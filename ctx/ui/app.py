@@ -3,6 +3,8 @@ from uuid import uuid4
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
+from textual.containers import Container
+from textual.widgets import Input, Static
 from textual.worker import Worker, WorkerState
 from textual import work
 
@@ -18,7 +20,6 @@ from ctx.ui.widgets.history_screen import HistoryScreen
 DEFAULT_MODEL = "openrouter/google/gemma-4-26b-a4b-it"
 MAX_TITLE_LENGTH = 50
 
-
 class ChatApp(App):
     CSS = """
     Screen {
@@ -27,10 +28,28 @@ class ChatApp(App):
     MessageList {
         height: 1fr;
     }
+    #input-area {
+        dock: bottom;
+        height: auto;
+    }
+    #model-label {
+        color: $text-disabled;
+        padding: 0 1;
+        height: 1;
+    }
+    #command-suggestions {
+        color: $text-muted;
+        background: $surface;
+        padding: 0 1;
+        border-top: solid $primary;
+        height: auto;
+        display: none;
+    }
     """
 
     BINDINGS = [
         Binding("ctrl+c", "cancel_stream", "Cancel", show=False),
+        Binding("escape", "dismiss_commands", "Dismiss", show=False),
     ]
 
     def __init__(self) -> None:
@@ -44,15 +63,71 @@ class ChatApp(App):
 
     def compose(self) -> ComposeResult:
         yield MessageList()
-        yield InputBar()
+        with Container(id="input-area"):
+            yield Static("", id="command-suggestions")
+            yield InputBar()
+            yield Static("", id="model-label")
 
     def on_mount(self) -> None:
         init_db()
         self.query_one(InputBar).focus()
+        self._update_model_label()
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input is not self.query_one(InputBar):
+            return
+        suggestions = self.query_one("#command-suggestions", Static)
+        if not event.value.startswith("/"):
+            suggestions.display = False
+            return
+        # Hide suggestions if user has completed a command and is typing arguments
+        if " " in event.value:
+            suggestions.display = False
+            return
+        suggestions.display = True
+        input_bar = self.query_one(InputBar)
+        # Find the first command that starts with the current input
+        for i, cmd in enumerate(InputBar.COMMANDS):
+            if cmd.startswith(event.value):
+                input_bar._selected_command = i
+                break
+        else:
+            if event.value == "/":
+                input_bar._selected_command = 0
+        self._update_suggestions()
+
+    def _update_suggestions(self) -> None:
+        input_bar = self.query_one(InputBar)
+        suggestions = self.query_one("#command-suggestions", Static)
+        selected = input_bar._selected_command
+        lines = ["Available commands:"]
+        for i, cmd in enumerate(InputBar.COMMANDS):
+            prefix = "▸" if i == selected else " "
+            lines.append(f"{prefix} [bold]{cmd}[/bold]")
+        suggestions.update("\n".join(lines))
+
+    def on_input_bar_command_navigated(self, event: InputBar.CommandNavigated) -> None:
+        self._update_suggestions()
+
+    def on_input_bar_command_selected(self, event: InputBar.CommandSelected) -> None:
+        try:
+            self.query_one("#command-suggestions", Static).display = False
+        except Exception:
+            pass
+
+    def action_dismiss_commands(self) -> None:
+        try:
+            self.query_one("#command-suggestions", Static).display = False
+        except Exception:
+            pass
 
     async def on_input_bar_submitted(self, event: InputBar.Submitted) -> None:
         text = event.text.strip()
         logger.info("on_input_bar_submitted | text=%r | len=%d", text, len(text))
+        try:
+            self.query_one("#command-suggestions", Static).display = False
+        except Exception:
+            pass
         if not text:
             return
 
@@ -90,6 +165,12 @@ class ChatApp(App):
 
         self._stream_worker = self._stream_response(assistant_node)
 
+    def _update_model_label(self) -> None:
+        try:
+            self.query_one("#model-label", Static).update(self.model)
+        except Exception:
+            pass
+
     async def _handle_model_command(self, text: str) -> None:
         parts = text.split(maxsplit=1)
         if len(parts) == 1:
@@ -98,6 +179,7 @@ class ChatApp(App):
         else:
             new_model = parts[1]
             self.model = new_model
+            self._update_model_label()
             logger.info("model switched | new_model=%s", new_model)
             await self._add_system_message(f"Model set to: {new_model}")
             self._check_connectivity(new_model)
@@ -112,7 +194,7 @@ class ChatApp(App):
             await self._add_system_message(f"⚠ Could not verify connectivity to {model} — the model may still work. Error: {msg}")
 
     async def _add_system_message(self, content: str) -> None:
-        node = Node(role="assistant", content=content)
+        node = Node(role="system", content=content, node_type="system")
         self.nodes.append(node)
         await self.query_one(MessageList).add_node(node)
 

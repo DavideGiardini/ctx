@@ -1,31 +1,20 @@
+from textual.color import Color
 from textual.containers import VerticalScroll, Vertical
 from textual.widgets import Markdown, Static
 
+from ctx.core.config import get_config
 from ctx.models.nodes import Node
-
-ROLE_LABELS = {
-    "user": "You",
-    "assistant": "Assistant",
-}
 
 
 class MessageWidget(Vertical):
     DEFAULT_CSS = """
     MessageWidget {
         height: auto;
-        border: round $primary;
-        padding: 0 1;
+        padding: 0 1 0 2;
         margin: 0 0 1 0;
     }
-    MessageWidget.user {
-        border: round $success;
-    }
-    MessageWidget.assistant {
-        border: round $accent;
-    }
-    MessageWidget > .role-label {
-        text-style: bold;
-        margin-bottom: 0;
+    MessageWidget.system {
+        text-style: italic;
     }
     """
 
@@ -39,13 +28,23 @@ class MessageWidget(Vertical):
             **kwargs,
         )
 
+    def on_mount(self) -> None:
+        colors = get_config()["colors"]
+        color_str = colors.get(self._role, colors["system"])
+        color = Color.parse(color_str)
+        style = "tall" if self._role in ("user", "assistant") else "solid"
+        self.styles.border_left = (style, color)
+
     def compose(self):
-        yield Static(ROLE_LABELS.get(self._role, self._role), classes="role-label")
-        yield Markdown(self._content or "▌", classes="content")
+        if self._role == "system":
+            yield Static(self._content or "", classes="content")
+        else:
+            yield Markdown(self._content or "▌", classes="content")
 
     def update_content(self, content: str) -> None:
         self._content = content
-        self.query_one(Markdown).update(content or "▌")
+        placeholder = "" if self._role == "system" else "▌"
+        self.query_one(".content").update(content or placeholder)
 
 
 class MessageList(VerticalScroll):
