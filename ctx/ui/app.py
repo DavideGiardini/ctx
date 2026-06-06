@@ -8,7 +8,7 @@ from textual import work
 
 from ctx.core.context import build_context
 from ctx.core.log import logger
-from ctx.core.provider import stream_response
+from ctx.core.provider import check_connectivity, stream_response
 from ctx.core.storage import init_db, save_conversation, load_conversation, list_conversations
 from ctx.models.nodes import Node
 from ctx.ui.widgets.input_bar import InputBar
@@ -96,9 +96,20 @@ class ChatApp(App):
             logger.info("model queried | current=%s", self.model)
             await self._add_system_message(f"Current model: {self.model}")
         else:
-            self.model = parts[1]
-            logger.info("model switched | new_model=%s", self.model)
-            await self._add_system_message(f"Model set to: {self.model}")
+            new_model = parts[1]
+            self.model = new_model
+            logger.info("model switched | new_model=%s", new_model)
+            await self._add_system_message(f"Model set to: {new_model}")
+            self._check_connectivity(new_model)
+
+    @work(name="check_connectivity")
+    async def _check_connectivity(self, model: str) -> None:
+        ok, msg = await check_connectivity(model)
+        if ok:
+            await self._add_system_message(f"✔ Connected to {model}")
+        else:
+            logger.warning("connectivity check failed | model=%s | error=%s", model, msg)
+            await self._add_system_message(f"⚠ Could not verify connectivity to {model} — the model may still work. Error: {msg}")
 
     async def _add_system_message(self, content: str) -> None:
         node = Node(role="assistant", content=content)
