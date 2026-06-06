@@ -5,6 +5,7 @@ from uuid import uuid4
 @dataclass
 class Node:
     id: str = field(default_factory=lambda: uuid4().hex)
+    conversation_id: str = ""
     role: str = ""
     content: str = ""
     node_type: str = "message"

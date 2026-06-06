@@ -1,6 +1,8 @@
 from textual.message import Message
 from textual.widgets import Input
 
+from ctx.core.log import logger
+
 
 class InputBar(Input):
     DEFAULT_CSS = """
@@ -16,5 +18,6 @@ class InputBar(Input):
 
     async def action_submit(self) -> None:
         text = self.value
+        logger.info("InputBar.action_submit called | text=%r", text)
         self.value = ""
         self.post_message(self.Submitted(text))
