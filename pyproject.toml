@@ -1,0 +1,16 @@
+[project]
+name = "ctx"
+version = "0.1.0"
+description = "A terminal chat application with streaming and model switching"
+requires-python = ">=3.11"
+dependencies = [
+    "textual",
+    "litellm",
+]
+
+[project.scripts]
+ctx = "ctx.main:run"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
