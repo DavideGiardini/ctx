@@ -16,6 +16,12 @@ class MessageWidget(Vertical):
     MessageWidget.system {
         text-style: italic;
     }
+    MessageWidget Markdown {
+        padding: 1 2 1 2;
+    }
+    MessageWidget Markdown > MarkdownParagraph {
+        margin: 0;
+    }
     """
 
     def __init__(self, node: Node, **kwargs) -> None:
