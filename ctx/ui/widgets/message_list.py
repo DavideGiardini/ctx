@@ -7,22 +7,8 @@ from ctx.models.nodes import Node
 
 
 class MessageWidget(Vertical):
-    DEFAULT_CSS = """
-    MessageWidget {
-        height: auto;
-        padding: 0 1 0 2;
-        margin: 0 0 1 0;
-    }
-    MessageWidget.system {
-        text-style: italic;
-    }
-    MessageWidget Markdown {
-        padding: 1 2 1 2;
-    }
-    MessageWidget Markdown > MarkdownParagraph {
-        margin: 0;
-    }
-    """
+    DEFAULT_CSS = ""
+
 
     def __init__(self, node: Node, **kwargs) -> None:
         self.node = node
@@ -54,11 +40,8 @@ class MessageWidget(Vertical):
 
 
 class MessageList(VerticalScroll):
-    DEFAULT_CSS = """
-    MessageList {
-        scrollbar-size: 1 1;
-    }
-    """
+    DEFAULT_CSS = ""
+
 
     async def add_node(self, node: Node) -> None:
         widget = MessageWidget(node)

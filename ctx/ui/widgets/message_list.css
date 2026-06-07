@@ -1,0 +1,17 @@
+MessageWidget {
+    height: auto;
+    padding: 0 1 0 2;
+    margin: 0 0 1 0;
+}
+MessageWidget.system {
+    text-style: italic;
+}
+MessageWidget Markdown {
+    padding: 1 2 1 2;
+}
+MessageWidget Markdown > MarkdownParagraph {
+    margin: 0;
+}
+MessageList {
+    scrollbar-size: 1 1;
+}

@@ -6,8 +6,8 @@ from ctx.core.log import logger
 
 
 class InputBar(Input):
-    DEFAULT_CSS = """
-    """
+    DEFAULT_CSS = ""
+
 
     BINDINGS = [
         Binding("up", "prev_command", "Previous Command", show=False),

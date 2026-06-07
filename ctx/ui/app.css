@@ -1,0 +1,23 @@
+Screen {
+    layout: vertical;
+}
+MessageList {
+    height: 1fr;
+}
+#input-area {
+    dock: bottom;
+    height: auto;
+}
+#model-label {
+    color: $text-disabled;
+    padding: 0 1;
+    height: 1;
+}
+#command-suggestions {
+    color: $text-muted;
+    background: $surface;
+    padding: 0 1;
+    border-top: solid $primary;
+    height: auto;
+    display: none;
+}

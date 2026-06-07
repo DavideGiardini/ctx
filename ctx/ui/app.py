@@ -21,31 +21,11 @@ DEFAULT_MODEL = "openrouter/google/gemma-4-26b-a4b-it"
 MAX_TITLE_LENGTH = 50
 
 class ChatApp(App):
-    CSS = """
-    Screen {
-        layout: vertical;
-    }
-    MessageList {
-        height: 1fr;
-    }
-    #input-area {
-        dock: bottom;
-        height: auto;
-    }
-    #model-label {
-        color: $text-disabled;
-        padding: 0 1;
-        height: 1;
-    }
-    #command-suggestions {
-        color: $text-muted;
-        background: $surface;
-        padding: 0 1;
-        border-top: solid $primary;
-        height: auto;
-        display: none;
-    }
-    """
+    CSS_PATH = [
+        "app.css",
+        "widgets/message_list.css",
+        "widgets/input_bar.css",
+    ]
 
     BINDINGS = [
         Binding("ctrl+c", "cancel_stream", "Cancel", show=False),
