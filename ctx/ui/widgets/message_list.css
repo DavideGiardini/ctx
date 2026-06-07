@@ -6,6 +6,9 @@ MessageWidget {
 MessageWidget.system {
     text-style: italic;
 }
+MessageWidget.context {
+    text-style: italic;
+}
 MessageWidget Markdown {
     padding: 1 2 1 2;
 }

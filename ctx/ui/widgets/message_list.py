@@ -24,11 +24,11 @@ class MessageWidget(Vertical):
         colors = get_config()["colors"]
         color_str = colors.get(self._role, colors["system"])
         color = Color.parse(color_str)
-        style = "tall" if self._role in ("user", "assistant") else "solid"
+        style = "tall" if self._role in ("user", "assistant", "context") else "solid"
         self.styles.border_left = (style, color)
 
     def compose(self):
-        if self._role == "system":
+        if self._role in ("system", "context"):
             yield Static(self._content or "", classes="content")
         else:
             yield Markdown(self._content or "▌", classes="content")

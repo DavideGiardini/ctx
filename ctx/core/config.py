@@ -9,6 +9,7 @@ _DEFAULTS = {
         "user": "#3b82f6",
         "assistant": "#f97316",
         "system": "#737373",
+        "context": "#22c55e",
     },
 }
 

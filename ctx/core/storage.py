@@ -1,12 +1,10 @@
 import json
 import sqlite3
 from datetime import datetime, timezone
-from pathlib import Path
 
 from ctx.models.nodes import Node
 from ctx.core.log import logger
-
-DB_PATH = Path.home() / ".local" / "state" / "ctx" / "ctx.db"
+from ctx.core.workspace import get_db_path
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS conversations (
@@ -28,8 +26,9 @@ CREATE TABLE IF NOT EXISTS nodes (
 
 
 def _connect() -> sqlite3.Connection:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(DB_PATH))
+    db = get_db_path()
+    db.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(db))
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     return conn

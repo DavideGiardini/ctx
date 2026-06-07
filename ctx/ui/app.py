@@ -12,8 +12,10 @@ from ctx.core.context import build_context
 from ctx.core.log import logger
 from ctx.core.provider import check_connectivity, stream_response
 from ctx.core.storage import init_db, save_conversation, load_conversation, list_conversations
+from ctx.core.workspace import ensure_workspace, list_context_files
 from ctx.models.nodes import Node
 from ctx.ui.widgets.input_bar import InputBar
+from ctx.ui.widgets.include_screen import IncludeScreen
 from ctx.ui.widgets.message_list import MessageList
 from ctx.ui.widgets.history_screen import HistoryScreen
 
@@ -49,6 +51,7 @@ class ChatApp(App):
             yield Static("", id="model-label")
 
     def on_mount(self) -> None:
+        ensure_workspace()
         init_db()
         self.query_one(InputBar).focus()
         self._update_model_label()
@@ -128,6 +131,11 @@ class ChatApp(App):
             self._handle_resume_command()
             return
 
+        if text == "/include":
+            logger.info("matched /include")
+            self._handle_include_command()
+            return
+
         logger.info("no command matched, sending to model")
 
         self._ensure_conversation(text)
@@ -205,6 +213,30 @@ class ChatApp(App):
         if result is None:
             return
         await self._load_conversation(result)
+
+    @work(name="handle_include")
+    async def _handle_include_command(self) -> None:
+        files = list_context_files()
+        if not files:
+            await self._add_system_message("No files in .ctx/context/ to include.")
+            return
+        result = await self.push_screen_wait(IncludeScreen())
+        if not result:
+            return
+        self._ensure_conversation("")
+        message_list = self.query_one(MessageList)
+        for path in result:
+            node = Node(
+                role="context",
+                content=f"Included: {path}",
+                node_type="context",
+                conversation_id=self.conversation_id,
+                meta={"source_path": path},
+            )
+            self.nodes.append(node)
+            await message_list.add_node(node)
+            logger.info("context included | path=%s", path)
+        self._persist()
 
     async def _load_conversation(self, conv_id: str) -> None:
         self.nodes = load_conversation(conv_id)
