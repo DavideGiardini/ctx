@@ -23,9 +23,15 @@ class MessageWidget(Vertical):
     def on_mount(self) -> None:
         colors = get_config()["colors"]
         color_str = colors.get(self._role, colors["system"])
-        color = Color.parse(color_str)
+        self._border_color = Color.parse(color_str)
         style = "tall" if self._role in ("user", "assistant", "context") else "solid"
-        self.styles.border_left = (style, color)
+        self.styles.border_left = (style, self._border_color)
+
+    def set_selected(self, selected: bool) -> None:
+        self.set_class(selected, "selected")
+        if self._role in ("user", "assistant", "context"):
+            style = "thick" if selected else "tall"
+            self.styles.border_left = (style, self._border_color)
 
     def compose(self):
         if self._role in ("system", "context"):

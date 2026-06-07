@@ -16,7 +16,7 @@ from ctx.core.workspace import ensure_workspace, list_context_files
 from ctx.models.nodes import Node
 from ctx.ui.widgets.input_bar import InputBar
 from ctx.ui.widgets.include_screen import IncludeScreen
-from ctx.ui.widgets.message_list import MessageList
+from ctx.ui.widgets.message_list import MessageList, MessageWidget
 from ctx.ui.widgets.history_screen import HistoryScreen
 
 DEFAULT_MODEL = "openrouter/google/gemma-4-26b-a4b-it"
@@ -32,6 +32,9 @@ class ChatApp(App):
     BINDINGS = [
         Binding("ctrl+c", "cancel_stream", "Cancel", show=False),
         Binding("escape", "dismiss_commands", "Dismiss", show=False),
+        Binding("up", "select_prev", "Previous Message", show=False),
+        Binding("down", "select_next", "Next Message", show=False),
+        Binding("i", "enter_insert", "Insert Mode", show=False),
     ]
 
     def __init__(self) -> None:
@@ -41,6 +44,8 @@ class ChatApp(App):
         self.conversation_title: str = ""
         self.model = DEFAULT_MODEL
         self._stream_worker: Worker | None = None
+        self.mode = "insert"
+        self._selected_node_id: str | None = None
         logger.info("app initialized | default_model=%s", DEFAULT_MODEL)
 
     def compose(self) -> ComposeResult:
@@ -100,9 +105,95 @@ class ChatApp(App):
 
     def action_dismiss_commands(self) -> None:
         try:
-            self.query_one("#command-suggestions", Static).display = False
+            suggestions = self.query_one("#command-suggestions", Static)
+            if suggestions.display:
+                suggestions.display = False
+                return
         except Exception:
             pass
+
+        if self.mode == "insert":
+            self._enter_edit_mode()
+        else:
+            self._enter_insert_mode()
+
+    def _enter_edit_mode(self) -> None:
+        if self.mode == "edit":
+            return
+        self.mode = "edit"
+        self.query_one(InputBar).blur()
+        for node in reversed(self.nodes):
+            if node.role != "system":
+                self._select_message(node.id)
+                break
+        logger.info("entered edit mode")
+
+    def _enter_insert_mode(self) -> None:
+        if self.mode == "insert":
+            return
+        self.mode = "insert"
+        self._clear_selection()
+        self.query_one(InputBar).focus()
+        logger.info("entered insert mode")
+
+    def _select_message(self, node_id: str | None) -> None:
+        message_list = self.query_one(MessageList)
+        if self._selected_node_id:
+            try:
+                prev = message_list.query_one(f"#msg-{self._selected_node_id}", MessageWidget)
+                prev.set_selected(False)
+            except Exception:
+                pass
+        self._selected_node_id = node_id
+        if node_id is None:
+            return
+        try:
+            widget = message_list.query_one(f"#msg-{node_id}", MessageWidget)
+            widget.set_selected(True)
+            widget.scroll_visible()
+        except Exception:
+            pass
+
+    def _clear_selection(self) -> None:
+        if self._selected_node_id:
+            try:
+                prev = self.query_one(MessageList).query_one(f"#msg-{self._selected_node_id}", MessageWidget)
+                prev.set_selected(False)
+            except Exception:
+                pass
+        self._selected_node_id = None
+
+    def action_select_prev(self) -> None:
+        if self.mode != "edit" or not self.nodes:
+            return
+        if self._selected_node_id is None:
+            start = len(self.nodes)
+        else:
+            start = next((i for i, n in enumerate(self.nodes) if n.id == self._selected_node_id), -1)
+            if start == -1:
+                start = len(self.nodes)
+        for offset in range(1, len(self.nodes) + 1):
+            idx = (start - offset) % len(self.nodes)
+            if self.nodes[idx].role != "system":
+                self._select_message(self.nodes[idx].id)
+                return
+
+    def action_select_next(self) -> None:
+        if self.mode != "edit" or not self.nodes:
+            return
+        if self._selected_node_id is None:
+            start = -1
+        else:
+            start = next((i for i, n in enumerate(self.nodes) if n.id == self._selected_node_id), -1)
+        for offset in range(1, len(self.nodes) + 1):
+            idx = (start + offset) % len(self.nodes)
+            if self.nodes[idx].role != "system":
+                self._select_message(self.nodes[idx].id)
+                return
+
+    def action_enter_insert(self) -> None:
+        if self.mode == "edit":
+            self._enter_insert_mode()
 
     async def on_input_bar_submitted(self, event: InputBar.Submitted) -> None:
         text = event.text.strip()
@@ -198,6 +289,7 @@ class ChatApp(App):
         self.nodes = []
         self.conversation_id = ""
         self.conversation_title = ""
+        self._clear_selection()
         message_list = self.query_one(MessageList)
         for child in list(message_list.children):
             await child.remove()
@@ -246,6 +338,7 @@ class ChatApp(App):
         self.conversation_title = next(
             (n.content[:MAX_TITLE_LENGTH].replace("\n", " ") for n in self.nodes if n.role == "user"), ""
         )
+        self._clear_selection()
         message_list = self.query_one(MessageList)
         for child in list(message_list.children):
             await child.remove()

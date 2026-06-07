@@ -18,6 +18,9 @@ MessageWidget Markdown {
 MessageWidget Markdown > MarkdownParagraph {
     margin: 0;
 }
+MessageWidget.selected {
+    background: $surface-lighten-1;
+}
 MessageList {
     scrollbar-size: 1 1;
 }
