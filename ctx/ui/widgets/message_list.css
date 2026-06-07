@@ -9,8 +9,11 @@ MessageWidget.system {
 MessageWidget.context {
     text-style: italic;
 }
+MessageWidget Static {
+    padding: 0;
+}
 MessageWidget Markdown {
-    padding: 1 2 1 2;
+    padding: 0;
 }
 MessageWidget Markdown > MarkdownParagraph {
     margin: 0;
