@@ -1,5 +1,5 @@
 from textual.color import Color
-from textual.containers import VerticalScroll, Vertical
+from textual.containers import Vertical, VerticalScroll
 from textual.widgets import Markdown, Static
 
 from ctx.core.config import get_config
@@ -25,13 +25,13 @@ class MessageWidget(Vertical):
         color_str = colors.get(self._role, colors["system"])
         self._border_color = Color.parse(color_str)
         style = "tall" if self._role in ("user", "assistant", "context") else "solid"
-        self.styles.border_left = (style, self._border_color)
+        self.styles.border_left = (style, self._border_color)  # type: ignore[assignment]
 
     def set_selected(self, selected: bool) -> None:
         self.set_class(selected, "selected")
         if self._role in ("user", "assistant", "context"):
             style = "thick" if selected else "tall"
-            self.styles.border_left = (style, self._border_color)
+            self.styles.border_left = (style, self._border_color)  # type: ignore[assignment]
 
     def compose(self):
         if self._role in ("system", "context"):
@@ -42,7 +42,7 @@ class MessageWidget(Vertical):
     def update_content(self, content: str) -> None:
         self._content = content
         placeholder = "" if self._role == "system" else "▌"
-        self.query_one(".content").update(content or placeholder)
+        self.query_one(".content").update(content or placeholder)  # type: ignore[attr-defined]
 
 
 class MessageList(VerticalScroll):

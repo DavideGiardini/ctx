@@ -1,10 +1,9 @@
 import json
 import sqlite3
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from ctx.models.nodes import Node
-from ctx.core.log import logger
 from ctx.core.workspace import get_db_path
+from ctx.models.nodes import Node
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS conversations (
@@ -45,7 +44,7 @@ def save_conversation(
     title: str,
     nodes: list[Node],
 ) -> None:
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     conn = _connect()
     try:
         existing = conn.execute(
@@ -70,8 +69,16 @@ def save_conversation(
             if not node.conversation_id:
                 continue
             conn.execute(
-                "INSERT INTO nodes (id, conversation_id, role, content, node_type, meta) VALUES (?, ?, ?, ?, ?, ?)",
-                (node.id, node.conversation_id, node.role, node.content, node.node_type, json.dumps(node.meta)),
+                "INSERT INTO nodes (id, conversation_id, role, content, node_type, meta) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    node.id,
+                    node.conversation_id,
+                    node.role,
+                    node.content,
+                    node.node_type,
+                    json.dumps(node.meta),
+                ),
             )
         conn.commit()
     finally:
@@ -82,7 +89,8 @@ def load_conversation(conversation_id: str) -> list[Node]:
     conn = _connect()
     try:
         rows = conn.execute(
-            "SELECT id, conversation_id, role, content, node_type, meta FROM nodes WHERE conversation_id = ? ORDER BY rowid",
+            "SELECT id, conversation_id, role, content, node_type, meta "
+            "FROM nodes WHERE conversation_id = ? ORDER BY rowid",
             (conversation_id,),
         ).fetchall()
     finally:

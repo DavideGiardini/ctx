@@ -1,23 +1,24 @@
 import asyncio
+import contextlib
 from uuid import uuid4
 
+from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container
 from textual.widgets import Input, Static
 from textual.worker import Worker, WorkerState
-from textual import work
 
 from ctx.core.context import build_context
 from ctx.core.log import logger
 from ctx.core.provider import check_connectivity, stream_response
-from ctx.core.storage import init_db, save_conversation, load_conversation, list_conversations
+from ctx.core.storage import init_db, list_conversations, load_conversation, save_conversation
 from ctx.core.workspace import ensure_workspace, list_context_files
 from ctx.models.nodes import Node
-from ctx.ui.widgets.input_bar import InputBar
-from ctx.ui.widgets.include_screen import IncludeScreen
-from ctx.ui.widgets.message_list import MessageList, MessageWidget
 from ctx.ui.widgets.history_screen import HistoryScreen
+from ctx.ui.widgets.include_screen import IncludeScreen
+from ctx.ui.widgets.input_bar import InputBar
+from ctx.ui.widgets.message_list import MessageList, MessageWidget
 
 DEFAULT_MODEL = "openrouter/google/gemma-4-26b-a4b-it"
 MAX_TITLE_LENGTH = 50
@@ -98,10 +99,8 @@ class ChatApp(App):
         self._update_suggestions()
 
     def on_input_bar_command_selected(self, event: InputBar.CommandSelected) -> None:
-        try:
+        with contextlib.suppress(Exception):
             self.query_one("#command-suggestions", Static).display = False
-        except Exception:
-            pass
 
     def action_dismiss_commands(self) -> None:
         try:
@@ -157,7 +156,9 @@ class ChatApp(App):
     def _clear_selection(self) -> None:
         if self._selected_node_id:
             try:
-                prev = self.query_one(MessageList).query_one(f"#msg-{self._selected_node_id}", MessageWidget)
+                prev = self.query_one(MessageList).query_one(
+                    f"#msg-{self._selected_node_id}", MessageWidget
+                )
                 prev.set_selected(False)
             except Exception:
                 pass
@@ -169,7 +170,9 @@ class ChatApp(App):
         if self._selected_node_id is None:
             start = len(self.nodes)
         else:
-            start = next((i for i, n in enumerate(self.nodes) if n.id == self._selected_node_id), -1)
+            start = next(
+                (i for i, n in enumerate(self.nodes) if n.id == self._selected_node_id), -1
+            )
             if start == -1:
                 start = len(self.nodes)
         for offset in range(1, len(self.nodes) + 1):
@@ -184,7 +187,9 @@ class ChatApp(App):
         if self._selected_node_id is None:
             start = -1
         else:
-            start = next((i for i, n in enumerate(self.nodes) if n.id == self._selected_node_id), -1)
+            start = next(
+                (i for i, n in enumerate(self.nodes) if n.id == self._selected_node_id), -1
+            )
         for offset in range(1, len(self.nodes) + 1):
             idx = (start + offset) % len(self.nodes)
             if self.nodes[idx].role != "system":
@@ -198,10 +203,8 @@ class ChatApp(App):
     async def on_input_bar_submitted(self, event: InputBar.Submitted) -> None:
         text = event.text.strip()
         logger.info("on_input_bar_submitted | text=%r | len=%d", text, len(text))
-        try:
+        with contextlib.suppress(Exception):
             self.query_one("#command-suggestions", Static).display = False
-        except Exception:
-            pass
         if not text:
             return
 
@@ -245,10 +248,8 @@ class ChatApp(App):
         self._stream_worker = self._stream_response(assistant_node)
 
     def _update_model_label(self) -> None:
-        try:
+        with contextlib.suppress(Exception):
             self.query_one("#model-label", Static).update(self.model)
-        except Exception:
-            pass
 
     async def _handle_model_command(self, text: str) -> None:
         parts = text.split(maxsplit=1)
@@ -270,7 +271,10 @@ class ChatApp(App):
             await self._add_system_message(f"✔ Connected to {model}")
         else:
             logger.warning("connectivity check failed | model=%s | error=%s", model, msg)
-            await self._add_system_message(f"⚠ Could not verify connectivity to {model} — the model may still work. Error: {msg}")
+            await self._add_system_message(
+                f"⚠ Could not verify connectivity to {model} — "
+                f"the model may still work. Error: {msg}"
+            )
 
     async def _add_system_message(self, content: str) -> None:
         node = Node(role="system", content=content, node_type="system")
@@ -336,7 +340,12 @@ class ChatApp(App):
             return
         self.conversation_id = conv_id
         self.conversation_title = next(
-            (n.content[:MAX_TITLE_LENGTH].replace("\n", " ") for n in self.nodes if n.role == "user"), ""
+            (
+                n.content[:MAX_TITLE_LENGTH].replace("\n", " ")
+                for n in self.nodes
+                if n.role == "user"
+            ),
+            "",
         )
         self._clear_selection()
         message_list = self.query_one(MessageList)

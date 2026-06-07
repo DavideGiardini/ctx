@@ -2,10 +2,10 @@
 
 from textual.app import ComposeResult
 from textual.binding import Binding
+from textual.containers import Vertical
 from textual.events import Key
 from textual.screen import ModalScreen
 from textual.widgets import Input, SelectionList, Static
-from textual.containers import Vertical
 
 from ctx.core.workspace import list_context_files
 
@@ -17,7 +17,7 @@ class FilterInput(Input):
         super().__init__(**kwargs)
         self._selection_list_id = selection_list_id
 
-    def _on_key(self, event: Key) -> None:
+    async def _on_key(self, event: Key) -> None:
         if event.key == "down":
             sl = self.screen.query_one(f"#{self._selection_list_id}", SelectionList)
             if sl.option_count:
@@ -26,18 +26,18 @@ class FilterInput(Input):
                     sl.highlighted = 0
             event.stop()
             return
-        super()._on_key(event)
+        await super()._on_key(event)
 
 
 class IncludeSelectionList(SelectionList):
     """SelectionList that returns focus to the input on Up-arrow at top."""
 
-    def _on_key(self, event: Key) -> None:
+    async def _on_key(self, event: Key) -> None:
         if event.key == "up" and self.highlighted == 0:
             self.screen.query_one("#include-filter", Input).focus()
             event.stop()
             return
-        super()._on_key(event)
+        await super()._on_key(event)
 
 
 class IncludeScreen(ModalScreen[list[str] | None]):
