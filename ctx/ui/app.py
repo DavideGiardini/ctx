@@ -5,7 +5,7 @@ from uuid import uuid4
 from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Container
+from textual.containers import Container, Horizontal
 from textual.widgets import Input, Static
 from textual.worker import Worker, WorkerState
 
@@ -15,6 +15,7 @@ from ctx.core.provider import check_connectivity, stream_response
 from ctx.core.storage import init_db, list_conversations, load_conversation, save_conversation
 from ctx.core.workspace import ensure_workspace, list_context_files
 from ctx.models.nodes import Node
+from ctx.ui.widgets.file_viewer import FileViewer, FileViewerScreen
 from ctx.ui.widgets.history_screen import HistoryScreen
 from ctx.ui.widgets.include_screen import IncludeScreen
 from ctx.ui.widgets.input_bar import InputBar
@@ -36,6 +37,10 @@ class ChatApp(App):
         Binding("up", "select_prev", "Previous Message", show=False),
         Binding("down", "select_next", "Next Message", show=False),
         Binding("i", "enter_insert", "Insert Mode", show=False),
+        Binding("o", "open_fullscreen", "Open file", show=False),
+        Binding("v", "toggle_split", "Toggle split", show=False),
+        Binding("ctrl+v", "close_split", "Close split", show=False),
+        Binding("tab", "switch_focus", "Switch focus", show=False, priority=True),
     ]
 
     def __init__(self) -> None:
@@ -47,10 +52,14 @@ class ChatApp(App):
         self._stream_worker: Worker | None = None
         self.mode = "insert"
         self._selected_node_id: str | None = None
+        self._split_active: bool = False
+        self._split_file_path: str | None = None
         logger.info("app initialized | default_model=%s", DEFAULT_MODEL)
 
     def compose(self) -> ComposeResult:
-        yield MessageList()
+        with Horizontal(id="main-area"):
+            yield MessageList()
+            yield FileViewer(id="split-viewer")
         with Container(id="input-area"):
             yield Static("", id="command-suggestions")
             yield InputBar()
@@ -121,6 +130,8 @@ class ChatApp(App):
             return
         self.mode = "edit"
         self.query_one(InputBar).blur()
+        # Focus on the conversation (message list), never the file viewer
+        self.query_one(MessageList).focus()
         for node in reversed(self.nodes):
             if node.role != "system":
                 self._select_message(node.id)
@@ -199,6 +210,79 @@ class ChatApp(App):
     def action_enter_insert(self) -> None:
         if self.mode == "edit":
             self._enter_insert_mode()
+
+    def _get_selected_node(self) -> Node | None:
+        if self._selected_node_id is None:
+            return None
+        for node in self.nodes:
+            if node.id == self._selected_node_id:
+                return node
+        return None
+
+    def action_open_fullscreen(self) -> None:
+        if self.mode != "edit":
+            return
+        node = self._get_selected_node()
+        if not node or node.node_type != "context":
+            return
+        source_path = node.meta.get("source_path")
+        if not source_path:
+            return
+        self.push_screen(FileViewerScreen(file_path=source_path))
+
+    def action_toggle_split(self) -> None:
+        if self.mode != "edit":
+            return
+        node = self._get_selected_node()
+        if not node or node.node_type != "context":
+            return
+        source_path = node.meta.get("source_path")
+        if not source_path:
+            return
+        split_viewer = self.query_one("#split-viewer", FileViewer)
+        # Always open or refresh the split viewer with the selected file
+        split_viewer.display = True
+        split_viewer.load_file(source_path)
+        self._split_active = True
+        self._split_file_path = source_path
+        split_viewer.focus()
+
+    def _close_split(self) -> None:
+        split_viewer = self.query_one("#split-viewer", FileViewer)
+        split_viewer.display = False
+        split_viewer.clear()
+        self._split_active = False
+        self._split_file_path = None
+        # Return focus to the message list if in edit mode
+        if self.mode == "edit":
+            with contextlib.suppress(Exception):
+                self.query_one(MessageList).focus()
+
+    def action_close_split(self) -> None:
+        # Only closes the split view; q is handled by FileViewerScreen for full-screen.
+        if self._split_active:
+            self._close_split()
+
+    def _is_focused_in(self, widget) -> bool:
+        focused = self.focused
+        if focused is None:
+            return False
+        if focused == widget:
+            return True
+        return focused in widget.walk_children()
+
+    def action_switch_focus(self) -> None:
+        if self.mode != "edit":
+            return
+        message_list = self.query_one(MessageList)
+        if not self._split_active:
+            message_list.focus()
+            return
+        split_viewer = self.query_one("#split-viewer", FileViewer)
+        if self._is_focused_in(split_viewer):
+            message_list.focus()
+        else:
+            split_viewer.focus()
 
     async def on_input_bar_submitted(self, event: InputBar.Submitted) -> None:
         text = event.text.strip()

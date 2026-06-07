@@ -1,8 +1,17 @@
 Screen {
     layout: vertical;
 }
-MessageList {
+#main-area {
     height: 1fr;
+}
+MessageList {
+    width: 1fr;
+    height: 1fr;
+}
+#split-viewer {
+    width: 1fr;
+    height: 1fr;
+    display: none;
 }
 #input-area {
     dock: bottom;
