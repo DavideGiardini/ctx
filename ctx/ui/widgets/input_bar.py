@@ -46,16 +46,27 @@ class InputBar(Input):
         text = self.value
         logger.info("InputBar.action_submit called | text=%r", text)
         if text.startswith("/"):
-            for cmd in self.COMMANDS:
-                if cmd.startswith(text):
-                    if cmd in self.COMMANDS_WITH_ARGS:
-                        self.value = cmd + " "
-                        self.cursor_position = len(self.value)
-                        self.post_message(self.CommandSelected(cmd))
-                        return
+            selected = self.COMMANDS[self._selected_command]
+            # Respect arrow-key selection if it matches the current prefix.
+            if selected.startswith(text):
+                cmd = selected
+            else:
+                for c in self.COMMANDS:
+                    if c.startswith(text):
+                        cmd = c
+                        break
+                else:
                     self.value = ""
-                    self.post_message(self.Submitted(cmd))
+                    self.post_message(self.Submitted(text))
                     return
+            if cmd in self.COMMANDS_WITH_ARGS:
+                self.value = cmd + " "
+                self.cursor_position = len(self.value)
+                self.post_message(self.CommandSelected(cmd))
+                return
+            self.value = ""
+            self.post_message(self.Submitted(cmd))
+            return
         self.value = ""
         self.post_message(self.Submitted(text))
 
