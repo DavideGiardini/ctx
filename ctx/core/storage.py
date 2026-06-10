@@ -1,8 +1,19 @@
 import json
 import sqlite3
 from datetime import UTC, datetime
+from typing import Protocol
 
 from ctx.models.nodes import Node
+
+
+class StoragePort(Protocol):
+    """Seam for conversation persistence."""
+
+    def init(self) -> None: ...
+    def save(self, conversation_id: str, title: str, nodes: list[Node]) -> None: ...
+    def load(self, conversation_id: str) -> list[Node]: ...
+    def list(self) -> list[dict]: ...
+    def get_last(self) -> str | None: ...
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS conversations (

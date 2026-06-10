@@ -1,24 +1,15 @@
+import asyncio
 from collections.abc import AsyncIterator
-from typing import Protocol
 from uuid import uuid4
 
 from ctx.core.context import build_context
-from ctx.core.provider import Provider, check_connectivity
+from ctx.core.provider import Provider
+from ctx.core.storage import StoragePort
 from ctx.core.workspace import Workspace
 from ctx.models.nodes import Node
 
 DEFAULT_MODEL = "openrouter/google/gemma-4-26b-a4b-it"
 MAX_TITLE_LENGTH = 50
-
-
-class StoragePort(Protocol):
-    """Seam for conversation persistence."""
-
-    def init(self) -> None: ...
-    def save(self, conversation_id: str, title: str, nodes: list[Node]) -> None: ...
-    def load(self, conversation_id: str) -> list[Node]: ...
-    def list(self) -> list[dict]: ...
-    def get_last(self) -> str | None: ...
 
 
 class ConversationCore:
@@ -64,11 +55,6 @@ class ConversationCore:
         self.nodes.append(assistant_node)
         return user_node, assistant_node
 
-    def query_model(self) -> Node:
-        node = Node(role="system", content=f"Current model: {self.model}", node_type="system")
-        self.nodes.append(node)
-        return node
-
     def set_model(self, model: str) -> Node:
         self.model = model
         node = Node(role="system", content=f"Model set to: {model}", node_type="system")
@@ -77,7 +63,7 @@ class ConversationCore:
         return node
 
     async def check_connectivity(self, model: str) -> Node:
-        ok, msg = await check_connectivity(model)
+        ok, msg = await self._provider.check_connectivity(model)
         if ok:
             node = Node(role="system", content=f"✔ Connected to {model}", node_type="system")
         else:
@@ -143,6 +129,9 @@ class ConversationCore:
             async for token in self._provider.stream(messages, self.model):
                 assistant_node.content += token
                 yield token
+        except asyncio.CancelledError:
+            self.persist()
+            raise
         except Exception:
             self.persist()
             raise

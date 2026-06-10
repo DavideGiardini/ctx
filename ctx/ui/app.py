@@ -322,7 +322,7 @@ class ChatApp(App):
         parts = text.split(maxsplit=1)
         if len(parts) == 1:
             logger.info("model queried | current=%s", self.core.model)
-            node = self.core.query_model()
+            node = self.core.add_system_message(f"Current model: {self.core.model}")
         else:
             new_model = parts[1]
             node = self.core.set_model(new_model)
@@ -391,7 +391,6 @@ class ChatApp(App):
         except asyncio.CancelledError:
             assistant_node.meta["interrupted"] = True
             message_list.update_content(assistant_node.id, assistant_node.content or "▌")
-            self.core.persist()
             raise
         except Exception as exc:
             assistant_node.meta["error"] = str(exc)
