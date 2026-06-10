@@ -4,7 +4,7 @@ from textual.containers import Vertical
 from textual.screen import ModalScreen
 from textual.widgets import SelectionList
 
-from ctx.core.storage import list_conversations
+from ctx.core.storage import ConversationRepository
 
 
 class HistoryScreen(ModalScreen[str | None]):
@@ -12,9 +12,10 @@ class HistoryScreen(ModalScreen[str | None]):
         Binding("escape", "dismiss_none", "Cancel", show=True),
     ]
 
-    def __init__(self) -> None:
+    def __init__(self, repository: ConversationRepository) -> None:
         super().__init__()
-        self._conversations = list_conversations()
+        self._repo = repository
+        self._conversations = self._repo.list()
 
     def compose(self) -> ComposeResult:
         with Vertical(id="history-container"):

@@ -11,27 +11,14 @@ from textual.worker import Worker, WorkerState
 from ctx.core.conversation import DEFAULT_MODEL, ConversationCore
 from ctx.core.log import logger
 from ctx.core.provider import LiteLLMProvider
-from ctx.core.storage import init_db, list_conversations, load_conversation, save_conversation
-from ctx.core.workspace import list_context_files
+from ctx.core.storage import ConversationRepository
+from ctx.core.workspace import get_db_path, list_context_files
 from ctx.models.nodes import Node
 from ctx.ui.widgets.file_viewer import FileViewer, FileViewerScreen
 from ctx.ui.widgets.history_screen import HistoryScreen
 from ctx.ui.widgets.include_screen import IncludeScreen
 from ctx.ui.widgets.input_bar import InputBar
 from ctx.ui.widgets.message_list import MessageList, MessageWidget
-
-
-class StorageAdapter:
-    """Concrete adapter for the storage seam. Wraps the current storage.py functions."""
-
-    def init(self) -> None:
-        init_db()
-
-    def save(self, conversation_id: str, title: str, nodes: list[Node]) -> None:
-        save_conversation(conversation_id, title, nodes)
-
-    def load(self, conversation_id: str) -> list[Node]:
-        return load_conversation(conversation_id)
 
 
 class ChatApp(App):
@@ -55,7 +42,8 @@ class ChatApp(App):
 
     def __init__(self) -> None:
         super().__init__()
-        self.core = ConversationCore(StorageAdapter(), LiteLLMProvider())
+        self._repo = ConversationRepository(str(get_db_path()))
+        self.core = ConversationCore(self._repo, LiteLLMProvider())
         self._stream_worker: Worker | None = None
         self.mode = "insert"
         self._selected_node_id: str | None = None
@@ -356,12 +344,12 @@ class ChatApp(App):
 
     @work(name="handle_resume")
     async def _handle_resume_command(self) -> None:
-        conversations = list_conversations()
+        conversations = self._repo.list()
         if not conversations:
             node = self.core.add_system_message("No past conversations found.")
             await self.query_one(MessageList).add_node(node)
             return
-        result = await self.push_screen_wait(HistoryScreen())
+        result = await self.push_screen_wait(HistoryScreen(self._repo))
         if result is None:
             return
         nodes = self.core.resume_conversation(result)
