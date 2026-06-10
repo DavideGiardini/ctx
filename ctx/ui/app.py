@@ -10,6 +10,7 @@ from textual.worker import Worker, WorkerState
 
 from ctx.core.conversation import DEFAULT_MODEL, ConversationCore
 from ctx.core.log import logger
+from ctx.core.provider import LiteLLMProvider
 from ctx.core.storage import init_db, list_conversations, load_conversation, save_conversation
 from ctx.core.workspace import list_context_files
 from ctx.models.nodes import Node
@@ -54,7 +55,7 @@ class ChatApp(App):
 
     def __init__(self) -> None:
         super().__init__()
-        self.core = ConversationCore(StorageAdapter())
+        self.core = ConversationCore(StorageAdapter(), LiteLLMProvider())
         self._stream_worker: Worker | None = None
         self.mode = "insert"
         self._selected_node_id: str | None = None

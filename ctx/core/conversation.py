@@ -1,11 +1,9 @@
-import asyncio
-import contextlib
 from collections.abc import AsyncIterator
 from typing import Protocol
 from uuid import uuid4
 
 from ctx.core.context import build_context
-from ctx.core.provider import check_connectivity, stream_response
+from ctx.core.provider import Provider, check_connectivity
 from ctx.core.workspace import ensure_workspace
 from ctx.models.nodes import Node
 
@@ -24,8 +22,9 @@ class StoragePort(Protocol):
 class ConversationCore:
     """Deep module: owns conversation state, commands, and streaming lifecycle."""
 
-    def __init__(self, storage: StoragePort) -> None:
+    def __init__(self, storage: StoragePort, provider: Provider) -> None:
         self._storage = storage
+        self._provider = provider
         self.nodes: list[Node] = []
         self.conversation_id: str = ""
         self.conversation_title: str = ""
@@ -132,33 +131,12 @@ class ConversationCore:
     async def stream(self, assistant_node: Node) -> AsyncIterator[str]:
         """Yield tokens, updating assistant_node.content internally."""
         messages = build_context(self.nodes[:-1])
-        queue: asyncio.Queue[tuple[str, object]] = asyncio.Queue()
-
-        async def _bridge() -> None:
-            with contextlib.suppress(asyncio.CancelledError):
-                await stream_response(
-                    messages=messages,
-                    model=self.model,
-                    on_token=lambda t: queue.put_nowait(("token", t)),
-                    on_done=lambda _: queue.put_nowait(("done", None)),
-                    on_error=lambda e: queue.put_nowait(("error", e)),
-                )
-
-        task = asyncio.create_task(_bridge())
         try:
-            while True:
-                kind, data = await queue.get()
-                if kind == "token":
-                    assistant_node.content += data  # type: ignore[operator]
-                    yield data  # type: ignore[misc]
-                elif kind == "done":
-                    self.persist()
-                    break
-                elif kind == "error":
-                    self.persist()
-                    raise data  # type: ignore[misc]
-        finally:
-            if not task.done():
-                task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
+            async for token in self._provider.stream(messages, self.model):
+                assistant_node.content += token
+                yield token
+        except Exception:
+            self.persist()
+            raise
+        else:
+            self.persist()
