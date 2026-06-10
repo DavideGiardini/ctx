@@ -1,15 +1,21 @@
+from collections.abc import Callable
+
 from ctx.core.log import logger
-from ctx.core.workspace import read_context_file
 from ctx.models.nodes import Node
 
 
-def build_context(nodes: list[Node]) -> list[dict]:
+def build_context(
+    nodes: list[Node], load_file: Callable[[str], str]
+) -> list[dict]:
     """Convert a list of Nodes into LLM message dicts.
 
     Context nodes (node_type == "context") are expanded in-place: their
     referenced file content is wrapped in <context_import> XML and merged
     into the next user message, or emitted as a standalone user message
     if no user message follows.
+
+    The ``load_file`` callable is injected so this function remains pure
+    and testable without filesystem I/O.
     """
     messages: list[dict] = []
 
@@ -22,7 +28,7 @@ def build_context(nodes: list[Node]) -> list[dict]:
                 logger.warning("context node missing source_path | node_id=%s", node.id)
                 continue
             try:
-                content = read_context_file(source_path)
+                content = load_file(source_path)
             except (OSError, ValueError) as exc:
                 logger.warning(
                     "failed to read context file | path=%s | error=%s", source_path, exc

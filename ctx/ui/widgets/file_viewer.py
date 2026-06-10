@@ -6,7 +6,7 @@ from textual.containers import Vertical
 from textual.screen import Screen
 from textual.widgets import Static, TextArea
 
-from ctx.core.workspace import get_context_dir
+from ctx.core.workspace import Workspace
 
 
 class ReadOnlyTextArea(TextArea, inherit_bindings=False):
@@ -45,11 +45,14 @@ class FileViewer(Vertical):
     """
 
     def __init__(
-        self, file_path: str | None = None,
+        self,
+        workspace: Workspace,
+        file_path: str | None = None,
         close_hint: str = "ctrl+v to close  —  tab to switch focus",
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
+        self._workspace = workspace
         self._file_path: str | None = file_path
         self._close_hint: str = close_hint
         self._text_area: TextArea | None = None
@@ -70,8 +73,7 @@ class FileViewer(Vertical):
         If the file doesn't exist, display a placeholder.
         """
         self._file_path = file_path
-        context_dir = get_context_dir()
-        target = context_dir / file_path
+        target = self._workspace.context_dir / file_path
 
         try:
             text = target.read_text(encoding="utf-8")
@@ -115,12 +117,15 @@ class FileViewerScreen(Screen[None]):
     def action_pop_screen(self) -> None:
         self.app.pop_screen()
 
-    def __init__(self, file_path: str, **kwargs) -> None:
+    def __init__(self, workspace: Workspace, file_path: str, **kwargs) -> None:
         super().__init__(**kwargs)
+        self._workspace = workspace
         self._file_path = file_path
 
     def compose(self) -> ComposeResult:
-        yield FileViewer(file_path=self._file_path, close_hint="q to close")
+        yield FileViewer(
+            workspace=self._workspace, file_path=self._file_path, close_hint="q to close"
+        )
 
     def on_mount(self) -> None:
         file_viewer = self.query_one(FileViewer)

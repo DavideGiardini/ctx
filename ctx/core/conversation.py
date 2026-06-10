@@ -4,7 +4,7 @@ from uuid import uuid4
 
 from ctx.core.context import build_context
 from ctx.core.provider import Provider, check_connectivity
-from ctx.core.workspace import ensure_workspace
+from ctx.core.workspace import Workspace
 from ctx.models.nodes import Node
 
 DEFAULT_MODEL = "openrouter/google/gemma-4-26b-a4b-it"
@@ -24,16 +24,22 @@ class StoragePort(Protocol):
 class ConversationCore:
     """Deep module: owns conversation state, commands, and streaming lifecycle."""
 
-    def __init__(self, storage: StoragePort, provider: Provider) -> None:
+    def __init__(
+        self,
+        storage: StoragePort,
+        provider: Provider,
+        workspace: Workspace,
+    ) -> None:
         self._storage = storage
         self._provider = provider
+        self._workspace = workspace
         self.nodes: list[Node] = []
         self.conversation_id: str = ""
         self.conversation_title: str = ""
         self.model: str = DEFAULT_MODEL
 
     def setup(self) -> None:
-        ensure_workspace()
+        self._workspace.ensure()
         self._storage.init()
 
     def _ensure_conversation(self, first_message: str) -> None:
@@ -132,7 +138,7 @@ class ConversationCore:
 
     async def stream(self, assistant_node: Node) -> AsyncIterator[str]:
         """Yield tokens, updating assistant_node.content internally."""
-        messages = build_context(self.nodes[:-1])
+        messages = build_context(self.nodes[:-1], self._workspace.read_file)
         try:
             async for token in self._provider.stream(messages, self.model):
                 assistant_node.content += token

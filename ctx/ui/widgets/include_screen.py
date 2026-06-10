@@ -7,7 +7,7 @@ from textual.events import Key
 from textual.screen import ModalScreen
 from textual.widgets import Input, SelectionList, Static
 
-from ctx.core.workspace import list_context_files
+from ctx.core.workspace import Workspace
 
 
 class FilterInput(Input):
@@ -46,8 +46,9 @@ class IncludeScreen(ModalScreen[list[str] | None]):
         Binding("enter", "confirm", "Confirm", show=False, priority=True),
     ]
 
-    def __init__(self) -> None:
+    def __init__(self, workspace: Workspace) -> None:
         super().__init__()
+        self._workspace = workspace
         self._all_files: list[str] = []
 
     def compose(self) -> ComposeResult:
@@ -65,7 +66,7 @@ class IncludeScreen(ModalScreen[list[str] | None]):
             )
 
     def on_mount(self) -> None:
-        self._all_files = sorted(list_context_files())
+        self._all_files = sorted(self._workspace.list_files())
         sl = self.query_one("#include-list", IncludeSelectionList)
         if not self._all_files:
             self.query_one("#include-title", Static).update("No files in .ctx/context/")

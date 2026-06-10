@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+from pathlib import Path
 
 from textual import work
 from textual.app import App, ComposeResult
@@ -12,7 +13,7 @@ from ctx.core.conversation import DEFAULT_MODEL, ConversationCore
 from ctx.core.log import logger
 from ctx.core.provider import LiteLLMProvider
 from ctx.core.storage import ConversationRepository
-from ctx.core.workspace import get_db_path, list_context_files
+from ctx.core.workspace import Workspace
 from ctx.models.nodes import Node
 from ctx.ui.widgets.file_viewer import FileViewer, FileViewerScreen
 from ctx.ui.widgets.history_screen import HistoryScreen
@@ -42,8 +43,11 @@ class ChatApp(App):
 
     def __init__(self) -> None:
         super().__init__()
-        self._repo = ConversationRepository(str(get_db_path()))
-        self.core = ConversationCore(self._repo, LiteLLMProvider())
+        self._workspace = Workspace(Path.cwd())
+        self._repo = ConversationRepository(str(self._workspace.db_path))
+        self.core = ConversationCore(
+            self._repo, LiteLLMProvider(), workspace=self._workspace
+        )
         self._stream_worker: Worker | None = None
         self.mode = "insert"
         self._selected_node_id: str | None = None
@@ -54,7 +58,7 @@ class ChatApp(App):
     def compose(self) -> ComposeResult:
         with Horizontal(id="main-area"):
             yield MessageList()
-            yield FileViewer(id="split-viewer")
+            yield FileViewer(workspace=self._workspace, id="split-viewer")
         with Container(id="input-area"):
             yield Static("", id="command-suggestions")
             yield InputBar()
@@ -219,7 +223,7 @@ class ChatApp(App):
         source_path = node.meta.get("source_path")
         if not source_path:
             return
-        self.push_screen(FileViewerScreen(file_path=source_path))
+        self.push_screen(FileViewerScreen(self._workspace, file_path=source_path))
 
     def action_toggle_split(self) -> None:
         if self.mode != "edit":
@@ -363,12 +367,12 @@ class ChatApp(App):
 
     @work(name="handle_include")
     async def _handle_include_command(self) -> None:
-        files = list_context_files()
+        files = self._workspace.list_files()
         if not files:
             node = self.core.add_system_message("No files in .ctx/context/ to include.")
             await self.query_one(MessageList).add_node(node)
             return
-        result = await self.push_screen_wait(IncludeScreen())
+        result = await self.push_screen_wait(IncludeScreen(self._workspace))
         if not result:
             return
         nodes = self.core.include_files(result)
