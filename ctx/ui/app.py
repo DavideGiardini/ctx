@@ -1,6 +1,5 @@
 import asyncio
 import contextlib
-from uuid import uuid4
 
 from textual import work
 from textual.app import App, ComposeResult
@@ -9,11 +8,10 @@ from textual.containers import Container, Horizontal
 from textual.widgets import Input, Static
 from textual.worker import Worker, WorkerState
 
-from ctx.core.context import build_context
+from ctx.core.conversation import DEFAULT_MODEL, ConversationCore
 from ctx.core.log import logger
-from ctx.core.provider import check_connectivity, stream_response
 from ctx.core.storage import init_db, list_conversations, load_conversation, save_conversation
-from ctx.core.workspace import ensure_workspace, list_context_files
+from ctx.core.workspace import list_context_files
 from ctx.models.nodes import Node
 from ctx.ui.widgets.file_viewer import FileViewer, FileViewerScreen
 from ctx.ui.widgets.history_screen import HistoryScreen
@@ -21,8 +19,19 @@ from ctx.ui.widgets.include_screen import IncludeScreen
 from ctx.ui.widgets.input_bar import InputBar
 from ctx.ui.widgets.message_list import MessageList, MessageWidget
 
-DEFAULT_MODEL = "openrouter/google/gemma-4-26b-a4b-it"
-MAX_TITLE_LENGTH = 50
+
+class StorageAdapter:
+    """Concrete adapter for the storage seam. Wraps the current storage.py functions."""
+
+    def init(self) -> None:
+        init_db()
+
+    def save(self, conversation_id: str, title: str, nodes: list[Node]) -> None:
+        save_conversation(conversation_id, title, nodes)
+
+    def load(self, conversation_id: str) -> list[Node]:
+        return load_conversation(conversation_id)
+
 
 class ChatApp(App):
     CSS_PATH = [
@@ -45,10 +54,7 @@ class ChatApp(App):
 
     def __init__(self) -> None:
         super().__init__()
-        self.nodes: list[Node] = []
-        self.conversation_id: str = ""
-        self.conversation_title: str = ""
-        self.model = DEFAULT_MODEL
+        self.core = ConversationCore(StorageAdapter())
         self._stream_worker: Worker | None = None
         self.mode = "insert"
         self._selected_node_id: str | None = None
@@ -66,8 +72,7 @@ class ChatApp(App):
             yield Static("", id="model-label")
 
     def on_mount(self) -> None:
-        ensure_workspace()
-        init_db()
+        self.core.setup()
         self.query_one(InputBar).focus()
         self._update_model_label()
 
@@ -78,13 +83,11 @@ class ChatApp(App):
         if not event.value.startswith("/"):
             suggestions.display = False
             return
-        # Hide suggestions if user has completed a command and is typing arguments
         if " " in event.value:
             suggestions.display = False
             return
         suggestions.display = True
         input_bar = self.query_one(InputBar)
-        # Find the first command that starts with the current input
         for i, cmd in enumerate(InputBar.COMMANDS):
             if cmd.startswith(event.value):
                 input_bar._selected_command = i
@@ -130,9 +133,8 @@ class ChatApp(App):
             return
         self.mode = "edit"
         self.query_one(InputBar).blur()
-        # Focus on the conversation (message list), never the file viewer
         self.query_one(MessageList).focus()
-        for node in reversed(self.nodes):
+        for node in reversed(self.core.nodes):
             if node.role != "system":
                 self._select_message(node.id)
                 break
@@ -176,35 +178,35 @@ class ChatApp(App):
         self._selected_node_id = None
 
     def action_select_prev(self) -> None:
-        if self.mode != "edit" or not self.nodes:
+        if self.mode != "edit" or not self.core.nodes:
             return
         if self._selected_node_id is None:
-            start = len(self.nodes)
+            start = len(self.core.nodes)
         else:
             start = next(
-                (i for i, n in enumerate(self.nodes) if n.id == self._selected_node_id), -1
+                (i for i, n in enumerate(self.core.nodes) if n.id == self._selected_node_id), -1
             )
             if start == -1:
-                start = len(self.nodes)
-        for offset in range(1, len(self.nodes) + 1):
-            idx = (start - offset) % len(self.nodes)
-            if self.nodes[idx].role != "system":
-                self._select_message(self.nodes[idx].id)
+                start = len(self.core.nodes)
+        for offset in range(1, len(self.core.nodes) + 1):
+            idx = (start - offset) % len(self.core.nodes)
+            if self.core.nodes[idx].role != "system":
+                self._select_message(self.core.nodes[idx].id)
                 return
 
     def action_select_next(self) -> None:
-        if self.mode != "edit" or not self.nodes:
+        if self.mode != "edit" or not self.core.nodes:
             return
         if self._selected_node_id is None:
             start = -1
         else:
             start = next(
-                (i for i, n in enumerate(self.nodes) if n.id == self._selected_node_id), -1
+                (i for i, n in enumerate(self.core.nodes) if n.id == self._selected_node_id), -1
             )
-        for offset in range(1, len(self.nodes) + 1):
-            idx = (start + offset) % len(self.nodes)
-            if self.nodes[idx].role != "system":
-                self._select_message(self.nodes[idx].id)
+        for offset in range(1, len(self.core.nodes) + 1):
+            idx = (start + offset) % len(self.core.nodes)
+            if self.core.nodes[idx].role != "system":
+                self._select_message(self.core.nodes[idx].id)
                 return
 
     def action_enter_insert(self) -> None:
@@ -214,7 +216,7 @@ class ChatApp(App):
     def _get_selected_node(self) -> Node | None:
         if self._selected_node_id is None:
             return None
-        for node in self.nodes:
+        for node in self.core.nodes:
             if node.id == self._selected_node_id:
                 return node
         return None
@@ -240,7 +242,6 @@ class ChatApp(App):
         if not source_path:
             return
         split_viewer = self.query_one("#split-viewer", FileViewer)
-        # Always open or refresh the split viewer with the selected file
         split_viewer.display = True
         split_viewer.load_file(source_path)
         self._split_active = True
@@ -253,13 +254,11 @@ class ChatApp(App):
         split_viewer.clear()
         self._split_active = False
         self._split_file_path = None
-        # Return focus to the message list if in edit mode
         if self.mode == "edit":
             with contextlib.suppress(Exception):
                 self.query_one(MessageList).focus()
 
     def action_close_split(self) -> None:
-        # Only closes the split view; q is handled by FileViewerScreen for full-screen.
         if self._split_active:
             self._close_split()
 
@@ -316,169 +315,95 @@ class ChatApp(App):
 
         logger.info("no command matched, sending to model")
 
-        self._ensure_conversation(text)
-
-        logger.info(f"self.conversation_id: {self.conversation_id}")
-        user_node = Node(role="user", content=text, conversation_id=self.conversation_id)
-        self.nodes.append(user_node)
+        user_node, assistant_node = self.core.submit(text)
         message_list = self.query_one(MessageList)
         await message_list.add_node(user_node)
-        self._persist()
-
-        assistant_node = Node(role="assistant", content="", conversation_id=self.conversation_id)
-        self.nodes.append(assistant_node)
         await message_list.add_node(assistant_node)
-
         self._stream_worker = self._stream_response(assistant_node)
 
     def _update_model_label(self) -> None:
         with contextlib.suppress(Exception):
-            self.query_one("#model-label", Static).update(self.model)
+            self.query_one("#model-label", Static).update(self.core.model)
 
     async def _handle_model_command(self, text: str) -> None:
         parts = text.split(maxsplit=1)
         if len(parts) == 1:
-            logger.info("model queried | current=%s", self.model)
-            await self._add_system_message(f"Current model: {self.model}")
+            logger.info("model queried | current=%s", self.core.model)
+            node = self.core.query_model()
         else:
             new_model = parts[1]
-            self.model = new_model
+            node = self.core.set_model(new_model)
             self._update_model_label()
             logger.info("model switched | new_model=%s", new_model)
-            await self._add_system_message(f"Model set to: {new_model}")
             self._check_connectivity(new_model)
+        await self.query_one(MessageList).add_node(node)
 
     @work(name="check_connectivity")
     async def _check_connectivity(self, model: str) -> None:
-        ok, msg = await check_connectivity(model)
-        if ok:
-            await self._add_system_message(f"✔ Connected to {model}")
-        else:
-            logger.warning("connectivity check failed | model=%s | error=%s", model, msg)
-            await self._add_system_message(
-                f"⚠ Could not verify connectivity to {model} — "
-                f"the model may still work. Error: {msg}"
-            )
-
-    async def _add_system_message(self, content: str) -> None:
-        node = Node(role="system", content=content, node_type="system")
-        self.nodes.append(node)
+        node = await self.core.check_connectivity(model)
         await self.query_one(MessageList).add_node(node)
 
-    def _ensure_conversation(self, first_message: str) -> None:
-        if not self.conversation_id:
-            self.conversation_id = uuid4().hex
-        if not self.conversation_title:
-            self.conversation_title = first_message[:MAX_TITLE_LENGTH].replace("\n", " ")
-
     async def _handle_new_command(self) -> None:
-        self._persist()
-        logger.info("new conversation | old_id=%s", self.conversation_id)
-        self.nodes = []
-        self.conversation_id = ""
-        self.conversation_title = ""
+        old_id = self.core.conversation_id
+        node = self.core.new_conversation()
+        logger.info("new conversation | old_id=%s", old_id)
         self._clear_selection()
         message_list = self.query_one(MessageList)
         for child in list(message_list.children):
             await child.remove()
-        await self._add_system_message("Started a new conversation.")
+        await message_list.add_node(node)
 
     @work(name="handle_resume")
     async def _handle_resume_command(self) -> None:
         conversations = list_conversations()
         if not conversations:
-            await self._add_system_message("No past conversations found.")
+            node = self.core.add_system_message("No past conversations found.")
+            await self.query_one(MessageList).add_node(node)
             return
         result = await self.push_screen_wait(HistoryScreen())
         if result is None:
             return
-        await self._load_conversation(result)
+        nodes = self.core.resume_conversation(result)
+        self._clear_selection()
+        message_list = self.query_one(MessageList)
+        for child in list(message_list.children):
+            await child.remove()
+        for node in nodes:
+            await message_list.add_node(node)
+        logger.info("loaded conversation | id=%s | nodes=%d", result, len(nodes))
 
     @work(name="handle_include")
     async def _handle_include_command(self) -> None:
         files = list_context_files()
         if not files:
-            await self._add_system_message("No files in .ctx/context/ to include.")
+            node = self.core.add_system_message("No files in .ctx/context/ to include.")
+            await self.query_one(MessageList).add_node(node)
             return
         result = await self.push_screen_wait(IncludeScreen())
         if not result:
             return
-        self._ensure_conversation("")
+        nodes = self.core.include_files(result)
         message_list = self.query_one(MessageList)
-        for path in result:
-            node = Node(
-                role="context",
-                content=f"Included: {path}",
-                node_type="context",
-                conversation_id=self.conversation_id,
-                meta={"source_path": path},
-            )
-            self.nodes.append(node)
+        for node in nodes:
             await message_list.add_node(node)
-            logger.info("context included | path=%s", path)
-        self._persist()
-
-    async def _load_conversation(self, conv_id: str) -> None:
-        self.nodes = load_conversation(conv_id)
-        if not self.nodes:
-            return
-        self.conversation_id = conv_id
-        self.conversation_title = next(
-            (
-                n.content[:MAX_TITLE_LENGTH].replace("\n", " ")
-                for n in self.nodes
-                if n.role == "user"
-            ),
-            "",
-        )
-        self._clear_selection()
-        message_list = self.query_one(MessageList)
-        for child in list(message_list.children):
-            await child.remove()
-        for node in self.nodes:
-            await message_list.add_node(node)
-        logger.info("loaded conversation | id=%s | nodes=%d", conv_id, len(self.nodes))
-
-    def _persist(self) -> None:
-        if not self.conversation_id:
-            return
-        save_conversation(self.conversation_id, self.conversation_title, self.nodes)
+            logger.info("context included | path=%s", node.meta.get("source_path", ""))
 
     @work(name="stream_response")
-    async def _stream_response(self, node: Node) -> None:
-        context_nodes = self.nodes[:-1]
-        messages = build_context(context_nodes)
+    async def _stream_response(self, assistant_node: Node) -> None:
         message_list = self.query_one(MessageList)
-
         try:
-            await stream_response(
-                messages=messages,
-                model=self.model,
-                on_token=lambda token: self._on_token(node, token, message_list),
-                on_done=lambda text: self._on_done(node, text),
-                on_error=lambda exc: self._on_error(node, exc, message_list),
-            )
+            async for _token in self.core.stream(assistant_node):
+                message_list.update_content(assistant_node.id, assistant_node.content)
+            logger.info("response finalized | length=%d", len(assistant_node.content))
         except asyncio.CancelledError:
-            node.meta["interrupted"] = True
-            logger.info("stream cancelled | partial_length=%d", len(node.content))
-            message_list.update_content(node.id, node.content or "▌")
-            self._persist()
+            assistant_node.meta["interrupted"] = True
+            message_list.update_content(assistant_node.id, assistant_node.content or "▌")
+            self.core.persist()
             raise
-
-    def _on_token(self, node: Node, token: str, message_list: MessageList) -> None:
-        node.content += token
-        message_list.update_content(node.id, node.content)
-
-    def _on_done(self, node: Node, text: str) -> None:
-        node.content = text
-        logger.info("response finalized | length=%d", len(text))
-        self._persist()
-
-    def _on_error(self, node: Node, exc: Exception, message_list: MessageList) -> None:
-        node.meta["error"] = str(exc)
-        message_list.update_content(node.id, f"**Error:** {exc}")
-        logger.error("stream error displayed | error=%s", exc)
-        self._persist()
+        except Exception as exc:
+            assistant_node.meta["error"] = str(exc)
+            message_list.update_content(assistant_node.id, f"**Error:** {exc}")
+            logger.error("stream error | error=%s", exc)
 
     def action_cancel_stream(self) -> None:
         if self._stream_worker and self._stream_worker.state == WorkerState.RUNNING:
