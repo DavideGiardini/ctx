@@ -1,7 +1,24 @@
 MessageWidget {
     height: auto;
     padding: 0 1 0 2;
-    margin: 0 0 1 0;
+    margin: 0;
+    overflow: hidden hidden;
+}
+MessageWidget.new-pass {
+    margin-top: 1;
+}
+MessageWidget .content {
+    width: 1fr;
+    height: auto;
+}
+MessageWidget .weight {
+    width: auto;
+    text-align: right;
+    color: $text-muted;
+    height: 1;
+}
+MessageWidget.application {
+    text-style: italic;
 }
 MessageWidget.system {
     text-style: italic;

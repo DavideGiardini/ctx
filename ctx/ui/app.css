@@ -1,26 +1,50 @@
 Screen {
     layout: vertical;
 }
+#header {
+    dock: top;
+    height: 1;
+    background: $surface;
+    color: $text;
+    padding: 0 1;
+}
+#header-title {
+    width: 1fr;
+    text-align: left;
+}
+#header-logo {
+    width: 1fr;
+    text-align: center;
+}
+#header-context {
+    width: 1fr;
+    text-align: right;
+}
+#footer {
+    dock: bottom;
+    height: 1;
+    background: $surface;
+    color: $text-muted;
+    text-align: center;
+    padding: 0 1;
+}
 #main-area {
+    height: 1fr;
+}
+#detail-inspector {
+    width: 1fr;
+    height: 1fr;
+}
+#right-pane {
+    width: 1fr;
     height: 1fr;
 }
 MessageList {
     width: 1fr;
     height: 1fr;
 }
-#split-viewer {
-    width: 1fr;
-    height: 1fr;
-    display: none;
-}
 #input-area {
-    dock: bottom;
     height: auto;
-}
-#model-label {
-    color: $text-disabled;
-    padding: 0 1;
-    height: 1;
 }
 #command-suggestions {
     color: $text-muted;

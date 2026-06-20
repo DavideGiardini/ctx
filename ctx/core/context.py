@@ -44,5 +44,8 @@ def build_context(
                 messages.append({"role": "user", "content": node_content})
         elif node_role == "assistant":
             messages.append({"role": "assistant", "content": node_content})
+        elif node_role == "system":
+            messages.append({"role": "system", "content": node_content})
+        # role="application" is intentionally skipped — it is a UI-only message.
 
     return messages
