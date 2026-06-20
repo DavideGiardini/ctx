@@ -9,10 +9,11 @@ from textual.containers import Container, Horizontal
 from textual.widgets import Input, Static
 from textual.worker import Worker, WorkerState
 
+from ctx.core.config import get_config
 from ctx.core.conversation import DEFAULT_MODEL, ConversationCore
 from ctx.core.log import logger
-from ctx.core.provider import LiteLLMProvider
-from ctx.core.storage import ConversationRepository
+from ctx.core.provider import LiteLLMProvider, Provider
+from ctx.core.storage import ConversationRepository, StoragePort
 from ctx.core.workspace import Workspace
 from ctx.models.nodes import Node
 from ctx.ui.widgets.file_viewer import FileViewer, FileViewerScreen
@@ -41,12 +42,21 @@ class ChatApp(App):
         Binding("tab", "switch_focus", "Switch focus", show=False, priority=True),
     ]
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        provider: Provider | None = None,
+        workspace: Workspace | None = None,
+        storage: StoragePort | None = None,
+    ) -> None:
         super().__init__()
-        self._workspace = Workspace(Path.cwd())
-        self._repo = ConversationRepository(str(self._workspace.db_path))
+        # Injectable seams: default to the real adapters so production
+        # `ChatApp()` is unchanged, while tests/harness can pass a
+        # TestProvider and a temp-dir Workspace.
+        self._workspace = workspace or Workspace(Path.cwd())
+        self._repo = storage or ConversationRepository(str(self._workspace.db_path))
         self.core = ConversationCore(
-            self._repo, LiteLLMProvider(), workspace=self._workspace
+            self._repo, provider or LiteLLMProvider(), workspace=self._workspace
         )
         self._stream_worker: Worker | None = None
         self.mode = "insert"
@@ -213,6 +223,80 @@ class ChatApp(App):
             if node.id == self._selected_node_id:
                 return node
         return None
+
+    def _focus_target(self) -> str | None:
+        """Report which pane currently holds focus, semantically."""
+        if self.focused is None:
+            return None
+        if self._is_focused_in(self.query_one(InputBar)):
+            return "input"
+        if self._split_active and self._is_focused_in(
+            self.query_one("#split-viewer", FileViewer)
+        ):
+            return "file_viewer"
+        if self._is_focused_in(self.query_one(MessageList)):
+            return "messages"
+        return "other"
+
+    def describe_state(self) -> dict:
+        """Return a structured snapshot of the app's observable state.
+
+        Raw data only (full node content, no truncation) — token-budget
+        formatting lives in ``ctx/agent/snapshot.py``. Useful for the agent
+        MCP layer and for debugging/logging this otherwise-opaque TUI.
+
+        Nodes are reported by stable *index* + role (the random ``Node.id``
+        uuids are an implementation detail agents should not depend on).
+        """
+        nodes = self.core.nodes
+        selected_index: int | None = None
+        selected_role: str | None = None
+        node_states: list[dict] = []
+        for i, node in enumerate(nodes):
+            is_selected = node.id == self._selected_node_id
+            if is_selected:
+                selected_index = i
+                selected_role = node.role
+            entry: dict = {
+                "index": i,
+                "role": node.role,
+                "node_type": node.node_type,
+                "content": node.content,
+                "selected": is_selected,
+            }
+            source_path = node.meta.get("source_path")
+            if source_path:
+                entry["source_path"] = source_path
+            node_states.append(entry)
+
+        streaming = (
+            self._stream_worker is not None
+            and self._stream_worker.state == WorkerState.RUNNING
+        )
+
+        input_bar = self.query_one(InputBar)
+        suggestions = self.query_one("#command-suggestions", Static)
+        command_menu: dict | None = None
+        if suggestions.display:
+            command_menu = {
+                "visible": True,
+                "selected": InputBar.COMMANDS[input_bar._selected_command],
+            }
+
+        return {
+            "mode": self.mode,
+            "model": self.core.model,
+            "title": self.core.conversation_title,
+            "streaming": streaming,
+            "focus": self._focus_target(),
+            "selected_index": selected_index,
+            "selected_role": selected_role,
+            "split": {"open": self._split_active, "file": self._split_file_path},
+            "input": input_bar.value,
+            "command_menu": command_menu,
+            "colors": get_config()["colors"],
+            "nodes": node_states,
+        }
 
     def action_open_fullscreen(self) -> None:
         if self.mode != "edit":

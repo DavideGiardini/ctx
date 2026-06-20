@@ -36,6 +36,10 @@
 - `ctx/core/context.py` — builds LLM message list from nodes; expands `context` nodes by reading files.
 - `ctx/models/nodes.py` — single `Node` dataclass representing a chat turn or context reference.
 - CSS is split across `ctx/ui/app.css` and `ctx/ui/widgets/*.css`.
+- `ctx/agent/` — headless agent-driving tooling (see "Agent-driven testing"):
+  `snapshot.py` (compact state renderer), `harness.py` (deterministic no-arg
+  `ChatApp`), `mcp_server.py` (MCP server). `ChatApp.describe_state()` in
+  `ctx/ui/app.py` produces the raw state the renderer formats.
 
 ## What `ctx` is
 
@@ -58,6 +62,71 @@ A terminal chat application that streams LLM responses via `litellm`. It support
 - `uv run ruff check --fix .` — auto-fix issues
 - `uv run mypy .` — type checking
 - No test suite configured.
+
+## Agent-driven testing (headless)
+
+The app can be driven and observed by a coding agent without a terminal and
+without screenshots, via an MCP server. This enables agent loops that interact
+with the *real* app — navigating, stress-testing, and finding bugs — at low
+token cost (a full state read is ~100 tokens, not an image).
+
+- **Server** — `ctx/agent/mcp_server.py` (`ctx-agent-mcp` console script),
+  registered for Claude Code in `.mcp.json`. It reuses `textual-mcp-server`
+  (headless driving over Textual's built-in `Pilot`) and adds one ctx-specific
+  tool. Claude Code auto-discovers it on session start (approve once).
+- **Harness app** — `ctx/agent/harness.py` `HarnessApp`: a no-arg `ChatApp`
+  wired with a `TestProvider` (canned tokens, no network) and a temp-dir
+  `Workspace` (no `.ctx/` pollution), seeded with one context file so
+  `/include` and the file-viewer split work out of the box.
+- **Semantic snapshot** — `ChatApp.describe_state()` returns observable state as
+  a dict; `ctx/agent/snapshot.py` `render()` formats it as a compact, diffable
+  block. Read this each step instead of a screenshot.
+
+### Tools available to the agent
+- `ctx_snapshot(session_id)` — compact semantic state: mode, focus, model,
+  streaming, selection, split viewer, and message nodes by **stable index**
+  (not the random `Node.id`). **Use this to observe.**
+- From `textual-mcp-server`: `textual_launch`, `textual_press`,
+  `textual_type_text`, `textual_screenshot` (text|SVG), `textual_snapshot`,
+  `textual_query`, `textual_get_screen_stack`, `textual_wait_for`,
+  `textual_check_errors`, `textual_stop`.
+
+**Keyboard-only by design.** `ctx/agent/mcp_server.py` de-registers the
+library's mouse tools (`textual_click`, `textual_hover`) on startup, so the only
+way to *move* is real keyboard input (`textual_press` / `textual_type_text`)
+dispatched through Textual's normal event pipeline — there is no tool that sets
+focus or mutates state directly. Agents navigate exactly as a user at the
+terminal would. (Selector-based `textual_query` is observation only — it looks,
+never acts.)
+
+### Workflow (token-efficient)
+1. `textual_launch("ctx.agent.harness:HarnessApp")` → `session_id`.
+2. `ctx_snapshot` to observe → act with `textual_press`/`textual_type_text` →
+   `ctx_snapshot` again and diff.
+3. `textual_check_errors` after risky actions to catch crashes/worker errors.
+4. Use `textual_screenshot` **only** for genuine visual/layout bugs the
+   semantic snapshot cannot express.
+5. `textual_stop(session_id)` when done.
+
+### Bindings the agent can exercise (= everything a user can do)
+toggle mode `esc`, insert `i`, navigate messages `↑`/`↓`, open file fullscreen
+`o`, toggle file split `v`, close split `ctrl+v`, switch focus `tab`,
+cancel stream / exit `ctrl+c`; commands `/model`, `/new`, `/resume`, `/include`.
+
+### Example stress-test loop prompt
+> Launch `ctx.agent.harness:HarnessApp`. Loop: read `ctx_snapshot`, choose a
+> plausible user action (type a message, toggle modes, navigate, run a command,
+> open/close the file split), perform it, then read `ctx_snapshot` again and
+> verify the state changed as intended. Call `textual_check_errors` after each
+> action. Record any crash, any snapshot that doesn't match the intended action,
+> or any stuck/inconsistent state. After N iterations, `textual_stop` and
+> summarize the bugs found.
+
+### Dependency note
+`textual-mcp-server` 1.0.0 declares `textual<8`, but that pin is conservative —
+its full tool surface was verified working on textual 8.2.7. `pyproject.toml`'s
+`[tool.uv] override-dependencies` keeps the app on textual 8 while reusing the
+library. Run the server with `uv run ctx-agent-mcp`.
 
 ## What to avoid
 - Do not run `pytest` — no tests are configured.

@@ -10,6 +10,7 @@ dependencies = [
 
 [project.scripts]
 ctx = "ctx.main:run"
+ctx-agent-mcp = "ctx.agent.mcp_server:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -19,7 +20,15 @@ build-backend = "hatchling.build"
 dev = [
     "mypy>=2.1.0",
     "ruff>=0.15.16",
+    "textual-mcp-server>=1.0.0",
 ]
+
+[tool.uv]
+# textual-mcp-server 1.0.0 declares textual<8, but that pin is conservative:
+# its full tool surface (launch, press, type, snapshot, text/SVG screenshot,
+# bindings) was verified working on textual 8.2.7. Override it so the production
+# app stays on textual 8 while the dev/agent tooling reuses the library.
+override-dependencies = ["textual>=8.2.7"]
 
 [tool.ruff]
 target-version = "py311"

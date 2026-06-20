@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "ctx-agent": {
+      "command": "uv",
+      "args": ["run", "ctx-agent-mcp"]
+    }
+  }
+}
