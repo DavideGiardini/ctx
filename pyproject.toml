@@ -19,6 +19,9 @@ build-backend = "hatchling.build"
 [dependency-groups]
 dev = [
     "mypy>=2.1.0",
+    "pre-commit>=4.6.0",
+    "pytest>=8",
+    "pytest-asyncio>=1.4.0",
     "ruff>=0.15.16",
     "textual-mcp-server>=1.0.0",
 ]
@@ -42,3 +45,9 @@ python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
 ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Pilot-driven TUI smoke tests are async; auto mode means async test functions
+# need no per-test decorator. See tests/README.md.
+asyncio_mode = "auto"

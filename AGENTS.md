@@ -3,7 +3,7 @@
 ## Environment
 - Python >=3.11, managed with `uv` (`uv.lock` committed).
 - Build backend: `hatchling`.
-- No test suite, linter, formatter, or CI is configured.
+- Quality tooling: `ruff` + `mypy` + `pytest` (scaffolded) and GitHub Actions CI — see "Quality checks".
 
 ## Dependencies
 - Install: `uv sync`
@@ -21,157 +21,115 @@
 - Both are gitignored by default.
 
 ## App behavior
-- Default model: `openrouter/google/gemma-4-26b-a4b-it` (set in `ctx/ui/app.py`).
 - Switch models at runtime with `/model <model>`.
 - Commands: `/new`, `/resume`, `/include`, `/model`.
 - Logs written to `~/.local/state/ctx/ctx.log`.
 - User config (colors) lives in `~/.config/ctx/config.json`.
 
-## Architecture notes
-- `ctx/main.py` — tiny entry point that launches `ChatApp`.
-- `ctx/ui/app.py` — main Textual app; orchestrates UI, commands, and streaming workers.
-- `ctx/core/provider.py` — `litellm` streaming wrapper (`stream_response`).
-- `ctx/core/storage.py` — SQLite persistence (`init_db`, `save_conversation`, `load_conversation`).
-- `ctx/core/workspace.py` — `.ctx/` discovery and context file reading.
-- `ctx/core/context.py` — builds LLM message list from nodes; expands `context` nodes by reading files.
-- `ctx/models/nodes.py` — single `Node` dataclass representing a chat turn or context reference.
-- CSS is split across `ctx/ui/app.css` and `ctx/ui/widgets/*.css`.
-- `ctx/agent/` — headless agent-driving tooling (see "Agent-driven testing"):
-  `snapshot.py` (compact state renderer), `harness.py` (deterministic no-arg
-  `ChatApp`), `mcp_server.py` (MCP server). `ChatApp.describe_state()` in
-  `ctx/ui/app.py` produces the raw state the renderer formats.
+## Architecture
+Layered: `core/` is framework-free domain logic (zero `textual` imports), `ui/` is
+a thin Textual adapter over it, `agent/` is headless QA tooling, `models/` holds
+shared types. `ctx/main.py` is a tiny entry point. See `docs/decisions/` for *why*
+it's shaped this way.
+
+**core/** (no `textual` imports)
+- `conversation.py` — `ConversationCore`: owns conversation state (nodes, model,
+  id/title) plus the command + streaming lifecycle. Takes a `Provider`, a
+  `StoragePort`, and a `Workspace` by injection (ADR 0001).
+- `provider.py` — `Provider` protocol (`stream()`, `check_connectivity()`) with
+  adapters `LiteLLMProvider` (real) and `TestProvider` (canned, no network) (ADR 0002).
+- `storage.py` — `StoragePort` protocol + `ConversationRepository(db_path)`
+  encapsulating all SQLite (WAL) schema/serialization (ADR 0003).
+- `context.py` — pure `build_context(nodes, load_file)` → litellm message list;
+  expands `context` nodes via the injected loader, no I/O of its own (ADR 0004).
+- `workspace.py` — `Workspace(root_path)`: `.ctx/` discovery, `ensure()`,
+  `list_files()`, `read_file()`; the sole `Path.cwd()` lives at its call site (ADR 0005).
+- `config.py` — `~/.config/ctx/config.json` merged over defaults (colors). `log.py`
+  — file logging to `~/.local/state/ctx/ctx.log`.
+
+**ui/**
+- `app.py` — `ChatApp`: Textual app and composition root. Constructs the core's
+  dependencies; owns widgets, focus, mode-switching, keybindings, and the `@work`
+  streaming worker. `describe_state()` exposes observable state for snapshots.
+- `widgets/` — `MessageList`, `MessageWidget`, `InputBar` (command suggest/cycle),
+  `IncludeScreen` (file-picker modal), `HistoryScreen` (conversation picker),
+  `FileViewer`. CSS split across `app.css` and `widgets/*.css`.
+
+**agent/** — headless QA tooling (see "Agent-driven testing"): `snapshot.py`,
+`harness.py`, `mcp_server.py`. **models/** — `nodes.py`: the `Node` dataclass (one
+chat turn or context reference).
+
+### Non-obvious behaviors
+- `/include` stores a `Node(node_type="context")` with `meta["source_path"]`;
+  `build_context` wraps file contents in `<context_import>` XML merged into the
+  next user message at stream time.
+- `ConversationRepository.save` replaces *all* nodes for a conversation id.
+- `check_connectivity` fires a single-token probe to confirm a model is reachable.
+
+## Designing new modules
+This codebase is built on a deep-module philosophy (see `docs/decisions/` for the
+ADRs that established it). Hold new code to the same bar:
+
+- **Prefer deep modules** — a simple interface hiding substantial implementation.
+  If a module's interface is about as complex as its implementation, it is
+  shallow; fold it into its caller or deepen it.
+- **The interface is the test surface.** Design the public interface so behavior
+  can be exercised through it. Don't extract a pure function *only* to test it
+  while the real bug lives in how it's called — keep logic where it has locality.
+- **Keep core logic framework-free.** `ctx/core/*` has zero `textual` imports;
+  the UI (`ctx/ui/*`) is a thin adapter over it. New domain logic goes in `core`.
+- **Inject a Protocol seam only when a second real implementation exists.** One
+  adapter is a hypothetical seam; two is a real one. Examples that earned their
+  seam: `Provider`/`TestProvider` (`ctx/core/provider.py`), `StoragePort` +
+  `ConversationRepository` (`ctx/core/storage.py`), injected `Workspace`.
+- **Apply the deletion test before adding an abstraction.** Would deleting it
+  concentrate complexity (good — it's pulling its weight) or just scatter it
+  (don't add it)?
+
+**Keep this file current.** Whenever you change the architecture — add/remove/rename
+a module, move a responsibility across the core/ui seam, change a module's
+interface, or introduce a new seam — update the `## Architecture` map (and its
+`### Non-obvious behaviors`) in the same change so it never goes stale. For a
+decision worth not re-litigating, add an ADR in `docs/decisions/`. A diff that
+reshapes the architecture without touching this file is incomplete.
+
+For deeper refactors, run the `/improve-codebase-architecture` skill.
 
 ## What `ctx` is
 
 A terminal chat application that streams LLM responses via `litellm`. It supports model switching, context file inclusion, conversation persistence, and a two-mode UI (insert vs. edit). Built on `textual`.
 
-## Features and how they are implemented
-
-- **Streaming LLM chat** — `ctx/core/provider.py` uses `litellm.acompletion` with `stream=True` and calls back `on_token` / `on_done` / `on_error`. The app runs this in a `textual` `Worker` so the UI stays responsive.
-- **Model switching** — `/model <name>` changes the active model string at runtime; `check_connectivity` fires a single-token probe to verify the model is reachable.
-- **Context file inclusion** — `/include` opens a modal (`IncludeScreen`) listing files from `.ctx/context/`. Selected files are stored as `Node(node_type="context")` with `meta["source_path"]`; `ctx/core/context.py` reads them at stream time and wraps their content in `<context_import>` XML merged into the next user message.
-- **Conversation persistence** — `ctx/core/storage.py` uses SQLite (WAL mode, foreign keys on). `conversations` and `nodes` tables; `save_conversation` replaces all nodes for the conversation ID. Past conversations can be resumed with `/resume` via `HistoryScreen`.
-- **Two-mode UI** — Insert mode focuses the input bar; Edit mode lets the user navigate past messages with ↑/↓ (keyboard bindings on `ChatApp`). Escape toggles between modes.
-- **UI widgets** — `MessageList` (scrollable message container), `MessageWidget` (per-message Markdown/Static display with colored left border), `InputBar` (custom Input with command suggestion and cycling), `IncludeScreen` (modal file picker), `HistoryScreen` (modal conversation picker).
-- **Per-directory workspace** — `ctx/core/workspace.py` discovers `.ctx/` in the current working directory. Each directory gets its own `conversations.db` and `context/` folder.
-- **Logging** — `ctx/core/log.py` writes structured logs to `~/.local/state/ctx/ctx.log` via a `FileHandler`.
-- **User config** — `ctx/core/config.py` reads `~/.config/ctx/config.json` and merges it over defaults (currently only `colors`).
-
 ## Quality checks
-- `uv run ruff check .` — lint and import sorting
-- `uv run ruff check --fix .` — auto-fix issues
-- `uv run mypy .` — type checking
-- No test suite configured.
+The gate (run before every commit; CI and the Ralph loop call it too):
+- `bash scripts/check.sh` — ruff + mypy + pytest in one shot.
+Individually: `uv run ruff check .` (add `--fix` to auto-fix), `uv run mypy .`,
+`uv run pytest`. A deterministic Pilot-driven test layer is the required next
+step — see `tests/README.md`. Install the local hook with `uv run pre-commit install`.
 
 ## Agent-driven testing (headless)
+The real app can be driven and observed without a terminal or screenshots, via the
+`ctx-agent` MCP server (`ctx/agent/mcp_server.py`, auto-discovered from `.mcp.json`).
+It drives a deterministic `HarnessApp` (`ctx/agent/harness.py` — `TestProvider` +
+temp workspace) and exposes `ctx_snapshot`, a ~100-token semantic state read,
+alongside `textual-mcp-server`'s keyboard/observation tools.
 
-The app can be driven and observed by a coding agent without a terminal and
-without screenshots, via an MCP server. This enables agent loops that interact
-with the *real* app — navigating, stress-testing, and finding bugs — at low
-token cost (a full state read is ~100 tokens, not an image).
+**Default to delegating behavioral QA to the `qa-tester` subagent** (modes:
+stress-test / verify-fix / verify-feature). It owns the launch flow, the
+snapshot→act→snapshot→check-errors loop, and the key bindings, and keeps that
+token-heavy traffic out of your context. Drive the MCP tools yourself only for a
+quick one-off check.
 
-- **Server** — `ctx/agent/mcp_server.py` (`ctx-agent-mcp` console script),
-  registered for Claude Code in `.mcp.json`. It reuses `textual-mcp-server`
-  (headless driving over Textual's built-in `Pilot`) and adds one ctx-specific
-  tool. Claude Code auto-discovers it on session start (approve once).
-- **Harness app** — `ctx/agent/harness.py` `HarnessApp`: a no-arg `ChatApp`
-  wired with a `TestProvider` (canned tokens, no network) and a temp-dir
-  `Workspace` (no `.ctx/` pollution), seeded with one context file so
-  `/include` and the file-viewer split work out of the box.
-- **Semantic snapshot** — `ChatApp.describe_state()` returns observable state as
-  a dict; `ctx/agent/snapshot.py` `render()` formats it as a compact, diffable
-  block. Read this each step instead of a screenshot.
-
-### Tools available to the agent
-- `ctx_snapshot(session_id)` — compact semantic state: mode, focus, model,
-  streaming, selection, split viewer, and message nodes by **stable index**
-  (not the random `Node.id`). **Use this to observe.**
-- From `textual-mcp-server`: `textual_launch`, `textual_press`,
-  `textual_type_text`, `textual_screenshot` (text|SVG), `textual_snapshot`,
-  `textual_query`, `textual_get_screen_stack`, `textual_wait_for`,
-  `textual_check_errors`, `textual_stop`.
-
-**Keyboard-only by design.** `ctx/agent/mcp_server.py` de-registers the
-library's mouse tools (`textual_click`, `textual_hover`) on startup, so the only
-way to *move* is real keyboard input (`textual_press` / `textual_type_text`)
-dispatched through Textual's normal event pipeline — there is no tool that sets
-focus or mutates state directly. Agents navigate exactly as a user at the
-terminal would. (Selector-based `textual_query` is observation only — it looks,
-never acts.)
-
-### Workflow (token-efficient)
-1. `textual_launch("ctx.agent.harness:HarnessApp")` → `session_id`.
-2. `ctx_snapshot` to observe → act with `textual_press`/`textual_type_text` →
-   `ctx_snapshot` again and diff.
-3. `textual_check_errors` after risky actions to catch crashes/worker errors.
-4. Use `textual_screenshot` **only** for genuine visual/layout bugs the
-   semantic snapshot cannot express.
-5. `textual_stop(session_id)` when done.
-
-### Bindings the agent can exercise (= everything a user can do)
-toggle mode `esc`, insert `i`, navigate messages `↑`/`↓`, open file fullscreen
-`o`, toggle file split `v`, close split `ctrl+v`, switch focus `tab`,
-cancel stream / exit `ctrl+c`; commands `/model`, `/new`, `/resume`, `/include`.
-
-### Example stress-test loop prompt
-> Launch `ctx.agent.harness:HarnessApp`. Loop: read `ctx_snapshot`, choose a
-> plausible user action (type a message, toggle modes, navigate, run a command,
-> open/close the file split), perform it, then read `ctx_snapshot` again and
-> verify the state changed as intended. Call `textual_check_errors` after each
-> action. Record any crash, any snapshot that doesn't match the intended action,
-> or any stuck/inconsistent state. After N iterations, `textual_stop` and
-> summarize the bugs found.
-
-### Dependency note
-`textual-mcp-server` 1.0.0 declares `textual<8`, but that pin is conservative —
-its full tool surface was verified working on textual 8.2.7. `pyproject.toml`'s
-`[tool.uv] override-dependencies` keeps the app on textual 8 while reusing the
-library. Run the server with `uv run ctx-agent-mcp`.
+> Dependency note: `textual-mcp-server` 1.0.0 pins `textual<8` conservatively;
+> `[tool.uv] override-dependencies` keeps the app on textual 8 while reusing the
+> library. Run the server manually with `uv run ctx-agent-mcp` if needed.
 
 ## What to avoid
-- Do not run `pytest` — no tests are configured.
+- Do not weaken the gate to make it pass; fix what `scripts/check.sh` reports.
 - Do not commit `.ctx/` or `.env`; they are gitignored.
 - Do not modify `uv.lock` by hand; use `uv sync` / `uv add` / `uv remove`.
 
-# BEHAVIOR
-
-## Role
-
-You are a patient, methodical coding professor. Your job is not just to produce working code, but to guide the student through building it — one piece at a time, with full understanding at every step.
-
----
-
-## Core Behavior
-
-**Move slowly and deliberately.** Never implement more than one logical unit per turn. A "logical unit" might be a single function, a single widget, a single dataclass — use your judgment, but when in doubt, do less rather than more.
-
-**Explain before you write.** Before producing any code, briefly describe what you are about to write and why it is designed the way it is. One short paragraph is enough. No need for exhaustive detail — just enough that the student understands the intent and the key design decision.
-
-**Pause after every step.** End every response with a brief summary of what was just done and an explicit invitation to ask questions before proceeding. Do not move to the next step until the student gives the go-ahead.
-
-**Never write code for future steps.** If the implementation brief mentions things that are not part of the current step, do not scaffold them, stub them, or leave TODO comments for them. Write only what is needed right now. Future steps will be handled when the time comes.
-
----
-
-## Format
-
-Each response follows this structure:
-
-1. **What we're doing** — one short paragraph explaining the unit about to be written and the key design decisions behind it.
-2. **The code** — clean, minimal, well-commented.
-3. **Pause** — a short summary of what was just written, followed by: *"Any questions before we move on?"*
-
----
-
-## Tone
-
-Calm, precise, and encouraging. You are a professor who enjoys explaining things, not an assistant trying to complete a task as fast as possible. Never rush. If something has an interesting design implication — especially one relevant to how the codebase will grow — point it out briefly.
-
----
-
-## Constraints
-
-- One logical unit per response, no exceptions.
-- Never proceed to the next unit without an explicit go-ahead from the student.
-- Never reference or implement anything outside the current step's implementation brief.
-- If you are unsure whether something is in scope, ask rather than assume.
+## Interaction modes
+- **Default — autonomous engineer**: implement complete logical changes, run
+  `scripts/check.sh`, and self-verify behavior via the `qa-tester` subagent before
+  reporting; read `docs/decisions/` before reopening settled design.
+- **`/professor`** — opt-in slow, teaching, one-unit-per-turn pairing style.

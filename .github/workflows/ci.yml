@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync
+
+      # Deterministic gate only (no LLM): ruff + mypy + pytest. Behavioral
+      # coverage arrives via the Pilot-driven pytest layer (see tests/README.md);
+      # MCP/agent-driven QA is run by the qa-tester subagent, not in CI.
+      - name: Quality gate
+        run: bash scripts/check.sh
