@@ -1,26 +1,31 @@
 Screen {
     layout: vertical;
 }
-#main-area {
+/* Header and footer dock to the Screen, so #body is the only flexible
+   vertical region and the split can never collapse. */
+#body {
     height: 1fr;
 }
-MessageList {
+#detail {
+    width: 1fr;
+    height: 1fr;
+    border-right: solid $surface;
+}
+#conversation {
     width: 1fr;
     height: 1fr;
 }
-#split-viewer {
-    width: 1fr;
+#messages {
     height: 1fr;
-    display: none;
+    scrollbar-size: 1 1;
 }
+/* The input area docks to the bottom of the right pane (not the Screen),
+   keeping the input inside the conversation pane. Suggestions + input sit in
+   normal flow inside it (compose order places the suggestions above the
+   input) — docking each one directly would overlap them. */
 #input-area {
     dock: bottom;
     height: auto;
-}
-#model-label {
-    color: $text-disabled;
-    padding: 0 1;
-    height: 1;
 }
 #command-suggestions {
     color: $text-muted;
@@ -29,4 +34,7 @@ MessageList {
     border-top: solid $primary;
     height: auto;
     display: none;
+}
+InputBar {
+    height: 3;
 }

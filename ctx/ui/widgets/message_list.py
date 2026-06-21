@@ -5,10 +5,38 @@ from textual.widgets import Markdown, Static
 from ctx.core.config import get_config
 from ctx.models.nodes import Node
 
+# Config key per node role for truncation lookups ("user" maps to "human").
+_TRUNCATION_KEY = {
+    "user": "human",
+    "assistant": "assistant",
+    "context": "context",
+    "system": "system",
+}
+
+# Which "conversation pass" a role belongs to. context/system inherit the
+# previous node's side, so they are resolved positionally (see _pass_starts).
+_SIDE = {"user": "human", "assistant": "assistant"}
+
+
+def _pass_starts(roles: list[str]) -> list[bool]:
+    """For an ordered list of node roles, return whether each node begins a new
+    conversation pass (gets a top margin). A pass is a human turn (query + its
+    context imports) or an assistant turn (response + its imports); context and
+    system nodes inherit the side of the preceding node. The first node is never
+    a pass start.
+    """
+    starts: list[bool] = []
+    prev_side: str | None = None
+    for role in roles:
+        side = _SIDE.get(role, prev_side)
+        starts.append(prev_side is not None and side != prev_side)
+        if side is not None:
+            prev_side = side
+    return starts
+
 
 class MessageWidget(Vertical):
     DEFAULT_CSS = ""
-
 
     def __init__(self, node: Node, **kwargs) -> None:
         self.node = node
@@ -26,6 +54,15 @@ class MessageWidget(Vertical):
         self._border_color = Color.parse(color_str)
         style = "tall" if self._role in ("user", "assistant", "context") else "solid"
         self.styles.border_left = (style, self._border_color)  # type: ignore[assignment]
+        self._apply_truncation()
+
+    def _apply_truncation(self) -> None:
+        truncation = get_config()["ui"]["truncation_lines"]
+        limit = truncation.get(_TRUNCATION_KEY.get(self._role, "system"))
+        if isinstance(limit, int):
+            self.styles.max_height = limit
+        else:  # "auto" (or anything non-int) disables truncation
+            self.styles.max_height = None
 
     def set_selected(self, selected: bool) -> None:
         self.set_class(selected, "selected")
@@ -33,7 +70,14 @@ class MessageWidget(Vertical):
             style = "thick" if selected else "tall"
             self.styles.border_left = (style, self._border_color)  # type: ignore[assignment]
 
+    def set_new_pass(self, is_new_pass: bool) -> None:
+        self.set_class(is_new_pass, "pass-start")
+
+    def set_weight_pct(self, pct: int | None) -> None:
+        self.query_one(".weight", Static).update("--%" if pct is None else f"{pct}%")
+
     def compose(self):
+        yield Static("--%", classes="weight")
         if self._role in ("system", "context"):
             yield Static(self._content or "", classes="content")
         else:
@@ -48,11 +92,17 @@ class MessageWidget(Vertical):
 class MessageList(VerticalScroll):
     DEFAULT_CSS = ""
 
-
     async def add_node(self, node: Node) -> None:
         widget = MessageWidget(node)
         await self.mount(widget)
+        self._apply_pass_margins()
         self.call_after_refresh(self.scroll_end)
+
+    def _apply_pass_margins(self) -> None:
+        widgets = list(self.query(MessageWidget))
+        starts = _pass_starts([w._role for w in widgets])
+        for widget, is_start in zip(widgets, starts, strict=True):
+            widget.set_new_pass(is_start)
 
     def update_content(self, node_id: str, content: str) -> None:
         try:

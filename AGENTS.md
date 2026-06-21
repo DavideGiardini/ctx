@@ -44,16 +44,28 @@ it's shaped this way.
   expands `context` nodes via the injected loader, no I/O of its own (ADR 0004).
 - `workspace.py` — `Workspace(root_path)`: `.ctx/` discovery, `ensure()`,
   `list_files()`, `read_file()`; the sole `Path.cwd()` lives at its call site (ADR 0005).
-- `config.py` — `~/.config/ctx/config.json` merged over defaults (colors). `log.py`
+- `config.py` — `~/.config/ctx/config.json` merged over defaults (`colors`,
+  `ui.truncation_lines` — per-role node line caps; `"auto"` disables). `log.py`
   — file logging to `~/.local/state/ctx/ctx.log`.
 
-**ui/**
+**ui/** — dual-pane "conversation IDE" shell (Product Concept §7): docked
+`AppHeader` (top) / `AppFooter` (bottom), a permanent `Horizontal#body` split with
+a left `DetailInspector` and a right `#conversation` pane (the `MessageList` +
+`InputBar` live inside it).
 - `app.py` — `ChatApp`: Textual app and composition root. Constructs the core's
-  dependencies; owns widgets, focus, mode-switching, keybindings, and the `@work`
-  streaming worker. `describe_state()` exposes observable state for snapshots.
-- `widgets/` — `MessageList`, `MessageWidget`, `InputBar` (command suggest/cycle),
-  `IncludeScreen` (file-picker modal), `HistoryScreen` (conversation picker),
-  `FileViewer`. CSS split across `app.css` and `widgets/*.css`.
+  dependencies; owns widgets, focus, Insert/Edit mode-switching (`_set_mode`),
+  keybindings, selection→inspector wiring, and the `@work` streaming worker (which
+  feeds both the truncated right-pane node and, when locked, the full left-pane
+  stream). `describe_state()` exposes observable state for snapshots.
+- `widgets/` — `MessageList`/`MessageWidget` (truncated nodes via per-role
+  `max-height`, right-docked weight slot, conversation-pass margins),
+  `DetailInspector` (reactive `show(NodeView)`; standard Markdown view vs. 3-split
+  Prompt/Content/Output context view, empty splits hidden), `AppHeader` (title /
+  logo / context-% gauge — gauge is a placeholder pending token counting),
+  `AppFooter` (mode-driven keybinding hints + model), `InputBar` (command
+  suggest/cycle), `IncludeScreen` (file-picker modal), `HistoryScreen`
+  (conversation picker). CSS split across `app.css` and `widgets/*.css` plus
+  widget `DEFAULT_CSS`.
 
 **agent/** — headless QA tooling (see "Agent-driven testing"): `snapshot.py`,
 `harness.py`, `mcp_server.py`. **models/** — `nodes.py`: the `Node` dataclass (one

@@ -38,9 +38,13 @@ tools are exposed by the `ctx-agent` MCP server and are named `ctx-agent_*`.
 `ctx-agent_textual_get_screen_stack` are observation-only.
 
 ### Bindings (the full set of user actions)
-toggle mode `esc`, insert `i`, navigate messages `↑`/`↓`, open file fullscreen `o`,
-toggle file split `v`, close split `ctrl+v`, switch focus `tab`, cancel stream /
-exit `ctrl+c`; commands `/model`, `/new`, `/resume`, `/include`.
+Dual-pane shell: left Detail Inspector, right Conversation. Insert mode = typing
+in the InputBar (Detail pane locked to the last node); Edit mode = navigating
+nodes (Detail pane reflects the selection).
+toggle Insert/Edit `esc`, enter Insert `i` (vim-style, from Edit), navigate nodes
+(incl. system) `↑`/`↓`, jump to first node `home`, focus context-node splits
+Prompt/Content/Output `1`/`2`/`3` (Edit + context node selected), switch pane focus
+`tab`, cancel stream / exit `ctrl+c`; commands `/model`, `/new`, `/resume`, `/include`.
 
 ## Modes
 

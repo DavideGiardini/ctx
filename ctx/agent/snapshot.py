@@ -44,11 +44,34 @@ def render(state: dict) -> str:
         line = f'input="{input_value}"'
         if menu:
             line += f"  command-menu→{menu['selected']}"
+            count = menu.get("count")
+            if count is not None:
+                menu_detail = f"{count} items"
+                if menu.get("occluded"):
+                    menu_detail += ", OCCLUDED"
+                line += f" ({menu_detail})"
         lines.append(line)
 
-    split = state.get("split") or {}
-    if split.get("open"):
-        lines.append(f"split=open file={split.get('file')!r}")
+    footer = state.get("footer")
+    if footer:
+        lines.append(f'footer="{footer}"')
+
+    detail = state.get("detail") or {}
+    if detail:
+        node = detail.get("node_index")
+        node_str = f"[{node}]" if node is not None else "-"
+        pane = detail.get("pane_mode", "none")
+        locked = "yes" if detail.get("locked") else "no"
+        line = f"detail: view={detail.get('view')} node={node_str} pane={pane}"
+        if pane == "browse":
+            line += f" hi={detail.get('highlighted_split') or '-'}"
+        elif pane == "maximized":
+            line += f" max={detail.get('maximized_split') or '-'}"
+        line += f" locked={locked}"
+        if detail.get("view") == "context":
+            visible = ",".join(detail.get("splits_visible", [])) or "-"
+            line += f" splits={visible}"
+        lines.append(line)
 
     colors = state.get("colors") or {}
     if colors:
@@ -64,9 +87,13 @@ def render(state: dict) -> str:
 
     for node in nodes:
         marker = "*" if node.get("selected") else " "
+        trunc = "~" if node.get("truncated") else " "
         role = f"{node['role']:<9}"
         content = _one_line(node.get("content", ""))
         suffix = f"  (file: {node['source_path']})" if node.get("source_path") else ""
-        lines.append(f"{marker} [{node['index']}] {role} {content}{suffix}")
+        weight = node.get("weight_pct")
+        if weight is not None:
+            suffix += f"  w={weight}%"
+        lines.append(f"{marker}{trunc}[{node['index']}] {role} {content}{suffix}")
 
     return "\n".join(lines)
