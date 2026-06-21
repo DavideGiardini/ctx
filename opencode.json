@@ -6,5 +6,11 @@
       "command": ["uv", "run", "ctx-agent-mcp"],
       "enabled": true
     }
+  },
+  "permission": {
+    "read": {
+      "*": "allow",
+      "docs/Product Concept.md": "ask"
+    }
   }
 }
