@@ -1,9 +1,27 @@
 # Tests
 
 This is the home of the **deterministic test layer** — the required next step in
-hardening `ctx`'s back pressure. It is intentionally empty for now (no tests have
-been written yet); `scripts/check.sh` treats "no tests collected" as a pass until
-the first test lands, then the gate tightens automatically.
+hardening `ctx`'s back pressure. The first unit tests have landed
+(`test_context.py`), so `scripts/check.sh` now runs them for real; the historical
+"no tests collected" pass-through is dormant.
+
+## How tests are authored here
+
+Unit tests are written with a **contract-first, code-blind** method (the
+`/write-tests` skill + the `test-spec-author` subagent) that resists tests which
+merely mirror the implementation ("self-validating" tests). The flow per module:
+
+1. The orchestrator hands a **code-blind** agent only the module's interface
+   (signatures + docstrings) and a prose statement of intent — never the bodies.
+2. That agent produces a numbered **behavioral contract**, committed under
+   `tests/specs/<module>.md` (the oracle of record; tests cite item ids like `# C3`).
+3. Tests are authored from the contract; a coverage loop closes any gaps by asking
+   *intent* questions (never by describing the code).
+4. `scripts/mutate.sh` runs **mutmut** to prove the assertions actually catch faults;
+   surviving mutants are triaged (weak test / equivalent / real bug). mutmut is a
+   periodic tool, deliberately **not** part of `scripts/check.sh`.
+
+See `tests/specs/context.md` for a worked example.
 
 ## What belongs here
 

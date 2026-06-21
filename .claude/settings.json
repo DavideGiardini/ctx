@@ -2,6 +2,9 @@
   "permissions": {
     "ask": [
       "Read(./docs/Product Concept.md)"
+    ],
+    "allow": [
+      "Write(tests/**)"
     ]
   }
 }

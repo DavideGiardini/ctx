@@ -3,3 +3,8 @@
 __pycache__
 .agents/
 .ctx
+
+# mutation testing (mutmut) + coverage artifacts — see scripts/mutate.sh
+mutants/
+.coverage
+html/

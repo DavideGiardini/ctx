@@ -18,6 +18,7 @@ build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = [
+    "mutmut>=3.6.0",
     "mypy>=2.1.0",
     "pre-commit>=4.6.0",
     "pytest>=8",
@@ -45,9 +46,48 @@ python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
 ignore_missing_imports = true
+# mutmut leaves an isolated copy of the package under mutants/ (kept so
+# `mutmut results`/`show` work for triage). It is gitignored, so ruff and pytest
+# already skip it, but `mypy .` does not honor gitignore — without this exclude it
+# sees two `ctx` packages and fails check.sh with a duplicate-module error.
+exclude = ["^mutants/"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 # Pilot-driven TUI smoke tests are async; auto mode means async test functions
 # need no per-test decorator. See tests/README.md.
 asyncio_mode = "auto"
+
+[tool.mutmut]
+# Mutation testing scope. Run via scripts/mutate.sh (NOT part of check.sh — it
+# is slow by design).
+#
+# source_paths = the whole package, because mutmut copies these paths into its
+# isolated mutants/ dir and the core imports ctx.models / ctx.core.log — copying
+# only ctx/core would break those imports.
+#
+# only_mutate = the UNION of all modules that have landed a contract + tests; only
+# these are mutated (everything else is copied but left intact). This is the single
+# source of truth — append a module when its tests land; do NOT narrow it for a
+# focused run (that clobbers other sessions). NEVER add ctx/ui/* — the Textual UI is
+# covered by the Pilot / qa-tester layer, not unit tests.
+#
+# The mutation gate is SERIAL and repo-global: mutmut uses one mutants/ working dir
+# and cache at the repo root and is CPU-heavy, so only ONE mutmut process may run at
+# a time. Parallel test-authoring sessions must NOT run mutmut or edit this list;
+# run the gate as a single sweep at the end (scope a focused run with
+# `scripts/mutate.sh run 'ctx.core.<mod>.*'` — see scripts/mutate.sh).
+source_paths = ["ctx"]
+only_mutate = [
+    "ctx/core/context.py",
+    "ctx/agent/snapshot.py",
+    "ctx/core/config.py",
+    "ctx/core/storage.py",
+    "ctx/core/workspace.py",
+    "ctx/core/conversation.py",
+    # provider.py is added for the TestProvider double (unit-tested). LiteLLMProvider
+    # is the network adapter — out of scope for unit tests by design (like ctx/ui/*),
+    # so its mutants are expected survivors on a full sweep; scope a focused run with
+    # 'ctx.core.provider.*' and triage only the TestProvider mutants.
+    "ctx/core/provider.py",
+]
