@@ -110,6 +110,21 @@ returns a `dict`. A hand-edited config with a type slip is still "a broken user
 config", which intent says must never take down the app. *(adjudicated A5: the firm
 oracle is no-raise + returns-a-dict; the exact recovered structure is not pinned.)*
 
+**C19. Never crashes on a non-object JSON root. — CONTRACT VIOLATION (BUG record); test
+quarantined `xfail(strict=True)`.** File contains valid JSON whose top-level value is not an
+object — e.g. `5`, `"hi"`, or `[1, 2]` → `get_config()` does not raise and returns a `dict`
+(falls back to `D`). A hand-edited config with a top-level type slip is still "a broken user
+config", which (like C18) intent says must never take down the app. *(adjudicated A9: same
+firm oracle as C18 — no-raise + returns-a-dict; the exact recovered structure is not pinned.
+This is the root-level sibling of C18's section-level wrong-type case.)*
+
+**C20. A truncation_lines value of `"auto"` is accepted and passed through.**
+*(The defaults' docstring documents `"auto"` as a legal value that disables truncation for a
+role; a user override of `{"ui": {"truncation_lines": {"assistant": "auto"}}}` is valid
+config, not a type error.)* File = `{"ui": {"truncation_lines": {"assistant": "auto"}}}` →
+does not raise; `result["ui"]["truncation_lines"]["assistant"] == "auto"`, and every other
+truncation key keeps its default value `D["ui"]["truncation_lines"][k]` (per C11's merge).
+
 ## Contract violations found
 
 Where the code violates this (correct, intended) contract, the test is kept as the
@@ -130,8 +145,13 @@ quarantined:
   spreads the value as a mapping, and the `except` clause only catches
   `(JSONDecodeError, OSError)`. Fix: guard the merge / widen the fallback so
   misshapen-but-parseable config returns defaults.
+- **C19 (non-object JSON root never crashes).** A valid-JSON but non-object root (e.g.
+  `5` or `[1, 2]`) raises an uncaught `TypeError` at `config.py:35` — `merged.update(value)`
+  requires a mapping, and the `except` clause only catches `(JSONDecodeError, OSError)`.
+  This is the root-level sibling of C18. Fix: guard the root's type before merging / widen
+  the fallback so a non-object root returns defaults.
 
-All other items (C1–C16) pass against the current implementation.
+All other items (C1–C16, C20) pass against the current implementation.
 
 ## Adjudication notes / ambiguities
 - **A1 (deep isolation):** resolved as IN contract (C17). Currently a bug.
@@ -145,6 +165,8 @@ All other items (C1–C16) pass against the current implementation.
 - **A6 (partial-validity files):** left unspecified — no item asserts mixed
   valid/invalid sections within one file. Revisit only if a real need appears.
 - **A7 (unreadable simulation):** resolved — point `CONFIG_PATH` at a directory.
+- **A9 (non-object JSON root):** resolved as IN contract — must not crash (C19), same firm
+  oracle as C18. Currently a bug. Recovered structure intentionally not pinned.
 - **A8 (baseline snapshot):** test-authoring note — deep-snapshot `D` before the
   mutation-isolation tests run.
 

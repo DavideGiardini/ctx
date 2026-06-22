@@ -912,3 +912,20 @@ async def test_c56_stream_uses_current_model(repo, workspace):
     await _collect(core.stream(assistant_node))
     assert provider.captured_model == "vendor/specific-model"
     assert provider.captured_model == core.model
+
+
+# C57. include_files with an empty path list appends nothing and returns an empty list.
+def test_c57_include_files_empty_list_is_noop(repo, test_provider, workspace):
+    core = ConversationCore(repo, test_provider(["hi"]), workspace)
+    core.setup()
+
+    count_before = len(core.nodes)
+
+    result = core.include_files([])
+
+    # returns an empty list
+    assert result == []
+    # node count unchanged
+    assert len(core.nodes) == count_before
+    # no context node created
+    assert not any(node.node_type == "context" for node in core.nodes)

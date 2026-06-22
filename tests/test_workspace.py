@@ -167,21 +167,35 @@ def test_c16_list_files_mixed_text_and_binary_nested(workspace):
 
 
 def test_c26_list_files_skips_unreadable_file(workspace):
-    # C26: readable.md + locked.md(chmod 0o000) -> omits locked.md, includes readable.md.
+    # C26. Skips a file it cannot read.
+    # Root bypasses permission checks entirely, so the file would still be
+    # readable and the skip behavior could not be observed.
     if os.geteuid() == 0:
-        pytest.skip("root bypasses file permission checks")
+        pytest.skip("running as root: permission bits do not constrain root")
 
     readable = workspace.context_dir / "readable.md"
-    readable.write_text("This file can be read by anyone.", encoding="utf-8")
-
     locked = workspace.context_dir / "locked.md"
-    locked.write_text("This content should never be listed.", encoding="utf-8")
+    readable.write_text("# Readable\n\nThis is valid UTF-8 text.\n", encoding="utf-8")
+    locked.write_text("# Locked\n\nThis is also valid UTF-8 text.\n", encoding="utf-8")
+
     os.chmod(locked, 0o000)
     try:
-        files = workspace.list_files()
-        assert "readable.md" in files
-        assert "locked.md" not in files
+        # Some filesystems/environments ignore permission bits; if the file is
+        # still readable, the precondition for this test does not hold.
+        try:
+            locked.read_text(encoding="utf-8")
+            pytest.skip("filesystem ignores permission bits: locked.md is still readable")
+        except (PermissionError, OSError):
+            pass
+
+        result = workspace.list_files()
+
+        # The unreadable file must be silently skipped, not raise.
+        assert "locked.md" not in result
+        # The readable file must still be listed.
+        assert "readable.md" in result
     finally:
+        # Restore permissions so the temp dir can be cleaned up.
         os.chmod(locked, 0o644)
 
 

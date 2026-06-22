@@ -118,11 +118,10 @@ def test_title_truthy_present():
     assert "Refactoring plan" in out
 
 
-def test_title_empty_no_line():
-    # C4b
-    out = render(state(streaming=False, title=""))
-    assert "title" not in out.lower() or "Refactoring plan" not in out
-    assert "" == "" and "title=" not in out
+def test_c4_empty_title_no_line():
+    # C4(b) — empty title produces no title line
+    out = render(state(title=""))
+    assert 'title="' not in out
 
 
 def test_title_absent_no_line():
@@ -664,19 +663,17 @@ def test_occluded_absent_when_false():
 # --- C47: OCCLUDED requires known count ---
 
 
-def test_occluded_requires_known_count():
-    # C47
+def test_c47_occluded_requires_count():
+    # C47/C28 — occluded indicator requires a count; with count=None nothing shows
     out = render(
         state(
-            streaming=False,
             input="filter",
-            command_menu={"selected": "add-context", "count": None, "occluded": True},
+            command_menu={"selected": "open-file", "count": None, "occluded": True},
         )
     )
-    menu_ln = next(ln for ln in lines(out) if "add-context" in ln)
-    assert "occluded" not in menu_ln.lower()
-    # no count number surfaced
-    assert not any(ch.isdigit() for ch in menu_ln)
+    assert "open-file" in out
+    assert "occluded" not in out.lower()
+    assert "None" not in out
 
 
 # --- C30: detail view surfaced ---
@@ -1179,3 +1176,46 @@ def test_context_missing_splits_placeholder():
     detail_line = next(ln for ln in lines(out) if "context" in ln)
     assert detail_line.strip() != ""
     assert "None" not in detail_line
+
+
+# C50 — a weight of zero is a real weight and is surfaced
+def test_c50_zero_weight_is_surfaced():
+    out = render(state(nodes=[node(index=0, weight_pct=0)], selected_index=0))
+    line = node_line(out, 0)
+    assert "w=0%" in line
+
+
+# C51 — a detail node index of zero is a bound node, not the unbound placeholder
+def test_c51_detail_node_index_zero_is_bound():
+    out = render(
+        state(detail={"view": "diff", "node_index": 0, "pane_mode": "none", "locked": False})
+    )
+    line = detail_line(out, "diff")
+    assert "[0]" in line
+
+
+# C52 — a selected index of zero is a real selection
+def test_c52_selected_index_zero_is_real_selection():
+    out = render(state(nodes=[node(index=0)], selected_index=0))
+    header = next(line for line in lines(out) if line.startswith("nodes="))
+    assert "selected=[0]" in header
+
+
+# C53 — an unrecognized pane mode surfaces its own value and neither split field
+def test_c53_unknown_pane_mode_surfaces_value_no_split_fields():
+    out = render(
+        state(
+            detail={
+                "view": "diff",
+                "node_index": 1,
+                "pane_mode": "split",
+                "highlighted_split": "HSPLIT-zzz",
+                "maximized_split": "MSPLIT-zzz",
+                "locked": False,
+            }
+        )
+    )
+    line = detail_line(out, "diff")
+    assert "split" in line
+    assert "HSPLIT-zzz" not in out
+    assert "MSPLIT-zzz" not in out

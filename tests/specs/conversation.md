@@ -368,6 +368,14 @@ and never the empty assistant node being streamed into. [kills `stream` 6; stren
 **C56. stream uses the current model.** The model the core hands to `provider.stream` is
 the core's current `model`. [kills `stream` 9]
 
+**C57. include_files with an empty path list appends nothing and returns an empty list.**
+*(Including zero files is a content no-op — there are no paths to import, so no `context`
+node is created.)* Given a fresh core → `include_files([])` returns `[]`, and afterward
+`self.nodes` contains no `context` node added by the call (the node count is unchanged from
+before the call). *(Whether an empty include materializes a `conversation_id` is left
+unspecified — adjudication note: the firm oracle is "no context node, returns `[]`"; the
+zero-node-conversation question is governed by storage C18 and not re-litigated here.)*
+
 ## Mutation testing (mutmut)
 Gate run scoped with `scripts/mutate.sh run 'ctx.core.conversation.*' 'ctx.core.provider.*'`.
 

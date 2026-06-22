@@ -1,5 +1,5 @@
-# Fast local back pressure. Install once with: uv run pre-commit install
-# These mirror the cheap half of scripts/check.sh (the full gate also runs pytest).
+# Local back pressure on every commit. Install once with: uv run pre-commit install
+# This mirrors the full scripts/check.sh gate: ruff (autofix) + mypy + pytest.
 repos:
   - repo: local
     hooks:
@@ -15,5 +15,14 @@ repos:
         entry: uv run mypy .
         language: system
         types: [python]
+        require_serial: true
+        pass_filenames: false
+      - id: pytest
+        name: pytest (test suite)
+        entry: uv run pytest -q
+        language: system
+        # always_run so the suite gates EVERY commit, even one that touches no
+        # Python files (docs, config, etc.) — the full gate is never skipped.
+        always_run: true
         require_serial: true
         pass_filenames: false

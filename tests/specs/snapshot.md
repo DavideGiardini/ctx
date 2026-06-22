@@ -261,6 +261,37 @@ missing an optional field is a case render() must tolerate, not crash on.
 - Expect: render does not raise; the detail line surfaces the neutral "no visible
   splits" placeholder (same as an empty list, per C44).
 
+### Falsy-but-valid values and unrecognized modes
+
+These pin the boundary between "value absent" (segment omitted / neutral placeholder)
+and "value present but falsy" (the real value `0`/`""` is surfaced). Intent: a numeric
+zero is a *measured* value, not a synonym for "missing" — only an absent key is missing.
+
+**C50. A weight of zero is a real weight and is surfaced.**
+- Given: a node with `weight_pct=0` and no `source_path`.
+- Expect: the node line contains the weight suffix `w=0%`. Zero is a meaningful measured
+  weight; only an ABSENT `weight_pct` omits the suffix (per C16). (Distinguishes
+  "value present" from "value truthy".)
+
+**C51. A detail node index of zero is a bound node, not the unbound placeholder.**
+- Given: `detail` active with `node_index=0`, otherwise valid.
+- Expect: the detail line surfaces the bound index `0` (e.g. contains `[0]`) — NOT the
+  neutral "no node" placeholder of C32. Index 0 is a valid binding; only `node_index=None`
+  (C32) is unbound.
+
+**C52. A selected index of zero is a real selection.**
+- Given: `selected_index=0` with at least one node.
+- Expect: the nodes-header line contains `selected=[0]`. Index 0 is a valid selection;
+  only an absent/`None` `selected_index` (C10) omits the segment.
+
+**C53. An unrecognized pane mode surfaces its own value and neither split field.**
+- Given: `detail` active with `pane_mode` set to a value that is none of
+  `browse`/`maximized`/`none` (e.g. `"split"`), with both `highlighted_split` and
+  `maximized_split` set to recognizable values.
+- Expect: the detail line surfaces the pane-mode value (`split`) and contains NEITHER the
+  highlighted-split value (C33) NOR the maximized-split value (C36) — those qualifier
+  fields are surfaced only in their own modes. (Generalizes C35/C38 to an unknown mode.)
+
 ## Adjudication notes
 
 - **mode/model required — non-requirement.** A state missing `mode` or `model` is "never

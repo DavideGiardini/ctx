@@ -23,6 +23,7 @@ with `reason="BUG: <summary> — contract <Cn>; see tests/specs/FOUND-BUGS.md"`.
 | ctx/core/storage.py | C24 | test_c24_same_instant_saves_ordered_most_recent_first | Two saves at the same instant still order most-recently-saved first in `list()`/`get_last()` | ordered by `updated_at` alone (no tiebreak) → same-instant order is undefined |
 | ctx/core/config.py | C17 | test_c17_nested_mutation_does_not_persist | Mutating a nested value in the returned config must not affect the next `get_config()` call (deep isolation) | `get_config()` returns a shallow copy of the defaults, so a nested mutation corrupts the process-global defaults seen by the next call |
 | ctx/core/config.py | C18 | test_c18_wrong_typed_sections_do_not_raise | A wrong-type but valid-JSON section (e.g. `{"colors": "blue"}`) falls back to defaults without raising | `get_config()` raises an uncaught `TypeError` at `config.py:37` — the merge spreads the value as a mapping and the `except` only catches `JSONDecodeError`/`OSError` |
+| ctx/core/config.py | C19 | test_c19_non_object_root_does_not_raise | A valid-JSON but non-object root (e.g. `5` or `[1,2]`) falls back to defaults without raising | `get_config()` raises an uncaught `TypeError: 'int' object is not iterable` at `config.py:35` (`merged.update(user_config)`) — the root-level sibling of C18; the `except` only catches `JSONDecodeError`/`OSError` |
 | ctx/core/workspace.py | C24 | test_c24_read_file_sibling_prefix_dir_raises_valueerror | `read_file("../context-extra/secret.txt")` — a sibling dir merely sharing a name *prefix* with `context` is out of bounds → `ValueError` | The guard is `str(target).startswith(str(context_dir.resolve()))` (no separator); `.../.ctx/context-extra/secret.txt` matches the prefix `.../.ctx/context`, so the guard passes and the **out-of-sandbox file is read** (returns its contents, no raise) — a sandbox escape |
 | ctx/core/conversation.py | C27 | test_resume_unknown_id_leaves_current_state_unchanged | Resuming an unknown id leaves the in-progress conversation intact (`nodes`/`conversation_id`/`conversation_title` unchanged); only `[]` is returned | `resume_conversation` does `self.nodes = storage.load(id)` (== `[]` for an unknown id) *before* the early `return []`, wiping the current `nodes` to `[]` while `conversation_id`/`conversation_title` keep their old values — a half-destroyed in-memory state |
 
@@ -51,6 +52,10 @@ _(move rows here when the code is fixed and the xfail marker removed — note th
   merge assumes each section is a mapping, but the `except` only catches
   `JSONDecodeError`/`OSError`. Fix hint: guard each section's type before spreading, or
   widen the fallback. See `config.md`.
+  C19: the root-level sibling of C18 — a valid-JSON but non-object root (`5`, `[1,2]`)
+  crashes at `merged.update(user_config)` (`config.py:35`) because `update` requires a
+  mapping. Same `except` gap. Fix hint: guard the root's type before merging (or widen the
+  fallback). See `config.md`.
 - **`ctx/core/workspace.py`** — one violation (C24); quarantined `xfail(strict=True)`.
   The `read_file` sandbox guard is a string-prefix test
   (`str(target).startswith(str(context_dir.resolve()))`) with no path-separator boundary,

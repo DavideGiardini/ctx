@@ -105,6 +105,29 @@ Given `[context source_path="empty.txt", user "go"]`, loader `{"empty.txt":""}` 
 raise; a single `role=="user"` dict whose content contains `"go"`, `"empty.txt"`, and
 `"context_import"`.
 
+**C20. A context node whose loader raises `ValueError` is skipped; the rest survives.**
+*(The injected loader is the workspace's sandboxed reader, which raises `ValueError` when a
+path escapes the context directory — a distinct failure from a missing file (C14, `OSError`).
+A rejected/escaping import must be skipped exactly like a failed read, not crash the build.)*
+Given `[context source_path="../escape.txt", user "still here"]` where loading
+"../escape.txt" raises `ValueError` → build does not raise; output contains a `role=="user"`
+dict containing `"still here"`; the rejected node contributes no `"context_import"` text.
+
+**C21. A context node is imported as USER material regardless of its own declared role.**
+*(adjudicated A5 extended: a "context" node's `role` field is irrelevant — imported file
+content is always user-side material. A context node declared with `role="assistant"` must
+NOT become an assistant message.)*
+Given `[context source_path="a.txt" with role="assistant", user "q"]`,
+loader `{"a.txt":"A BODY"}` → no assistant dict contains `"A BODY"`; `"A BODY"` appears in a
+`role=="user"` dict (merged with `"q"`, per C7).
+
+**C22. A context node whose `source_path` is the empty string is skipped.**
+*(An empty `source_path` is "no source", indistinguishable from an absent one (C16) — there
+is nothing to import.)*
+Given `[context with meta {"source_path": ""}, user "after"]` → build does not raise; output
+contains a `role=="user"` dict with content `"after"`; nothing is marked as imported for the
+empty-source node. (Distinguishes "no source" from `source_path is None`.)
+
 ## Adjudication notes
 - **A1 (wrapper token):** marker is `context_import`, source path is an attribute. Assert
   substrings, never byte-exact format.

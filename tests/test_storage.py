@@ -363,3 +363,78 @@ def test_c24_same_instant_saves_ordered_most_recent_first(repo, make_node, monke
     assert repo.get_last() == "b"
     ids = [d["id"] for d in repo.list()]
     assert ids.index("b") < ids.index("a")
+
+
+# C25. Re-saving one conversation does not disturb another's nodes.
+def test_resave_does_not_disturb_other_conversation(repo, make_node):
+    nodes_a = [
+        make_node(role="user", content="conv-a first", conversation_id="conv-a"),
+        make_node(role="assistant", content="conv-a second", conversation_id="conv-a"),
+    ]
+    nodes_b = [
+        make_node(role="user", content="conv-b first", conversation_id="conv-b"),
+        make_node(role="assistant", content="conv-b second", conversation_id="conv-b"),
+    ]
+    repo.save("conv-a", "Title A", nodes_a)
+    repo.save("conv-b", "Title B", nodes_b)
+
+    nodes_a2 = [
+        make_node(role="user", content="conv-a rewritten one", conversation_id="conv-a"),
+        make_node(role="assistant", content="conv-a rewritten two", conversation_id="conv-a"),
+        make_node(role="user", content="conv-a rewritten three", conversation_id="conv-a"),
+    ]
+    repo.save("conv-a", "Title A", nodes_a2)
+
+    assert repo.load("conv-b") == nodes_b
+    assert repo.load("conv-a") == nodes_a2
+
+
+# C26. A single re-save updates title, recency, and nodes together.
+def test_resave_updates_title_recency_and_nodes(repo, make_node):
+    nodes_n1 = [
+        make_node(role="user", content="x version one alpha", conversation_id="conv-x"),
+        make_node(role="assistant", content="x version one beta", conversation_id="conv-x"),
+    ]
+    repo.save("conv-x", "T1", nodes_n1)
+
+    nodes_y = [
+        make_node(role="user", content="y content", conversation_id="conv-y"),
+    ]
+    repo.save("conv-y", "Y title", nodes_y)
+
+    nodes_n2 = [
+        make_node(role="user", content="x version two gamma", conversation_id="conv-x"),
+        make_node(role="assistant", content="x version two delta", conversation_id="conv-x"),
+        make_node(role="user", content="x version two epsilon", conversation_id="conv-x"),
+    ]
+    repo.save("conv-x", "T2", nodes_n2)
+
+    listing = repo.list()
+    x_entries = [entry for entry in listing if entry["id"] == "conv-x"]
+    assert len(x_entries) == 1
+    assert x_entries[0]["title"] == "T2"
+
+    assert repo.get_last() == "conv-x"
+    assert listing[0]["id"] == "conv-x"
+
+    assert repo.load("conv-x") == nodes_n2
+
+
+# C27. An empty-string title is stored and returned verbatim.
+def test_empty_title_stored_verbatim(repo, make_node):
+    nodes = [
+        make_node(role="user", content="empty title conversation", conversation_id="conv-empty"),
+    ]
+    repo.save("conv-empty", "", nodes)
+
+    listing = repo.list()
+    entries = [entry for entry in listing if entry["id"] == "conv-empty"]
+    assert len(entries) == 1
+    assert entries[0]["title"] == ""
+
+    repo.save("conv-empty", "Now named", nodes)
+
+    listing = repo.list()
+    entries = [entry for entry in listing if entry["id"] == "conv-empty"]
+    assert len(entries) == 1
+    assert entries[0]["title"] == "Now named"

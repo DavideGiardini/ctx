@@ -266,3 +266,31 @@ def test_c18_wrong_typed_sections_do_not_raise(config_file):
     config_file.write_json({"ui": 42})
     result = get_config()
     assert isinstance(result, dict)
+
+
+# C19
+@pytest.mark.xfail(
+    reason=(
+        "BUG: non-object JSON root crashes get_config() instead of falling back "
+        "to defaults — contract C19; see tests/specs/FOUND-BUGS.md"
+    ),
+    strict=True,
+)
+def test_c19_non_object_root_does_not_raise(config_file):
+    defaults = _baseline(config_file)
+    config_file.write_json(5)
+    result = get_config()
+    assert isinstance(result, dict)
+    assert result == defaults
+
+
+# C20
+def test_c20_auto_truncation_value_passed_through(config_file):
+    defaults = _baseline(config_file)
+    config_file.write_json({"ui": {"truncation_lines": {"assistant": "auto"}}})
+    result = get_config()
+    assert result["ui"]["truncation_lines"]["assistant"] == "auto"
+    for k in defaults["ui"]["truncation_lines"]:
+        if k == "assistant":
+            continue
+        assert result["ui"]["truncation_lines"][k] == defaults["ui"]["truncation_lines"][k]

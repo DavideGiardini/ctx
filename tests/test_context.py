@@ -342,3 +342,77 @@ def test_c19_empty_file_body_still_imports(make_node, stub_loader):
     assert "go" in content
     assert "empty.txt" in content
     assert "context_import" in content
+
+
+# C20. A context node whose loader raises ValueError is skipped; the rest survives.
+def test_context_node_loader_valueerror_is_skipped(make_node):
+    def loader(path):
+        raise ValueError("escapes sandbox")
+
+    nodes = [
+        make_node(
+            role="context",
+            node_type="context",
+            content="Included: ../escape.txt",
+            meta={"source_path": "../escape.txt"},
+        ),
+        make_node(role="user", content="still here"),
+    ]
+
+    result = build_context(nodes, loader)
+
+    # The skipped context node must not raise and must not surface its import.
+    assert all("context_import" not in msg["content"] for msg in result)
+    # The surviving user message must still be present.
+    assert any(
+        msg["role"] == "user" and "still here" in msg["content"] for msg in result
+    )
+
+
+# C21. A context node is imported as USER material regardless of its own declared role.
+def test_context_node_imported_as_user_regardless_of_role(make_node, stub_loader):
+    loader = stub_loader({"a.txt": "A BODY"})
+
+    nodes = [
+        make_node(
+            role="assistant",
+            node_type="context",
+            meta={"source_path": "a.txt"},
+        ),
+        make_node(role="user", content="q"),
+    ]
+
+    result = build_context(nodes, loader)
+
+    # The imported file body must never land in an assistant message.
+    assert not any(
+        msg["role"] == "assistant" and "A BODY" in msg["content"] for msg in result
+    )
+    # The imported file body must appear in a user message.
+    assert any(
+        msg["role"] == "user" and "A BODY" in msg["content"] for msg in result
+    )
+
+
+# C22. A context node whose source_path is the empty string is skipped.
+def test_context_node_empty_source_path_is_skipped(make_node, stub_loader):
+    # A loader that would raise FileNotFoundError if invoked on "".
+    loader = stub_loader({})
+
+    nodes = [
+        make_node(
+            role="context",
+            node_type="context",
+            meta={"source_path": ""},
+        ),
+        make_node(role="user", content="after"),
+    ]
+
+    result = build_context(nodes, loader)
+
+    # Must not raise (asserted implicitly by reaching here) and must not import.
+    assert all("context_import" not in msg["content"] for msg in result)
+    # The trailing user message must survive.
+    assert any(
+        msg["role"] == "user" and "after" in msg["content"] for msg in result
+    )

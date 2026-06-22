@@ -167,6 +167,27 @@ via `datetime.now(UTC)`, where `datetime` is imported into module `ctx.core.stor
 monkeypatch `ctx.core.storage.datetime` so `now(UTC)` returns a fixed instant for both
 saves. This is the dependency seam — the *expected value* comes from intent, not the code.)
 
+### Cross-conversation isolation & combined update
+
+**C25. Re-saving one conversation does not disturb another's nodes.**
+*(The node-replacement on save (C6) is scoped to the saved conversation; a save must never
+delete or alter nodes belonging to a different conversation.)*
+Given `"conv-a"` (nodes A) and `"conv-b"` (nodes B) both saved, then `"conv-a"` re-saved
+with a new node set A2 → `load("conv-b")` still returns exactly nodes B (unchanged), and
+`load("conv-a")` returns exactly A2. (Guards against an unscoped node-delete.)
+
+**C26. A single re-save updates title, recency, and nodes together.**
+Given `"conv-x"` saved with title `"T1"` and nodes N1, then re-saved with title `"T2"` and a
+different node set N2 → afterward, in one consistent state: `list()` contains exactly one
+`"conv-x"` dict whose `title=="T2"`; `"conv-x"` is at the head of `list()` / is `get_last()`
+(most-recent); and `load("conv-x")` returns exactly N2 (N1 fully superseded). (The three
+effects of an update co-occur; a mutant updating only one is caught.)
+
+**C27. An empty-string title is stored and returned verbatim.** *(resolves A3 observably.)*
+Given a conversation saved with `title==""` and ≥1 persistable node → `list()` contains that
+conversation with `title==""` (the empty string, not a substitute), and re-saving it later
+with a non-empty title overwrites it to that value.
+
 ## Adjudication notes
 - **A3 (empty/duplicate title):** `title` is a `str`; empty string is valid and stored
   verbatim; duplicate titles across conversations are allowed. Not separately asserted —
