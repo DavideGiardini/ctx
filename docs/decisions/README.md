@@ -28,7 +28,16 @@ don't rewrite.
 | ADR | Title | Status |
 |-----|-------|--------|
 | [0001](0001-extract-conversation-core.md) | Extract ConversationCore from ChatApp | Accepted |
-| [0002](0002-provider-protocol.md) | Deepen provider.py with a Provider protocol | Accepted |
+| [0002](0002-provider-protocol.md) | Deepen provider.py with a Provider protocol | Superseded by 0010 |
 | [0003](0003-conversation-repository.md) | Deepen storage.py into a ConversationRepository | Accepted |
 | [0004](0004-pure-context-builder.md) | Make context.py pure via an injected file loader | Accepted |
 | [0005](0005-inject-workspace.md) | Inject Workspace as a class | Accepted |
+| [0006](0006-conversation-core-followups.md) | ConversationCore observations | Notes |
+| [0007](0007-context-builder-observations.md) | context.py (build_context) observations | Notes |
+| [0008](0008-workspace-observations.md) | workspace.py observations | Notes |
+| [0009](0009-imports-live-not-snapshots.md) | File imports are live, not snapshots (§3.3 gap) | Notes |
+| [0010](0010-connectivity-on-provider-seam.md) | check_connectivity crosses the Provider seam | Accepted |
+| [0011](0011-provider-observations.md) | provider.py observations | Notes |
+| [0012](0012-agent-tooling-should-not-ship.md) | agent/ is dev-only tooling but currently ships | Notes |
+| [0013](0013-storage-observations.md) | storage.py observations | Notes |
+| [0014](0014-wiring-observations.md) | System-level / wiring observations | Notes |

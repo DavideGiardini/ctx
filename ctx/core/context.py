@@ -9,13 +9,12 @@ def build_context(
 ) -> list[dict]:
     """Convert a list of Nodes into LLM message dicts.
 
-    Context nodes (node_type == "context") are expanded in-place: their
-    referenced file content is wrapped in <context_import> XML and merged
-    into the next user message, or emitted as a standalone user message
-    if no user message follows.
+    Context nodes (node_type == "context") load their file, wrap it in
+    <context_import> XML, and count as user-role content. Adjacent user-role
+    content is coalesced into one user message; assistant nodes are appended
+    as their own; other roles (e.g. system) are skipped.
 
-    The ``load_file`` callable is injected so this function remains pure
-    and testable without filesystem I/O.
+    ``load_file`` is injected so this stays pure and testable without I/O.
     """
     messages: list[dict] = []
 

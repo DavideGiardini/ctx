@@ -1,6 +1,8 @@
 # 0002 — Deepen provider.py with a Provider protocol
 
-**Status:** Accepted
+**Status:** Superseded by [0010](0010-connectivity-on-provider-seam.md)
+(the `check_connectivity` decision below no longer holds — it is now a protocol
+method, not a module-level function)
 
 ## Context
 
