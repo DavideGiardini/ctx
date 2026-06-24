@@ -166,20 +166,21 @@ All other items (C1–C16, C20) pass against the current implementation.
   valid/invalid sections within one file. Revisit only if a real need appears.
 - **A7 (unreadable simulation):** resolved — point `CONFIG_PATH` at a directory.
 - **A9 (non-object JSON root):** resolved as IN contract — must not crash (C19), same firm
-  oracle as C18. Currently a bug. Recovered structure intentionally not pinned.
+  oracle as C18. Fixed (non-dict root falls back to defaults). Recovered structure
+  intentionally not pinned.
 - **A8 (baseline snapshot):** test-authoring note — deep-snapshot `D` before the
   mutation-isolation tests run.
 
 ## Mutation testing (mutmut)
 **43 mutants, 43 killed, 0 survivors** (focused run:
 `scripts/mutate.sh run 'ctx.core.config.*'`). No equivalent-mutant exceptions to
-document. The two quarantined bugs (C17/C18) are `xfail(strict=True)`, which keeps the
-baseline green so mutmut can run.
+document. (C17/C18/C19 were formerly quarantined `xfail(strict=True)`; they are now fixed
+and the markers removed — the tests pass normally.)
 
 **Test-isolation note:** `get_config()` shares the module-level defaults dict
 (`ctx.core.config._DEFAULTS`) by reference, so a test that mutates a returned config
 leaks into that global. Under mutmut (which runs the suite multiple times in one
 process) this caused C17's strict-xfail to XPASS on a later pass and abort the run. An
-autouse fixture (`_isolate_config_defaults`) now deep-copies and restores `_DEFAULTS`
-around each test, guaranteeing per-test isolation. Once the C17 deep-copy fix lands, the
-underlying leak disappears too.
+autouse fixture (`_isolate_config_defaults`) deep-copies and restores `_DEFAULTS`
+around each test, guaranteeing per-test isolation. With the C17 deep-copy fix now landed,
+the underlying leak is gone too (the fixture remains as a belt-and-braces guard).

@@ -16,16 +16,7 @@ with `reason="BUG: <summary> — contract <Cn>; see tests/specs/FOUND-BUGS.md"`.
 
 ## Open
 
-| Module | Contract | xfail test | Expected (per contract) | Actual (current code) |
-|--------|----------|------------|-------------------------|-----------------------|
-| ctx/core/storage.py | C18 | test_c18_zero_persisted_empty_list_not_listed | A save with `nodes==[]` (no persisted nodes) leaves no conversation in `list()`/`get_last()` | `save()` always inserts the conversation row, so it appears in `list()`/`get_last()` |
-| ctx/core/storage.py | C18 | test_c18_zero_persisted_all_filtered_not_listed | A save whose nodes all have `conversation_id==""` (all filtered) leaves no conversation in `list()`/`get_last()` | same: the conversation row is inserted regardless of whether any node persists |
-| ctx/core/storage.py | C24 | test_c24_same_instant_saves_ordered_most_recent_first | Two saves at the same instant still order most-recently-saved first in `list()`/`get_last()` | ordered by `updated_at` alone (no tiebreak) → same-instant order is undefined |
-| ctx/core/config.py | C17 | test_c17_nested_mutation_does_not_persist | Mutating a nested value in the returned config must not affect the next `get_config()` call (deep isolation) | `get_config()` returns a shallow copy of the defaults, so a nested mutation corrupts the process-global defaults seen by the next call |
-| ctx/core/config.py | C18 | test_c18_wrong_typed_sections_do_not_raise | A wrong-type but valid-JSON section (e.g. `{"colors": "blue"}`) falls back to defaults without raising | `get_config()` raises an uncaught `TypeError` at `config.py:37` — the merge spreads the value as a mapping and the `except` only catches `JSONDecodeError`/`OSError` |
-| ctx/core/config.py | C19 | test_c19_non_object_root_does_not_raise | A valid-JSON but non-object root (e.g. `5` or `[1,2]`) falls back to defaults without raising | `get_config()` raises an uncaught `TypeError: 'int' object is not iterable` at `config.py:35` (`merged.update(user_config)`) — the root-level sibling of C18; the `except` only catches `JSONDecodeError`/`OSError` |
-| ctx/core/workspace.py | C24 | test_c24_read_file_sibling_prefix_dir_raises_valueerror | `read_file("../context-extra/secret.txt")` — a sibling dir merely sharing a name *prefix* with `context` is out of bounds → `ValueError` | The guard is `str(target).startswith(str(context_dir.resolve()))` (no separator); `.../.ctx/context-extra/secret.txt` matches the prefix `.../.ctx/context`, so the guard passes and the **out-of-sandbox file is read** (returns its contents, no raise) — a sandbox escape |
-| ctx/core/conversation.py | C27 | test_resume_unknown_id_leaves_current_state_unchanged | Resuming an unknown id leaves the in-progress conversation intact (`nodes`/`conversation_id`/`conversation_title` unchanged); only `[]` is returned | `resume_conversation` does `self.nodes = storage.load(id)` (== `[]` for an unknown id) *before* the early `return []`, wiping the current `nodes` to `[]` while `conversation_id`/`conversation_title` keep their old values — a half-destroyed in-memory state |
+_(none — all confirmed bugs below have been fixed and their xfail markers removed)_
 
 <!--
 Example row:
@@ -33,45 +24,47 @@ Example row:
 -->
 
 ## Fixed
-_(move rows here when the code is fixed and the xfail marker removed — note the commit/PR)_
+_(rows move here when the code is fixed and the xfail marker removed)_
+
+Fixed on branch `develop` (test suite green, all 8 quarantine markers removed):
+
+| Module | Contract | (formerly xfail) test | Fix |
+|--------|----------|------------|-----|
+| ctx/core/storage.py | C18 | test_c18_zero_persisted_empty_list_not_listed | `save()` no longer inserts a row for a brand-new conversation with no persistable nodes (only `INSERT` when `persistable`); an existing conversation still updates/clears (C7) |
+| ctx/core/storage.py | C18 | test_c18_zero_persisted_all_filtered_not_listed | same fix — `persistable = [n for n in nodes if n.conversation_id]` gates the `INSERT` |
+| ctx/core/storage.py | C24 | test_c24_same_instant_saves_ordered_most_recent_first | `list()`/`get_last()` order by `updated_at DESC, rowid DESC` — rowid is the monotonic tiebreak |
+| ctx/core/config.py | C17 | test_c17_nested_mutation_does_not_persist | `get_config()` returns `copy.deepcopy(_DEFAULTS)` on every path → deep isolation |
+| ctx/core/config.py | C18 | test_c18_wrong_typed_sections_do_not_raise | each section re-merged only when `isinstance(value, dict)`; wrong-typed section falls back to a deepcopy of its default |
+| ctx/core/config.py | C19 | test_c19_non_object_root_does_not_raise | non-dict root short-circuits to the deepcopied defaults before `update()` |
+| ctx/core/workspace.py | C24 | test_c24_read_file_sibling_prefix_dir_raises_valueerror | guard is now `target.is_relative_to(self._context.resolve())` (resolved-path containment) instead of string `startswith` |
+| ctx/core/conversation.py | C27 | test_resume_unknown_id_leaves_current_state_unchanged | `resume_conversation` loads into a local and only assigns `self.nodes`/id/title once the load is non-empty |
 
 ---
 
 ### Notes per module
 - **`ctx/core/context.py`** — no contract violations found (19/19 green; see `context.md`).
-- **`ctx/core/storage.py`** — two violations (C18, C24); both quarantined `xfail(strict=True)`.
-  C18: a conversation with zero persisted nodes is a first-class entity it shouldn't be —
-  it leaks into `list()`/`get_last()`. C24: recency ordering lacks a tiebreak, so
-  same-instant saves are unordered. Fix hint for C24: add a monotonic secondary sort
-  (sequence column or `rowid`). See `storage.md`.
-- **`ctx/core/config.py`** — two violations (C17, C18); both quarantined `xfail(strict=True)`.
-  C17: `get_config()` shallow-copies the defaults, so a caller mutating a nested value
-  (`result["colors"]["user"] = ...`) poisons the module-level defaults for the rest of the
-  process. Fix hint: return a `copy.deepcopy` (and the no-file path must deep-copy too).
-  C18: a misshapen-but-parseable config crashes instead of falling back — the per-section
-  merge assumes each section is a mapping, but the `except` only catches
-  `JSONDecodeError`/`OSError`. Fix hint: guard each section's type before spreading, or
-  widen the fallback. See `config.md`.
-  C19: the root-level sibling of C18 — a valid-JSON but non-object root (`5`, `[1,2]`)
-  crashes at `merged.update(user_config)` (`config.py:35`) because `update` requires a
-  mapping. Same `except` gap. Fix hint: guard the root's type before merging (or widen the
-  fallback). See `config.md`.
-- **`ctx/core/workspace.py`** — one violation (C24); quarantined `xfail(strict=True)`.
-  The `read_file` sandbox guard is a string-prefix test
-  (`str(target).startswith(str(context_dir.resolve()))`) with no path-separator boundary,
-  so a sibling directory whose name *starts with* the context dir's name (e.g.
-  `.ctx/context-extra/` next to `.ctx/context/`) passes the check and its files are read —
-  a path-traversal/sandbox escape. The blind contract pinned this as C24 (security-critical).
-  Fix hint: compare resolved paths with `Path.is_relative_to(context_dir.resolve())` (or
-  `os.path.commonpath`), not string `startswith`. Note: the other security items pass —
-  C25 (symlink whose resolved target escapes) is correctly rejected because `.resolve()`
-  follows the link before the check. See `workspace.md`.
-- **`ctx/core/conversation.py`** — one violation (C27); quarantined `xfail(strict=True)`.
-  `resume_conversation(id)` assigns `self.nodes = storage.load(id)` *before* the
-  `if not self.nodes: return []` guard, so resuming an UNKNOWN id (load returns `[]`) wipes
-  the current in-memory `nodes` to `[]` while leaving `conversation_id`/`conversation_title`
-  set — a half-destroyed state that can silently discard an in-progress conversation.
-  Adjudicated intent (the user chose "preserve current state"): an unknown-id resume must
-  leave `nodes`/`id`/`title`/`model` untouched and only return `[]`. Fix hint: load into a
-  local, and only assign `self.nodes`/adopt the id once the load is non-empty. See
+- **`ctx/core/storage.py`** — two violations (C18, C24); **both fixed**.
+  C18: a conversation with zero persisted nodes used to leak into `list()`/`get_last()`;
+  `save()` now only inserts a row for a brand-new conversation when at least one node
+  persists (an existing conversation still updates/clears — see C7). C24: recency ordering
+  now has a monotonic tiebreak — `ORDER BY updated_at DESC, rowid DESC`. See `storage.md`.
+- **`ctx/core/config.py`** — three violations (C17, C18, C19); **all fixed**.
+  C17: `get_config()` now returns `copy.deepcopy(_DEFAULTS)` on every path, so a caller
+  mutating a nested value can't poison the module-level defaults. C18: each known section is
+  re-merged only when the user value `isinstance(value, dict)`, otherwise it falls back to a
+  deepcopy of that section's default, so a misshapen-but-parseable section no longer crashes.
+  C19: a valid-JSON but non-object root (`5`, `[1,2]`) short-circuits to the deepcopied
+  defaults before `update()`. See `config.md`.
+- **`ctx/core/workspace.py`** — one violation (C24); **fixed**.
+  The `read_file` sandbox guard is now a resolved-path containment check
+  (`target.is_relative_to(self._context.resolve())`) instead of a string-prefix test, so a
+  sibling directory whose name *starts with* the context dir's name (e.g. `.ctx/context-extra/`
+  next to `.ctx/context/`) is correctly rejected. The other security items still pass — C23
+  (absolute path) and C25 (escaping symlink) raise because `.resolve()` precedes the check,
+  and C27 (`read_file("")` → the context dir itself) still raises an OSError-family error.
+  See `workspace.md`.
+- **`ctx/core/conversation.py`** — one violation (C27); **fixed**.
+  `resume_conversation(id)` now loads into a local and only assigns `self.nodes`/`id`/`title`
+  once the load is non-empty, so resuming an UNKNOWN id leaves the in-progress conversation
+  untouched and returns `[]` (adjudicated intent: preserve current state). See
   `conversation.md`.

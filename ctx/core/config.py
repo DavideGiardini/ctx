@@ -1,3 +1,4 @@
+import copy
 import json
 from pathlib import Path
 
@@ -27,22 +28,40 @@ _DEFAULTS: dict[str, dict] = {
 
 
 def get_config() -> dict:
-    if CONFIG_PATH.exists():
-        try:
-            with open(CONFIG_PATH) as f:
-                user_config = json.load(f)
-            merged = _DEFAULTS.copy()
-            merged.update(user_config)
-            if "colors" in user_config:
-                merged["colors"] = {**_DEFAULTS["colors"], **user_config["colors"]}
-            if "ui" in user_config:
-                merged["ui"] = {**_DEFAULTS["ui"], **user_config["ui"]}
-                if "truncation_lines" in user_config["ui"]:
-                    merged["ui"]["truncation_lines"] = {
-                        **_DEFAULTS["ui"]["truncation_lines"],
-                        **user_config["ui"]["truncation_lines"],
-                    }
-            return merged
-        except (json.JSONDecodeError, OSError):
-            pass
-    return _DEFAULTS.copy()
+    merged = copy.deepcopy(_DEFAULTS)
+    if not CONFIG_PATH.exists():
+        return merged
+    try:
+        with open(CONFIG_PATH) as f:
+            user_config = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return merged
+
+    # A valid-JSON but non-object root (e.g. 5 or [1, 2]) cannot be merged.
+    if not isinstance(user_config, dict):
+        return merged
+
+    merged.update(user_config)
+
+    # Re-merge known sections, but only when the user value is itself a mapping;
+    # a wrong-typed section (e.g. {"colors": "blue"}) falls back to defaults.
+    if isinstance(user_config.get("colors"), dict):
+        merged["colors"] = {**_DEFAULTS["colors"], **user_config["colors"]}
+    else:
+        merged["colors"] = copy.deepcopy(_DEFAULTS["colors"])
+
+    if isinstance(user_config.get("ui"), dict):
+        merged["ui"] = {**_DEFAULTS["ui"], **user_config["ui"]}
+        if isinstance(user_config["ui"].get("truncation_lines"), dict):
+            merged["ui"]["truncation_lines"] = {
+                **_DEFAULTS["ui"]["truncation_lines"],
+                **user_config["ui"]["truncation_lines"],
+            }
+        else:
+            merged["ui"]["truncation_lines"] = copy.deepcopy(
+                _DEFAULTS["ui"]["truncation_lines"]
+            )
+    else:
+        merged["ui"] = copy.deepcopy(_DEFAULTS["ui"])
+
+    return merged

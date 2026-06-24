@@ -257,12 +257,6 @@ def test_c23_read_file_absolute_path_raises_valueerror(workspace):
         workspace.read_file("/etc/passwd")
 
 
-@pytest.mark.xfail(
-    reason="BUG: read_file permits reading an out-of-bounds sibling dir whose name "
-    "shares a prefix with 'context' (naive startswith containment guard) — "
-    "contract C24; see tests/specs/FOUND-BUGS.md",
-    strict=True,
-)
 def test_c24_read_file_sibling_prefix_dir_raises_valueerror(workspace):
     # C24: sibling dir sharing a name prefix (context-extra) is out of bounds -> ValueError.
     sibling = workspace.context_dir.parent / "context-extra"

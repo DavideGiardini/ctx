@@ -4,15 +4,12 @@ Each test cites its adjudicated contract item (# C<n>). Expected values trace to
 the contract (the oracle), never to the implementation. The repository is exercised
 purely through its public interface: init/save/load/list/get_last.
 
-Three tests are marked strict-xfail because they assert intended behavior that the
-current implementation violates (confirmed deferred bugs, quarantined not fixed):
-  - C18 (both: nodes==[] and all conversation_id=="") and C24.
-See tests/specs/FOUND-BUGS.md.
+Three tests (C18 for nodes==[] and for all conversation_id=="", plus C24) previously
+recorded confirmed bugs as strict-xfail; those bugs are now fixed and the markers
+removed. See tests/specs/FOUND-BUGS.md.
 """
 
 from datetime import UTC, datetime
-
-import pytest
 
 
 # C1
@@ -259,14 +256,7 @@ def test_c17_list_reorders_after_update(repo, make_node):
     assert [d["id"] for d in repo.list()] == ["a", "c", "b"]
 
 
-# C18 (xfail) — asserts intended behavior for a confirmed deferred bug
-@pytest.mark.xfail(
-    reason=(
-        "BUG: empty/all-filtered conversation still listed — contract C18; "
-        "see tests/specs/FOUND-BUGS.md"
-    ),
-    strict=True,
-)
+# C18
 def test_c18_zero_persisted_empty_list_not_listed(repo):
     # C18: a save yielding zero persisted nodes (nodes==[]) must not appear anywhere.
     repo.save("conv-empty", "Empty", [])
@@ -276,14 +266,7 @@ def test_c18_zero_persisted_empty_list_not_listed(repo):
     assert repo.load("conv-empty") == []
 
 
-# C18 (xfail) — asserts intended behavior for a confirmed deferred bug
-@pytest.mark.xfail(
-    reason=(
-        "BUG: empty/all-filtered conversation still listed — contract C18; "
-        "see tests/specs/FOUND-BUGS.md"
-    ),
-    strict=True,
-)
+# C18
 def test_c18_zero_persisted_all_filtered_not_listed(repo, make_node):
     # C18: a save where all nodes have conversation_id=="" yields zero persisted nodes.
     nodes = [
@@ -338,14 +321,7 @@ def test_c23_get_last_equals_first_listed(repo, make_node):
     assert repo.get_last() == repo.list()[0]["id"]
 
 
-# C24 (xfail) — asserts intended behavior for a confirmed deferred bug
-@pytest.mark.xfail(
-    reason=(
-        "BUG: same-instant saves not ordered most-recent-first (no tiebreak) — "
-        "contract C24; see tests/specs/FOUND-BUGS.md"
-    ),
-    strict=True,
-)
+# C24
 def test_c24_same_instant_saves_ordered_most_recent_first(repo, make_node, monkeypatch):
     # C24: with a frozen clock, two saves sharing a timestamp must still order b before a.
     fixed = datetime(2024, 1, 1, tzinfo=UTC)

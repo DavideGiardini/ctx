@@ -5,7 +5,8 @@ Each test cites its contract id (e.g. # C12) and asserts only on observable
 behavior (return values, raised exceptions, persisted repo state) — never on
 implementation internals.
 
-Exactly one xfail records a known bug: C27 (BUG-3), see tests/specs/FOUND-BUGS.md.
+C27 (BUG-3) previously recorded a known bug as xfail; it is now fixed and the marker
+removed. See tests/specs/FOUND-BUGS.md.
 
 The cancellation tests (C40 and the C42 cancellation case) model a realistic
 mid-stream cancel: a provider yields a token then BLOCKS awaiting the next one;
@@ -447,13 +448,6 @@ def test_resume_unknown_id_returns_empty_list(repo, test_provider, workspace):
     assert result == []
 
 
-@pytest.mark.xfail(
-    reason=(
-        "BUG: resume of unknown id wipes current nodes — contract C27; "
-        "see tests/specs/FOUND-BUGS.md"
-    ),
-    strict=True,
-)
 def test_resume_unknown_id_leaves_current_state_unchanged(repo, test_provider, workspace):
     # C27
     core = ConversationCore(repo, test_provider(["hi"]), workspace)

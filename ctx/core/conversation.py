@@ -87,9 +87,11 @@ class ConversationCore:
         return Node(role="system", content="Started a new conversation.", node_type="system")
 
     def resume_conversation(self, conv_id: str) -> list[Node]:
-        self.nodes = self._storage.load(conv_id)
-        if not self.nodes:
+        loaded = self._storage.load(conv_id)
+        if not loaded:
+            # Unknown id: leave the in-progress conversation intact.
             return []
+        self.nodes = loaded
         self.conversation_id = conv_id
         self.conversation_title = next(
             (

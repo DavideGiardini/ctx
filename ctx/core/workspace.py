@@ -72,7 +72,9 @@ class Workspace:
             ValueError: if the path escapes the context directory.
         """
         target = (self._context / rel_path).resolve()
-        # Security guard: ensure resolved path is still inside context_dir
-        if not str(target).startswith(str(self._context.resolve())):
+        # Security guard: ensure resolved path is still inside context_dir.
+        # Compare resolved paths for containment (not a string prefix), so a
+        # sibling dir merely sharing a name prefix (e.g. context-extra) is rejected.
+        if not target.is_relative_to(self._context.resolve()):
             raise ValueError(f"Path escapes context directory: {rel_path}")
         return target.read_text(encoding="utf-8")

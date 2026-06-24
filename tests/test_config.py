@@ -231,14 +231,6 @@ def test_c16_top_level_mutation_does_not_persist(config_file):
     assert r2 == defaults
 
 
-@pytest.mark.xfail(
-    reason=(
-        "BUG: get_config() returns a shallow copy of the defaults, so mutating a "
-        "nested value in the returned dict corrupts the defaults seen by the next "
-        "call — contract C17; see tests/specs/FOUND-BUGS.md"
-    ),
-    strict=True,
-)
 def test_c17_nested_mutation_does_not_persist(config_file):
     # C17
     defaults = _baseline(config_file)
@@ -249,14 +241,6 @@ def test_c17_nested_mutation_does_not_persist(config_file):
     assert r2["colors"]["user"] == defaults["colors"]["user"]
 
 
-@pytest.mark.xfail(
-    reason=(
-        "BUG: a wrong-type but valid-JSON config section makes get_config() raise "
-        "instead of falling back to defaults — contract C18; "
-        "see tests/specs/FOUND-BUGS.md"
-    ),
-    strict=True,
-)
 def test_c18_wrong_typed_sections_do_not_raise(config_file):
     # C18
     config_file.write_json({"colors": "not-a-dict"})
@@ -269,13 +253,6 @@ def test_c18_wrong_typed_sections_do_not_raise(config_file):
 
 
 # C19
-@pytest.mark.xfail(
-    reason=(
-        "BUG: non-object JSON root crashes get_config() instead of falling back "
-        "to defaults — contract C19; see tests/specs/FOUND-BUGS.md"
-    ),
-    strict=True,
-)
 def test_c19_non_object_root_does_not_raise(config_file):
     defaults = _baseline(config_file)
     config_file.write_json(5)

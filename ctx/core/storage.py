@@ -56,7 +56,9 @@ class ConversationRepository:
         conn.close()
 
     def save(self, conversation_id: str, title: str, nodes: list[Node]) -> None:
+        # Only nodes carrying a conversation_id persist (system messages are skipped).
         now = datetime.now(UTC).isoformat()
+        persistable = [node for node in nodes if node.conversation_id]
         conn = self._connect()
         try:
             existing = conn.execute(
@@ -67,20 +69,21 @@ class ConversationRepository:
                     "UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?",
                     (title, now, conversation_id),
                 )
-            else:
+            elif persistable:
                 conn.execute(
                     "INSERT INTO conversations (id, title, created_at, updated_at)"
                     " VALUES (?, ?, ?, ?)",
                     (conversation_id, title, now, now),
                 )
+            else:
+                # A brand-new conversation with nothing to persist must not create a
+                # row, so it can't leak into list()/get_last() (contract C18).
+                return
 
             conn.execute(
                 "DELETE FROM nodes WHERE conversation_id = ?", (conversation_id,)
             )
-            for node in nodes:
-                # Skip system messages
-                if not node.conversation_id:
-                    continue
+            for node in persistable:
                 conn.execute(
                     "INSERT INTO nodes (id, conversation_id, role, content, node_type, meta) "
                     "VALUES (?, ?, ?, ?, ?, ?)",
@@ -125,7 +128,8 @@ class ConversationRepository:
         conn = self._connect()
         try:
             rows = conn.execute(
-                "SELECT id, title, updated_at FROM conversations ORDER BY updated_at DESC"
+                "SELECT id, title, updated_at FROM conversations "
+                "ORDER BY updated_at DESC, rowid DESC"
             ).fetchall()
         finally:
             conn.close()
@@ -136,7 +140,7 @@ class ConversationRepository:
         conn = self._connect()
         try:
             row = conn.execute(
-                "SELECT id FROM conversations ORDER BY updated_at DESC LIMIT 1"
+                "SELECT id FROM conversations ORDER BY updated_at DESC, rowid DESC LIMIT 1"
             ).fetchone()
         finally:
             conn.close()
