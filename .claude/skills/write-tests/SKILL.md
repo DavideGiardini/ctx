@@ -24,7 +24,7 @@ layers defend against it, each catching a different failure:
 | mutmut | Is the oracle **strong** enough to catch faults? | `scripts/mutate.sh` + human triage |
 
 ## Scope
-Framework-free core only: `ctx/core/*`, `ctx/models/*`, `ctx/agent/snapshot.py`.
+Framework-free core only: `ctx/core/*`, `ctx/models/*`, `tools/agent/snapshot.py`.
 **Not** `ctx/ui/*` — Textual UI behavior is the `qa-tester` / Pilot-driven layer.
 One module per invocation. Reuse `tests/conftest.py` fixtures; don't rebuild them.
 
@@ -129,7 +129,7 @@ Two order/isolation traps to know:
 
 Once the suite is green: run the gate on **your own module**, so survivors land in the
 session that has the context to triage them: `scripts/mutate.sh run 'ctx.<dotted.module>.*'`
-(e.g. `ctx.core.storage.*`, `ctx.agent.snapshot.*`). The glob scopes which mutants
+(e.g. `ctx.core.storage.*`, `tools.agent.snapshot.*`). The glob scopes which mutants
 *execute* without editing config — the survivors that come back are only your module's.
 
 The single constraint is **concurrency**: mutmut uses one repo-global `mutants/` working

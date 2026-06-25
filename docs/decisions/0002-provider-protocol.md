@@ -31,6 +31,6 @@ implementations are `async` generators).
   `async for token in self._provider.stream(...)`; the `asyncio.Queue`/`_bridge`
   task and unused `asyncio`/`contextlib` imports were deleted.
 - `TestProvider` is what makes the headless agent harness
-  (`ctx/agent/harness.py`) deterministic and network-free.
+  (`tools/agent/harness.py`) deterministic and network-free.
 - This is the canonical example of "introduce a Protocol seam only once a second
   real implementation exists."

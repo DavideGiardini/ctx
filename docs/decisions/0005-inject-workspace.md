@@ -29,6 +29,6 @@ everywhere.
 
 - The single `Path.cwd()` call is now isolated to `ChatApp.__init__`; all
   downstream components are testable with a temp directory. This is exactly what
-  makes `HarnessApp` (`ctx/agent/harness.py`) able to run in an ephemeral temp dir.
+  makes `HarnessApp` (`tools/agent/harness.py`) able to run in an ephemeral temp dir.
 - Validation still lives in `list_files()` (coupled to listing), but is now local
   to the workspace module — an accepted, bounded compromise.

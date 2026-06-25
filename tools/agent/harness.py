@@ -5,7 +5,7 @@ Wires ``ChatApp`` with a ``TestProvider`` (canned tokens, no network) and a
 and never touch the network or pollute the repo's ``.ctx/``.
 
 No-arg constructible so ``textual-mcp-server``'s loader can instantiate it as
-``ctx.agent.harness:HarnessApp``. The temp directory is ephemeral (left to the
+``tools.agent.harness:HarnessApp``. The temp directory is ephemeral (left to the
 OS temp cleaner); each instantiation gets its own.
 """
 
@@ -30,7 +30,7 @@ class HarnessApp(ctx_app.ChatApp):
     """ChatApp pre-wired for deterministic, network-free agent runs."""
 
     # ChatApp.CSS_PATH is relative to ctx/ui/. As a subclass defined in
-    # ctx/agent/, Textual would resolve those paths against ctx/agent/, so we
+    # tools/agent/, Textual would resolve those paths against tools/agent/, so we
     # re-anchor them to the real UI directory (reusing the base list).
     CSS_PATH = [str(_UI_DIR / path) for path in ctx_app.ChatApp.CSS_PATH]
 

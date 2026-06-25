@@ -2,7 +2,7 @@
   "mcpServers": {
     "ctx-agent": {
       "command": "uv",
-      "args": ["run", "ctx-agent-mcp"]
+      "args": ["run", "python", "-m", "tools.agent.mcp_server"]
     }
   }
 }

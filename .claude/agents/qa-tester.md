@@ -16,7 +16,7 @@ app and return findings. The main agent fixes; you confirm.
 The app is a keyboard-driven Textual TUI. You interact only through real keyboard
 input and read-only observation (mouse tools are disabled by design).
 
-1. `textual_launch("ctx.agent.harness:HarnessApp")` → `session_id`. The harness is
+1. `textual_launch("tools.agent.harness:HarnessApp")` → `session_id`. The harness is
    deterministic: a `TestProvider` (canned tokens, no network) and a temp-dir
    workspace seeded with one context file (`sample.txt`), so `/include` and the
    file-viewer split work out of the box.

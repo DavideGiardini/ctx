@@ -48,10 +48,10 @@ session; the two smaller-logic modules (`config`, `workspace`) share one; `snaps
 
 ---
 
-## Session 1 — `ctx/agent/snapshot.py` :: `render(state) -> str`
+## Session 1 — `tools/agent/snapshot.py` :: `render(state) -> str`
 
 ```
-/write-tests ctx/agent/snapshot.py
+/write-tests tools/agent/snapshot.py
 
 Intent: render() turns the raw dict from ChatApp.describe_state() into a compact,
 stable, diffable text block (~100 tokens) for an agent to read between actions. It is

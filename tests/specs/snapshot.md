@@ -1,4 +1,4 @@
-# Behavioral contract — `ctx/agent/snapshot.py` :: `render`
+# Behavioral contract — `tools/agent/snapshot.py` :: `render`
 
 The oracle of record for `render(state: dict) -> str`. Authored code-blind from
 intent (see `.claude/skills/write-tests`), then human-adjudicated. Tests in
