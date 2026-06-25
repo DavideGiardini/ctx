@@ -19,7 +19,7 @@ tools are exposed by the `ctx-agent` MCP server and are named `ctx-agent_*`.
 
 ## How the app is driven
 
-1. `ctx-agent_textual_launch("ctx.agent.harness:HarnessApp")` → `session_id`. The
+1. `ctx-agent_textual_launch("tools.agent.harness:HarnessApp")` → `session_id`. The
    harness is deterministic: a `TestProvider` (canned tokens, no network) and a
    temp-dir workspace seeded with one context file (`sample.txt`), so `/include`
    and the file-viewer split work out of the box.

@@ -85,7 +85,7 @@ this as part of the plan:
   will hand the subagent, precise enough to run as-is:
   - **Mode** — usually `verify-feature` (use `verify-fix` for bug work,
     `stress-test` for hardening).
-  - **Setup** — launch `ctx.agent.harness:HarnessApp`.
+  - **Setup** — launch `tools.agent.harness:HarnessApp`.
   - **Steps** — the ordered keypresses / commands to drive the flow.
   - **Expected results** — for each checkpoint, the observable state the
     `ctx_snapshot` should show (e.g. "after `/export`, snapshot shows a system

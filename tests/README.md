@@ -30,7 +30,7 @@ See `tests/specs/context.md` for a worked example.
   `build_context`, `Workspace` (use a temp dir), and the `Provider` protocol via
   `TestProvider`.
 - **Pilot-driven smoke tests** of the TUI — the deterministic counterpart to the
-  agent-driven MCP QA. Drive `ctx.agent.harness:HarnessApp` (or `ChatApp` wired
+  agent-driven MCP QA. Drive `tools.agent.harness:HarnessApp` (or `ChatApp` wired
   with `TestProvider`) through Textual's `App.run_test()` / `Pilot`, press keys,
   and assert on `describe_state()`. This is the proper home for repeatable "MCP
   smoke" coverage; the `qa-tester` subagent handles the exploratory/LLM-driven side.
@@ -39,5 +39,5 @@ See `tests/specs/context.md` for a worked example.
 
 - `pytest` with `asyncio_mode = "auto"` (configured in `pyproject.toml`) — async
   test functions need no decorator.
-- Reuse the existing harness (`ctx/agent/harness.py`) and snapshot renderer
-  (`ctx/agent/snapshot.py`) rather than rebuilding fixtures.
+- Reuse the existing harness (`tools/agent/harness.py`) and snapshot renderer
+  (`tools/agent/snapshot.py`) rather than rebuilding fixtures.

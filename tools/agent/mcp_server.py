@@ -10,7 +10,7 @@ generic driving/observation tools (``textual_launch``, ``textual_press``,
 this semantic tool all operate on the same live sessions in one process.
 
 Typical flow for an agent:
-    textual_launch("ctx.agent.harness:HarnessApp")  -> session_id
+    textual_launch("tools.agent.harness:HarnessApp")  -> session_id
     ctx_snapshot(session_id)                         # cheap semantic state
     textual_press(session_id, ["i"])                 # interact
     ctx_snapshot(session_id)                         # diff
@@ -23,7 +23,7 @@ import contextlib
 
 from textual_mcp.server import _session_manager, mcp
 
-from ctx.agent.snapshot import render
+from tools.agent.snapshot import render
 
 # --- Hardening: keep navigation keyboard-only --------------------------------
 # ctx is a keyboard-driven TUI. Remove the library's mouse tools so an agent can

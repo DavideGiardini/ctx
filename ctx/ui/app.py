@@ -361,7 +361,7 @@ class ChatApp(App):
         """Return a structured snapshot of the app's observable state.
 
         Raw data only (full node content, no truncation) — token-budget
-        formatting lives in ``ctx/agent/snapshot.py``. Useful for the agent
+        formatting lives in ``tools/agent/snapshot.py``. Useful for the agent
         MCP layer and for debugging/logging this otherwise-opaque TUI.
 
         Nodes are reported by stable *index* + role (the random ``Node.id``

@@ -1,4 +1,4 @@
-"""Tests for ctx.agent.snapshot.render.
+"""Tests for tools.agent.snapshot.render.
 
 The oracle for every assertion in this file traces to tests/specs/snapshot.md
 (the adjudicated behavioral contract), never to the implementation. These tests
@@ -12,7 +12,7 @@ using conftest fixtures.
 
 import copy
 
-from ctx.agent.snapshot import render
+from tools.agent.snapshot import render
 
 # --- local helpers (no conftest fixtures: render consumes plain dicts) ---
 

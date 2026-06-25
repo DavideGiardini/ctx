@@ -3,7 +3,7 @@
   "mcp": {
     "ctx-agent": {
       "type": "local",
-      "command": ["uv", "run", "ctx-agent-mcp"],
+      "command": ["uv", "run", "python", "-m", "tools.agent.mcp_server"],
       "enabled": true
     }
   },

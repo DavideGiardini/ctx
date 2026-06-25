@@ -28,9 +28,10 @@
 
 ## Architecture
 Layered: `core/` is framework-free domain logic (zero `textual` imports), `ui/` is
-a thin Textual adapter over it, `agent/` is headless QA tooling, `models/` holds
-shared types. `ctx/main.py` is a tiny entry point. See `docs/decisions/` for *why*
-it's shaped this way.
+a thin Textual adapter over it, `models/` holds shared types. `ctx/main.py` is a
+tiny entry point. The headless QA tooling lives in the top-level `tools/agent/`
+package — deliberately **outside** the shippable `ctx` package so it can never
+reach end users (ADR 0012). See `docs/decisions/` for *why* it's shaped this way.
 
 **core/** (no `textual` imports)
 - `conversation.py` — `ConversationCore`: owns conversation state (nodes, model,
@@ -67,9 +68,12 @@ a left `DetailInspector` and a right `#conversation` pane (the `MessageList` +
   (conversation picker). CSS split across `app.css` and `widgets/*.css` plus
   widget `DEFAULT_CSS`.
 
-**agent/** — headless QA tooling (see "Agent-driven testing"): `snapshot.py`,
-`harness.py`, `mcp_server.py`. **models/** — `nodes.py`: the `Node` dataclass (one
-chat turn or context reference).
+**models/** — `nodes.py`: the `Node` dataclass (one chat turn or context reference).
+
+**tools/agent/** (top-level, OUTSIDE the `ctx` package — never ships, ADR 0012) —
+headless QA tooling (see "Agent-driven testing"): `snapshot.py`, `harness.py`,
+`mcp_server.py`. It may import *from* `ctx` (tooling → product); `ctx` must never
+import *from* `tools`.
 
 ### Non-obvious behaviors
 - `/include` stores a `Node(node_type="context")` with `meta["source_path"]`;
@@ -120,8 +124,8 @@ step — see `tests/README.md`. Install the local hook with `uv run pre-commit i
 
 ## Agent-driven testing (headless)
 The real app can be driven and observed without a terminal or screenshots, via the
-`ctx-agent` MCP server (`ctx/agent/mcp_server.py`, auto-discovered from `.mcp.json`).
-It drives a deterministic `HarnessApp` (`ctx/agent/harness.py` — `TestProvider` +
+`ctx-agent` MCP server (`tools/agent/mcp_server.py`, auto-discovered from `.mcp.json`).
+It drives a deterministic `HarnessApp` (`tools/agent/harness.py` — `TestProvider` +
 temp workspace) and exposes `ctx_snapshot`, a ~100-token semantic state read,
 alongside `textual-mcp-server`'s keyboard/observation tools.
 
@@ -133,7 +137,8 @@ quick one-off check.
 
 > Dependency note: `textual-mcp-server` 1.0.0 pins `textual<8` conservatively;
 > `[tool.uv] override-dependencies` keeps the app on textual 8 while reusing the
-> library. Run the server manually with `uv run ctx-agent-mcp` if needed.
+> library. Run the server manually with `uv run python -m tools.agent.mcp_server`
+> if needed (it is intentionally not a console script — see ADR 0012).
 
 ## What to avoid
 - Do not weaken the gate to make it pass; fix what `scripts/check.sh` reports.

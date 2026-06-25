@@ -10,11 +10,18 @@ dependencies = [
 
 [project.scripts]
 ctx = "ctx.main:run"
-ctx-agent-mcp = "ctx.agent.mcp_server:main"
+# NOTE: no ctx-agent-mcp console script. The agent/QA tooling lives OUTSIDE the
+# shipped package (tools/agent/, see docs/decisions/0012) so it cannot reach end
+# users. Launch it in dev with `uv run python -m tools.agent.mcp_server`.
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+# Ship ONLY the ctx package. tools/ (dev-only agent harness + MCP server) must
+# never be bundled — keeping it out is the whole point of decision 0012.
+packages = ["ctx"]
 
 [dependency-groups]
 dev = [
@@ -54,6 +61,10 @@ exclude = ["^mutants/"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Put the repo root on sys.path so tests can import the dev-only `tools` package
+# (tools/agent/snapshot.py). `tools` is intentionally NOT an installed package
+# (it must not ship), so without this the snapshot tests can't import it.
+pythonpath = ["."]
 # Pilot-driven TUI smoke tests are async; auto mode means async test functions
 # need no per-test decorator. See tests/README.md.
 asyncio_mode = "auto"
@@ -77,10 +88,10 @@ asyncio_mode = "auto"
 # a time. Parallel test-authoring sessions must NOT run mutmut or edit this list;
 # run the gate as a single sweep at the end (scope a focused run with
 # `scripts/mutate.sh run 'ctx.core.<mod>.*'` — see scripts/mutate.sh).
-source_paths = ["ctx"]
+source_paths = ["ctx", "tools"]
 only_mutate = [
     "ctx/core/context.py",
-    "ctx/agent/snapshot.py",
+    "tools/agent/snapshot.py",
     "ctx/core/config.py",
     "ctx/core/storage.py",
     "ctx/core/workspace.py",

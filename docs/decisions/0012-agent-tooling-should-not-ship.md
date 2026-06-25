@@ -1,6 +1,6 @@
 # 0012 — agent/ is dev-only tooling but currently ships
 
-**Status:** Notes (fix intended — Option B preferred)
+**Status:** Resolved (Option B implemented — see "Resolution" below).
 
 ## Context
 
@@ -41,6 +41,29 @@ Option A (fallback, minimal): keep `agent/` under `ctx/` but add a wheel `exclud
 and drop `ctx-agent-mcp` from `[project.scripts]` (launch via `python -m
 ctx.agent.mcp_server` in dev).
 
-When fixing, also decide `TestProvider`'s home (it currently still ships inside
-`ctx/core/provider.py`), and **verify with a real `uv build`** — inspect the wheel
-contents to prove `agent/` is excluded rather than assume it.
+## Resolution (Option B)
+
+- **Location.** `ctx/agent/` moved to the top-level `tools/agent/` package
+  (`tools.agent.{harness,snapshot,mcp_server}`). `tools/` is outside the importable
+  `ctx` package, so it cannot be bundled into the wheel. As belt-and-suspenders,
+  `[tool.hatch.build.targets.wheel] packages = ["ctx"]` makes the shipped package
+  set explicit. Layout direction is enforced: `tools/*` may import `ctx.*`; `ctx/*`
+  must never import `tools.*` (and no `ctx` module does).
+- **Console script removed, not repointed.** `ctx-agent-mcp` is gone from
+  `[project.scripts]`. Repointing it at `tools.agent.mcp_server:main` would still
+  install a console script in the wheel that `ModuleNotFoundError`s for end users
+  (`tools` isn't shipped) — the same class of bug. Dev launch is now
+  `uv run python -m tools.agent.mcp_server`; `.mcp.json` / `opencode.json` were
+  updated accordingly. The MCP server **name** stays `ctx-agent`, so all
+  `mcp__ctx-agent__*` allowlists and qa-tester references are unchanged.
+- **`TestProvider` stays in `ctx/core/provider.py`.** It is consumed by
+  `tests/conftest.py` and the unit suite — not only the harness — so moving it into
+  `tools/` would point core test fixtures at the dev-tooling package (wrong
+  direction). It is a tiny in-core test double (the legitimate second `Provider`
+  impl) with no `textual_mcp` dependency, so it ships harmlessly and never crashes,
+  and keeps its existing mutmut coverage with no path juggling.
+- **mutmut coverage preserved.** `[tool.mutmut]` now lists `source_paths =
+  ["ctx", "tools"]` and `only_mutate` points at `tools/agent/snapshot.py`, so the
+  snapshot renderer keeps its mutation coverage at the new path.
+- **Verified with a real `uv build`** — the wheel contains no `ctx/agent/...` and no
+  `tools/...`, and its `entry_points.txt` declares only the `ctx` console script.
