@@ -49,6 +49,12 @@ reach end users (ADR 0012). See `docs/decisions/` for *why* it's shaped this way
   expands `context` nodes via the injected loader, no I/O of its own (ADR 0004).
 - `workspace.py` — `Workspace(root_path)`: `.ctx/` discovery, `ensure()`,
   `list_files()`, `read_file()`; the sole `Path.cwd()` lives at its call site (ADR 0005).
+  `list_files` classifies a file as text by a **bounded ~8 KB sniff** (`SNIFF_BYTES`):
+  no NUL byte + UTF-8-decodable prefix (incremental decode, so a multi-byte char split
+  at the boundary isn't a false negative) — no extension allowlist, so `Dockerfile`/`LICENSE`
+  pass. It also applies `read_file`'s containment guard (`resolve()` + `is_relative_to`),
+  so a symlink escaping the sandbox is never listed and the picker can't surface a file
+  the reader would reject (ADR 0008 #1/#2).
 - `config.py` — `~/.config/ctx/config.json` merged over defaults (`model` — the
   user-overridable default LLM model, read once by `ConversationCore` at
   construction; `colors`; `ui.truncation_lines` — per-role node line caps; `"auto"`

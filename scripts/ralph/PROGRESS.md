@@ -264,3 +264,46 @@ Git history is the source of truth for *what changed*; this file captures the
   with identity exclusion — the test discriminates the exact mutation.
 - Verification: `bash scripts/check.sh` green (312 passed, was 311: +1 new test).
 - This was the final unchecked PRD task — all tasks now `- [x]`.
+
+## 2026-06-26 — Seed (round-2 cleanups PRD, not a task)
+- PRD-1 (core hardening) is complete (entries above). `scripts/ralph/PRD.md` was
+  replaced with **round-2 cleanups**: harden `list_files` (bounded text-sniff +
+  traversal guard, refs 0008 #1/#2), extract a `_derive_title` helper (0006 #5),
+  annotate two stale ADRs (0013 #1, 0014 #3).
+- The bounded-sniff design is fully specified in `docs/decisions/0008` (the
+  **Decision** block): first ~8 KB, reject on NUL byte or non-UTF-8, tolerant
+  boundary decode, **no extension allowlist**. Caching the verdict is deliberately
+  out of scope (deferred until the KB widens to the whole launch dir).
+- Reminders: ADRs are immutable — task 3 *annotates*, never rewrites. Task 2 is a
+  pure refactor — lean on existing green, don't add trivial tests. Reuse
+  `read_file`'s existing `resolve()`/`is_relative_to` guard for the traversal half of
+  task 1.
+
+## 2026-06-26 — Task: Harden list_files — bounded text-sniff + traversal guard (ref 0008 #1/#2)
+- `ctx/core/workspace.py`: replaced the full-file `read_text` validation in `list_files`
+  with a **bounded sniff**. Added module-level `SNIFF_BYTES = 8192` and pure helper
+  `_sniff_is_text(chunk: bytes) -> bool`: rejects on a NUL byte, else decodes with an
+  incremental UTF-8 decoder (`codecs.getincrementaldecoder("utf-8")`, `final=False`) so a
+  multi-byte char split at the 8 KB boundary is NOT a false negative. No extension
+  allowlist — extensionless dev files pass. `list_files` now reads only the first 8 KB
+  (`path.open("rb").read(SNIFF_BYTES)`).
+- Also added the **containment guard** mirroring `read_file`: compute `context_root =
+  self._context.resolve()` once, and skip any path whose `path.resolve()` is not
+  `is_relative_to(context_root)`. So a symlink under context/ that escapes the sandbox is
+  never listed → picker and reader agree by construction (closes 0008 #2 disagreement).
+- Log messages preserved/split: out-of-bounds → "skipped out-of-bounds context file";
+  OSError on open → "unreadable context file" (keeps C26 green); non-text → "skipped
+  non-text context file" (keeps C15/C16 green).
+- Tests: 4 new acceptance tests in `tests/test_workspace.py` (the PRD floor (a)–(d)).
+  Written directly, NOT via code-blind subagent, because `list_files`' public signature
+  is unchanged — these pin refined behavior of an existing method. (c) proves bounded
+  reading without a spy: a >8 KB file clean for its prefix but with a NUL byte past the
+  window is still listed (whole-file validation would skip it). Added a traceability
+  addendum to `tests/specs/workspace.md` (the named tests, not new C-items).
+- Pure core-logic task: list_files' observable output (the picker's file set) is fully
+  covered by the unit tests through the public interface → no qa-tester run (per loop rules).
+- Docs: updated AGENTS.md workspace.py line with the sniff + containment-guard invariant.
+- Verification: `bash scripts/check.sh` green (316 passed, was 312: +4 new tests).
+- Gotcha for next iter: remaining PRD tasks are 2 (extract `_derive_title` — pure refactor,
+  NO new tests) and 3 (annotate two stale ADRs — docs-only, ADRs are immutable, append a
+  **Correction:** pointer, never rewrite the Decision/Consequences body).

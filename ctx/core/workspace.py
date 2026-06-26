@@ -1,8 +1,32 @@
 """Workspace directory discovery and context file management."""
 
+import codecs
 from pathlib import Path
 
 from ctx.core.log import logger
+
+# Bytes read to classify a file as text. Bounded so listing cost is independent
+# of file size (ADR 0008 #1): one small read per file, never the whole file.
+SNIFF_BYTES = 8192
+
+
+def _sniff_is_text(chunk: bytes) -> bool:
+    """Return True if an ~8 KB prefix looks like UTF-8 text.
+
+    A file qualifies when its prefix contains no NUL byte and decodes as UTF-8.
+    Decoding is incremental with ``final=False`` so a multi-byte character split
+    across the sniff boundary is tolerated rather than reported as invalid. This
+    matches what ``read_file`` (UTF-8) can actually consume, so the picker and the
+    reader agree by construction (ADR 0008 #1).
+    """
+    if b"\x00" in chunk:
+        return False
+    decoder = codecs.getincrementaldecoder("utf-8")()
+    try:
+        decoder.decode(chunk, final=False)
+    except UnicodeDecodeError:
+        return False
+    return True
 
 
 class Workspace:
@@ -39,25 +63,34 @@ class Workspace:
     def list_files(self) -> list[str]:
         """Recursively list all plain text files under .ctx/context/.
 
-        Returns relative paths from the context directory.
-        Files that are not valid UTF-8 are skipped with a warning.
+        Returns relative paths from the context directory. A file is included
+        only if (1) its resolved path stays inside the context directory — the
+        same containment guard ``read_file`` enforces, so a symlink escaping the
+        sandbox is never listed — and (2) its first ~8 KB sniff as UTF-8 text.
+        Files failing either check are skipped with a warning rather than raised.
         """
         if not self._context.exists():
             return []
 
+        context_root = self._context.resolve()
         files: list[str] = []
         for path in sorted(self._context.rglob("*")):
             if not path.is_file():
                 continue
             rel = path.relative_to(self._context).as_posix()
-            # Quick UTF-8 check — if it fails, skip
-            try:
-                path.read_text(encoding="utf-8")
-            except UnicodeDecodeError:
-                logger.warning("skipped non-text context file | path=%s", rel)
+            # Containment guard (mirrors read_file): a symlink that resolves
+            # outside context/ must not be listed, else read_file would reject it.
+            if not path.resolve().is_relative_to(context_root):
+                logger.warning("skipped out-of-bounds context file | path=%s", rel)
                 continue
+            try:
+                with path.open("rb") as handle:
+                    chunk = handle.read(SNIFF_BYTES)
             except OSError:
                 logger.warning("unreadable context file | path=%s", rel)
+                continue
+            if not _sniff_is_text(chunk):
+                logger.warning("skipped non-text context file | path=%s", rel)
                 continue
             files.append(rel)
         logger.info("context files listed | count=%d", len(files))

@@ -1,128 +1,64 @@
-# PRD — Core hardening & node-classification cleanup
+# PRD — Deferred cleanups (round 2)
 
 ## Goal
-Resolve the Tier-1/Tier-2 correctness and quality issues found in the
-session-recorded triage (`docs/decisions/0006`–`0014`): make context-load and
-stream failures visible instead of silent, give the conversation a model that
-survives resume, make persistence uniform, and introduce a single source of truth
-for node construction/classification. Each task is an independent, green-keeping
-slice; the per-issue rationale lives in the referenced `docs/decisions/` notes.
+The small, lower-priority cleanups deferred from the first hardening PRD. Each is
+independent and green-keeping. Rationale lives in the cited `docs/decisions/` notes;
+PRD-1 (core hardening) is already complete — see git history and the `PROGRESS.md`
+entries dated 2026-06-26.
 
 ## Constraints / notes
-- Follow the "Designing new modules" guidance in `AGENTS.md`: deep modules, `core/`
-  stays framework-free (zero `textual` imports), seams only on a second real
-  implementation, deletion test before abstraction.
-- Read the referenced ADR/notes before starting a task — they carry the *why*.
-- `StoragePort` (`ctx/core/storage.py`) has a **second implementation**,
-  `SaveCountingStorage` in `tests/test_conversation.py`. Any change to the
-  `StoragePort` interface (e.g. `save()` signature) MUST update that double in the
-  same task, or the tree goes red.
-- Behavioral checks go through the `qa-tester` subagent (the `ctx-agent` MCP server
-  drives `tools.agent.harness:HarnessApp`). Unit-level acceptance goes through
-  `scripts/check.sh` (ruff + mypy + pytest).
-- Shared fixtures already exist in `tests/conftest.py` (`repo`, `workspace`,
-  `test_provider`, `make_node`, `stub_loader`) — reuse them.
-- Do NOT introduce `Node` subclasses — the chosen approach is factory classmethods +
-  predicates on the single `Node` dataclass (see tasks 4–5 and `docs/decisions/0014`).
+- Follow `AGENTS.md` "Designing new modules": deep modules, `core/` framework-free,
+  reuse existing seams/patterns, deletion test before abstraction.
+- Read the cited note before starting — it carries the *why* and, for task 1, the
+  full design decision.
+- Shared fixtures in `tests/conftest.py` (`repo`, `workspace`, `test_provider`,
+  `make_node`, `stub_loader`) — reuse them.
+- Task 2 is a pure refactor: rely on the existing suite staying green; do NOT add
+  trivial new tests for it (per the test-strategy rule in `PROMPT.md`).
+- Task 3 edits ADRs, which are **immutable** (`docs/decisions/README.md`): *annotate*
+  with a correction pointer; do NOT rewrite the Decision/Consequences text.
 
 ## Tasks
 Top-to-bottom by priority; the loop always takes the topmost unchecked task.
 
-- [x] **Harden `build_context` against bad/empty nodes** — in
-      `ctx/core/context.py`, stop silently dropping context nodes whose file fails
-      to load: when `load_file` raises `OSError`/`ValueError`, emit a *visible*
-      marker into the built message (e.g. a `<context_import source="…"
-      error="…">` block) instead of `continue`-ing past it. Also skip
-      `user`/`assistant` nodes whose `content` is empty so no empty-content message
-      is produced. (Refs: 0007 #1, 0007 #2.) _Acceptance:_ unit tests in
-      `tests/test_context.py` — (a) a `stub_loader` that raises for a path produces
-      a message that references that path with an error indication (not silently
-      absent); (b) an `assistant` node with `content=""` yields no message.
-      `scripts/check.sh` green.
+- [x] **Harden `list_files` — bounded text-sniff + traversal guard** — in
+      `ctx/core/workspace.py`, replace the full-file `read_text` validation in
+      `list_files()` with a **bounded sniff**: read only the first ~8 KB of each file
+      and reject it if that prefix contains a NUL byte or is not valid UTF-8 (decode
+      tolerantly at the chunk boundary so a multi-byte char split across it isn't a
+      false negative). No extension allowlist — extensionless text files must pass.
+      *Also* apply the same containment guard `read_file()` uses (`resolve()` +
+      `is_relative_to(self._context.resolve())`) so `list_files` never lists a file
+      `read_file` would reject. (Refs: 0008 #1 — see its **Decision** block — and
+      0008 #2.) _Acceptance:_ unit tests in `tests/test_workspace.py` — (a) an
+      extensionless text file (e.g. named `Dockerfile`) is listed; (b) a file whose
+      first bytes contain a NUL byte is skipped; (c) a large valid-UTF-8 text file is
+      listed (and is not fully read — assert via a read-size spy or a file larger than
+      the sniff window); (d) a symlink under `.ctx/context/` that resolves outside it
+      is not listed. `scripts/check.sh` green.
 
-- [x] **Persist & restore the conversation's model** — add a `model` column to the
-      `conversations` table in `ctx/core/storage.py`; extend `StoragePort.save` and
-      `ConversationRepository.save` to take and write the model; have
-      `ConversationCore.persist` pass `self.model`; have
-      `resume_conversation` restore `self.model` from the stored row. Add a small
-      migration in `init()` for pre-existing DBs (SQLite has no `ADD COLUMN IF NOT
-      EXISTS` — guard via `PRAGMA table_info`). Update the `SaveCountingStorage`
-      double. (Ref: 0014 #2.) _Acceptance:_ unit test — set a model, persist, then a
-      fresh `ConversationCore` sharing the same `repo` resumes that id and has the
-      stored `model`. qa-tester — switch model with `/model`, `/resume` that
-      conversation, snapshot shows the conversation's model in the footer.
-      `scripts/check.sh` green.
+- [ ] **Extract a `_derive_title` helper** — in `ctx/core/conversation.py`, factor the
+      duplicated title logic (`content[:MAX_TITLE_LENGTH].replace("\n", " ")`, used in
+      `_ensure_conversation` and `resume_conversation`) into one private helper and call
+      it from both. Pure refactor, no behavior change. (Ref: 0006 #5.) _Acceptance:_
+      the existing `tests/test_conversation.py` title tests stay green unchanged; no
+      new tests are warranted. `scripts/check.sh` green.
 
-- [x] **Source the default model from `config.py`** — move the default model out of
-      the `DEFAULT_MODEL` constant in `ctx/core/conversation.py` into the defaults
-      in `ctx/core/config.py`; have `ConversationCore` read the default from config
-      (read it once, e.g. at construction — don't do file I/O per call). Update the
-      `app.py` reference. (Ref: 0006 #3.) _Acceptance:_ unit test — config supplies
-      the default model and a freshly constructed `ConversationCore` uses it; the
-      hardcoded constant is gone. `scripts/check.sh` green.
-
-- [x] **Add `Node` factory constructors and migrate `ConversationCore`** — add
-      classmethods `Node.user`, `Node.assistant`, `Node.system`, `Node.context` to
-      `ctx/models/nodes.py`, each encoding the correct `role`/`node_type`/`content`/
-      `meta` combination (e.g. `Node.context(source_path, conversation_id)` sets
-      `role="context"`, `node_type="context"`, `content="Included: …"`,
-      `meta={"source_path": …}`). Migrate every `Node(...)` construction in
-      `ctx/core/conversation.py` to the factories. No behavior change. (Ref:
-      0014 #1.) _Acceptance:_ unit tests assert each factory's field combination;
-      the existing `tests/test_conversation.py` suite stays green.
-      `scripts/check.sh` green.
-
-- [x] **Add a `goes_to_model` predicate and route `build_context` through it**
-      *(depends on the factories task above)* — add `Node.goes_to_model() -> bool`
-      (`role in {"user","assistant"}` or `node_type == "context"`) to
-      `ctx/models/nodes.py`, and replace the inline role-based inclusion logic in
-      `ctx/core/context.py` with it, so the "which nodes reach the LLM" rule has one
-      definition. No change to the produced messages. (Ref: 0014 #1.)
-      _Acceptance:_ unit test covers the predicate truth table (user/assistant/
-      context → True; system → False); existing `build_context` tests stay green.
-      `scripts/check.sh` green.
-
-- [x] **Make persistence uniform across all commands** — every command method in
-      `ctx/core/conversation.py` (`set_model`, `check_connectivity`,
-      `add_system_message`, …) calls `persist()`, and the nodes they create carry
-      the `conversation_id` so they are actually written (today system/connectivity
-      breadcrumbs are filtered out by the storage layer). Document the uniform policy
-      in the `ConversationCore` docstring. Consequence (intended): model-change and
-      connectivity messages now reappear on resume. (Ref: 0006 #6.) _Acceptance:_
-      unit tests — after each command, `repo.load(id)` reflects the created node(s);
-      qa-tester — `/model X`, `/resume`, snapshot shows the "Model set to: X" node in
-      the restored conversation. `scripts/check.sh` green.
-
-- [x] **Give the provider a timeout and a domain error type** — in
-      `ctx/core/provider.py`, define a small `ProviderError`; have
-      `LiteLLMProvider.stream` pass a sane `timeout` to `acompletion` and map raised
-      backend exceptions to `ProviderError` (so the litellm type doesn't leak through
-      the seam). `ConversationCore.stream` already persists-and-re-raises on
-      exception — ensure `ProviderError` flows through unchanged. (Ref: 0011 #1.)
-      _Acceptance:_ `ProviderError` exists; a provider test double that raises
-      `ProviderError` from `stream` causes `ConversationCore.stream` to persist the
-      partial assistant node and re-raise `ProviderError` (unit test). Note:
-      `LiteLLMProvider` itself is the network adapter and stays out of the unit suite
-      by design. `scripts/check.sh` green.
-
-- [x] **Decouple `stream()` from node ordering** — in `ConversationCore.stream`
-      (`ctx/core/conversation.py`), replace `build_context(self.nodes[:-1], …)` with
-      a slice that excludes the streamed node *by identity*:
-      `build_context([n for n in self.nodes if n is not assistant_node], …)`. Same
-      behavior, no reliance on the assistant node being last. (Ref: 0006 #1.)
-      _Acceptance:_ existing stream tests stay green; a unit test confirms the
-      context excludes exactly the streamed assistant node regardless of its
-      position in `self.nodes`. `scripts/check.sh` green.
+- [ ] **Annotate the two stale ADRs with a correction pointer** — ADRs are immutable,
+      so do NOT rewrite their bodies. Append a brief, clearly-marked **Correction:**
+      line to each: `docs/decisions/0003-conversation-repository.md` (its `:memory:`
+      "supports tests" claim is false given the connection-per-method design — point to
+      `0013`) and `docs/decisions/0004-pure-context-builder.md` (its "no side effects"
+      claim is overstated — `build_context` logs — point to `0014 #3`). (Refs: 0013 #1,
+      0014 #3.) _Acceptance:_ each of the two ADRs carries a one-line correction pointer
+      to its observation note; Decision/Consequences text is unchanged; `scripts/check.sh`
+      green (docs-only, nothing should break).
 
 ## Out of scope
-- **Feature-gated** (change only when the triggering feature is built): the
-  persistence-model rework / soft-delete + node graph + op log (0006 #2), import
-  snapshots & staleness (0009), `<context_import>` escaping for untrusted sources
-  (0007 #3), and the structural persist choke-point (`_add`) (0006 #6 structural).
-- **Deferred to a later PRD** (minor cleanups, to be scoped next session):
-  bounded UTF-8 sniff in `list_files` (0008 #1), `list_files`/`read_file` traversal
-  alignment (0008 #2), `_derive_title` helper (0006 #5), and the stale-ADR doc fixes
-  (0013 #1, 0014 #3).
-- **Node subclassing / inheritance** — explicitly rejected in favor of factories +
-  predicates.
+- **Caching the text-sniff verdict** — deliberately deferred (see 0008): the sniff is
+  already cheap for `.ctx/context/`; a `(path, mtime, size)`-keyed cache on `Workspace`
+  is worth it only once the KB widens to the whole launch directory.
+- All feature-gated items (persistence-model rework 0006 #2, import snapshots 0009,
+  import escaping 0007 #3) and `Node` subclassing remain out of scope.
 - Do not touch `main`/`develop`, `uv.lock` (use `uv`), `.ctx/`, or `.env`.
+- DO NOT COMMIT `docs/Sprint Roadmap.md`, commit only your touched files.
