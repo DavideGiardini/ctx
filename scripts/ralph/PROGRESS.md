@@ -324,3 +324,17 @@ Git history is the source of truth for *what changed*; this file captures the
   docs-only; ADRs are IMMUTABLE, append a one-line **Correction:** pointer to the
   observation note, never rewrite the Decision/Consequences body). Targets:
   0003 (`:memory:` claim → point to 0013) and 0004 ("no side effects" → 0014 #3).
+
+## 2026-06-26 — Task: Annotate the two stale ADRs with a correction pointer (refs 0013 #1, 0014 #3)
+- Docs-only. ADRs are immutable (`docs/decisions/README.md`: "supersede, don't
+  rewrite") so I **appended** a clearly-marked `**Correction:**` block to each,
+  after a `---` rule, leaving the Decision/Consequences text untouched:
+  - `0003-conversation-repository.md`: the `:memory:` "supports tests" claim is
+    stale under connection-per-method → points to `0013`.
+  - `0004-pure-context-builder.md`: the "no side effects" claim is overstated
+    (`build_context` logs) → points to `0014 #3`.
+- No new tests warranted (docs-only, no behavior change); no qa-tester (no
+  UI/runtime change).
+- Verification: `bash scripts/check.sh` green (ruff + mypy + 316 passed, unchanged).
+- This was the **last unchecked task** in `scripts/ralph/PRD.md` (round-2 cleanups).
+  All three tasks now `- [x]`. PRD complete.

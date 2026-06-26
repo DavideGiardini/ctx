@@ -44,7 +44,7 @@ Top-to-bottom by priority; the loop always takes the topmost unchecked task.
       the existing `tests/test_conversation.py` title tests stay green unchanged; no
       new tests are warranted. `scripts/check.sh` green.
 
-- [ ] **Annotate the two stale ADRs with a correction pointer** — ADRs are immutable,
+- [x] **Annotate the two stale ADRs with a correction pointer** — ADRs are immutable,
       so do NOT rewrite their bodies. Append a brief, clearly-marked **Correction:**
       line to each: `docs/decisions/0003-conversation-repository.md` (its `:memory:`
       "supports tests" claim is false given the connection-per-method design — point to

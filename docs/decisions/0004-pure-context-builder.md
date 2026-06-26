@@ -27,3 +27,10 @@ is injected at the call site.
   Tests pass a stub loader (`build_context(nodes, load_file=lambda p: "stub")`).
 - The injected loader was later unified into `Workspace.read_file` — see
   [0005](0005-inject-workspace.md).
+
+---
+
+**Correction:** "no side effects" is overstated — `build_context` calls
+`logger.warning(...)` on bad/unreadable context nodes, which is I/O. Its *return
+value* is deterministic, but it is not side-effect-free. See
+[0014 #3](0014-wiring-observations.md).
