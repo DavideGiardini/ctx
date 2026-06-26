@@ -39,6 +39,10 @@ reach end users (ADR 0012). See `docs/decisions/` for *why* it's shaped this way
   `StoragePort`, and a `Workspace` by injection (ADR 0001).
 - `provider.py` — `Provider` protocol (`stream()`, `check_connectivity()`) with
   adapters `LiteLLMProvider` (real) and `TestProvider` (canned, no network) (ADR 0002).
+  `LiteLLMProvider.stream` passes a finite `STREAM_TIMEOUT` to the backend and maps
+  any backend failure (request-time or mid-stream) to the domain error `ProviderError`
+  so litellm types never leak through the seam; `CancelledError`/`GeneratorExit`
+  (BaseException) pass through unwrapped (ADR 0011 #1).
 - `storage.py` — `StoragePort` protocol + `ConversationRepository(db_path)`
   encapsulating all SQLite (WAL) schema/serialization (ADR 0003).
 - `context.py` — pure `build_context(nodes, load_file)` → litellm message list;

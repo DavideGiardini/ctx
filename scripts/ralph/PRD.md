@@ -93,7 +93,7 @@ Top-to-bottom by priority; the loop always takes the topmost unchecked task.
       qa-tester — `/model X`, `/resume`, snapshot shows the "Model set to: X" node in
       the restored conversation. `scripts/check.sh` green.
 
-- [ ] **Give the provider a timeout and a domain error type** — in
+- [x] **Give the provider a timeout and a domain error type** — in
       `ctx/core/provider.py`, define a small `ProviderError`; have
       `LiteLLMProvider.stream` pass a sane `timeout` to `acompletion` and map raised
       backend exceptions to `ProviderError` (so the litellm type doesn't leak through

@@ -217,3 +217,33 @@ Git history is the source of truth for *what changed*; this file captures the
   set_model's — switching model writes TWO system nodes (model + connectivity) that
   both survive resume (seen in qa snapshot). Intended. Remaining PRD tasks (provider
   timeout/ProviderError; decouple stream from node ordering) are independent of this.
+
+## 2026-06-26 — Task: Give the provider a timeout and a domain error type (ref 0011 #1)
+- `ctx/core/provider.py`: added `STREAM_TIMEOUT = 60.0` and a `ProviderError(Exception)`
+  domain type. `LiteLLMProvider.stream` now wraps its body in try/except: passes
+  `timeout=STREAM_TIMEOUT` to `acompletion`, and maps any `Exception` (request-time OR
+  mid-stream) to `ProviderError(str(exc)) from exc`. `CancelledError`/`GeneratorExit`
+  are BaseException, so they pass through unwrapped — cancellation still works.
+- `ctx/core/conversation.py`: NO change. `stream` already does
+  `except Exception: persist(); raise`, so `ProviderError` flows through unchanged
+  (persist partial + re-raise same object). Verified by PE6.
+- Why preserve `str(exc)` as the ProviderError message: the UI shows the exception
+  text to the user, so keeping the message identical means no observable UI change →
+  pure core-logic task, no qa-tester run (per loop rules).
+- Tests: code-blind `test-spec-author` wrote `tests/specs/provider-errors.md` (PE1–PE6)
+  + `tests/test_provider_errors.py` — request-time wrap (PE1), mid-stream wrap preserving
+  prior tokens (PE2), timeout positive/finite + handed to backend (PE3), happy-path
+  transparency (PE4), CancelledError not wrapped (PE5), ProviderError flows through
+  ConversationCore.stream with partial persisted (PE6, the acceptance floor). Red on
+  PE1/PE2/PE3 (clean collection) → green after impl. PE4/PE5/PE6 were already green
+  (the except-Exception path + happy path pre-existed).
+- **Deliberate test fix (author was blind to accessor):** PE6 used `conversation.nodes`
+  on the result of `repo.load()`, but `ConversationRepository.load` returns a `list[Node]`
+  directly. Corrected to `[n.content for n in loaded if n.role == "assistant"]`. Intent
+  unchanged (assert partial assistant content persisted).
+- Docs: `AGENTS.md` provider.py line updated (interface gained ProviderError + timeout).
+- Verification: `bash scripts/check.sh` green (311 passed, was 304: +7 new PE tests).
+- Gotcha: wrapping the whole stream body means a malformed-chunk `IndexError`/`AttributeError`
+  (ADR 0011's chunk-shape concern) is now also surfaced as ProviderError — acceptable,
+  arguably better. Remaining PRD task (decouple stream from node ordering, 0006 #1) is
+  the last one and is independent of this.
