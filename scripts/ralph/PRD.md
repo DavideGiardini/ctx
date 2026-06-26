@@ -82,7 +82,7 @@ Top-to-bottom by priority; the loop always takes the topmost unchecked task.
       context → True; system → False); existing `build_context` tests stay green.
       `scripts/check.sh` green.
 
-- [ ] **Make persistence uniform across all commands** — every command method in
+- [x] **Make persistence uniform across all commands** — every command method in
       `ctx/core/conversation.py` (`set_model`, `check_connectivity`,
       `add_system_message`, …) calls `persist()`, and the nodes they create carry
       the `conversation_id` so they are actually written (today system/connectivity

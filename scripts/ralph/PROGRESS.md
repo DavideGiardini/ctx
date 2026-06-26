@@ -176,3 +176,44 @@ Git history is the source of truth for *what changed*; this file captures the
   so no UI/runtime change → no qa-tester run.
 - Gotcha: the build_context docstring already said "other roles (e.g. system) are skipped" — still
   accurate, left as-is. Next PRD task (uniform persistence) is independent of this predicate.
+
+## 2026-06-26 — Task: Make persistence uniform across all commands (ref 0006 #6)
+- `ctx/models/nodes.py`: `Node.system` gained an optional `conversation_id: str = ""`
+  (consistent with the user/assistant/context factories — ownership is orthogonal to
+  kind). Default "" preserves the transient case. **Reverses the prior task's
+  "system carries no conversation_id" invariant** — that was load-bearing only because
+  breadcrumbs weren't meant to persist; this task makes them persist when raised inside
+  a conversation. N4 in test_nodes.py still valid (tests the no-arg default → "").
+- `ctx/core/conversation.py`: `set_model`, `check_connectivity`, `add_system_message`
+  now build their breadcrumb with `self.conversation_id` and call `persist()`
+  (check_connectivity & add_system_message previously didn't persist at all). Added a
+  class-docstring statement of the uniform policy. `new_conversation` left as-is — it
+  already persists the old conversation, and its returned "Started a new conversation"
+  notice legitimately belongs to no conversation (id reset to "").
+- The rule: a breadcrumb persists iff raised inside an active conversation; with no
+  conversation the id is "" and `persist()` no-ops / storage filters it. So `/model`
+  before any message is still not persisted (unchanged).
+- Tests: code-blind `test-spec-author` wrote `tests/specs/command-persistence.md`
+  (CP1–CP11) + `tests/test_command_persistence.py` — each command persists its
+  breadcrumb under an active conversation (acceptance floor), the no-conversation
+  transient case, the Node.system durability seam, and no-displacement of real turns.
+  Fixed the two flagged import lines (`ctx.core.conversation` / `ctx.models.nodes`).
+  Red on the 6 persistence cases (clean collection) → green after impl.
+- **Deliberate test changes (old contract reversed, documented):** deleted stale
+  tests C15 (`set_model_notice_is_transient_and_unpersisted`), C19
+  (`check_connectivity_notice_is_transient`), C34 (`add_system_message_does_not_persist`)
+  — superseded by CP1/CP3/CP4/CP5. Narrowed C35 to the no-conversation case
+  (`..._without_conversation`). Repurposed C45 (`test_persist_excludes_idless_notices`)
+  to the surviving invariant: the storage filter is keyed on conversation_id, not
+  system-ness — an id-less breadcrumb is dropped even while real turns persist. Updated
+  the corresponding entries in `tests/specs/conversation.md`.
+- Docs: `AGENTS.md` models/ line + `storage.py` save comment updated to match.
+- Verification: `bash scripts/check.sh` green (304 passed, was 296: +11 new CP, −3
+  deleted, +0 net elsewhere). qa-tester verify-feature PASS — `/model
+  anthropic/claude-3-opus` inside a conversation, `/new`, `/resume` → restored
+  transcript contains the "Model set to: …" AND "✔ Connected to …" system breadcrumbs;
+  header model also restored; no errors.
+- Gotcha for next iteration: connectivity now fires its own breadcrumb persist after
+  set_model's — switching model writes TWO system nodes (model + connectivity) that
+  both survive resume (seen in qa snapshot). Intended. Remaining PRD tasks (provider
+  timeout/ProviderError; decouple stream from node ordering) are independent of this.
