@@ -28,7 +28,7 @@ slice; the per-issue rationale lives in the referenced `docs/decisions/` notes.
 ## Tasks
 Top-to-bottom by priority; the loop always takes the topmost unchecked task.
 
-- [ ] **Harden `build_context` against bad/empty nodes** — in
+- [x] **Harden `build_context` against bad/empty nodes** — in
       `ctx/core/context.py`, stop silently dropping context nodes whose file fails
       to load: when `load_file` raises `OSError`/`ValueError`, emit a *visible*
       marker into the built message (e.g. a `<context_import source="…"

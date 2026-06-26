@@ -32,3 +32,24 @@ Git history is the source of truth for *what changed*; this file captures the
   has a second implementation, `SaveCountingStorage` in `tests/test_conversation.py`,
   that must be updated in lockstep with any interface change; the agent/QA tooling
   now lives at `tools/agent/` (outside the shipped `ctx` package).
+
+## 2026-06-26 — Task: Harden build_context against bad/empty nodes (refs 0007 #1, #2)
+- `ctx/core/context.py`: a context node whose `load_file` raises `OSError`/`ValueError`
+  no longer `continue`s silently — it emits a visible `<context_import source="…"
+  error="…"></context_import>` block as user material (flows through the normal
+  user-merge). Empty `user`/`assistant` nodes (`content == ""`) are now skipped so no
+  empty-content message reaches the provider. Missing/empty `source_path` still drops
+  (nothing to import).
+- Tests: added code-blind `tests/test_context_failures.py` (test-spec-author) for the
+  two new behaviors — the acceptance floor. **Deliberately corrected** three existing
+  tests in `tests/test_context.py` (C14/C15/C20) that encoded the OLD silent-drop
+  behavior the PRD explicitly reverses; their expectations now match the visible-marker
+  contract (justified change, not test-fudging — expected behavior comes from the PRD,
+  not the impl). Updated `tests/specs/context.md`: rewrote C14/C15/C20, added C23
+  (empty-node skip).
+- Verification: `bash scripts/check.sh` green (263 passed). Pure core logic — no
+  qa-tester run (no UI/runtime behavior change; the adapter calls build_context
+  unchanged).
+- Gotcha for next iteration: the mutmut figures in `tests/specs/context.md` are now
+  marked STALE (the load-failure branch changed shape, empty-skip branches are new) —
+  re-run mutmut on context.py in a future pass if you touch it.
