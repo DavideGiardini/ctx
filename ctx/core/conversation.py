@@ -2,13 +2,13 @@ import asyncio
 from collections.abc import AsyncIterator
 from uuid import uuid4
 
+from ctx.core.config import get_config
 from ctx.core.context import build_context
 from ctx.core.provider import Provider
 from ctx.core.storage import StoragePort
 from ctx.core.workspace import Workspace
 from ctx.models.nodes import Node
 
-DEFAULT_MODEL = "openrouter/google/gemma-4-26b-a4b-it"
 MAX_TITLE_LENGTH = 50
 
 
@@ -24,10 +24,13 @@ class ConversationCore:
         self._storage = storage
         self._provider = provider
         self._workspace = workspace
+        # Default model is read once from config at construction (no per-call
+        # file I/O); used for the initial model and on /new reset (ADR 0006 #3).
+        self._default_model: str = get_config()["model"]
         self.nodes: list[Node] = []
         self.conversation_id: str = ""
         self.conversation_title: str = ""
-        self.model: str = DEFAULT_MODEL
+        self.model: str = self._default_model
 
     def setup(self) -> None:
         self._workspace.ensure()
@@ -88,7 +91,7 @@ class ConversationCore:
         self.nodes = []
         self.conversation_id = ""
         self.conversation_title = ""
-        self.model = DEFAULT_MODEL
+        self.model = self._default_model
         return Node(role="system", content="Started a new conversation.", node_type="system")
 
     def resume_conversation(self, conv_id: str) -> list[Node]:

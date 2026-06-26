@@ -10,7 +10,7 @@ from textual.widgets import Input, Static
 from textual.worker import Worker, WorkerState
 
 from ctx.core.config import get_config
-from ctx.core.conversation import DEFAULT_MODEL, ConversationCore
+from ctx.core.conversation import ConversationCore
 from ctx.core.log import logger
 from ctx.core.provider import LiteLLMProvider, Provider
 from ctx.core.storage import ConversationRepository, StoragePort
@@ -75,7 +75,7 @@ class ChatApp(App):
         self._stream_worker: Worker | None = None
         self.mode = "insert"
         self._selected_node_id: str | None = None
-        logger.info("app initialized | default_model=%s", DEFAULT_MODEL)
+        logger.info("app initialized | default_model=%s", self.core.model)
 
     def compose(self) -> ComposeResult:
         yield AppHeader(id="app-header")

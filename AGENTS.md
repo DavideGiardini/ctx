@@ -45,9 +45,10 @@ reach end users (ADR 0012). See `docs/decisions/` for *why* it's shaped this way
   expands `context` nodes via the injected loader, no I/O of its own (ADR 0004).
 - `workspace.py` — `Workspace(root_path)`: `.ctx/` discovery, `ensure()`,
   `list_files()`, `read_file()`; the sole `Path.cwd()` lives at its call site (ADR 0005).
-- `config.py` — `~/.config/ctx/config.json` merged over defaults (`colors`,
-  `ui.truncation_lines` — per-role node line caps; `"auto"` disables). `log.py`
-  — file logging to `~/.local/state/ctx/ctx.log`.
+- `config.py` — `~/.config/ctx/config.json` merged over defaults (`model` — the
+  user-overridable default LLM model, read once by `ConversationCore` at
+  construction; `colors`; `ui.truncation_lines` — per-role node line caps; `"auto"`
+  disables). `log.py` — file logging to `~/.local/state/ctx/ctx.log`.
 
 **ui/** — dual-pane "conversation IDE" shell (Product Concept §7): docked
 `AppHeader` (top) / `AppFooter` (bottom), a permanent `Horizontal#body` split with

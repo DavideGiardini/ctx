@@ -86,7 +86,11 @@ def test_c2_absent_returns_baseline(config_file):
 def test_c3_baseline_shape(config_file):
     # C3
     defaults = _baseline(config_file)
-    assert set(defaults.keys()) == {"colors", "ui"}
+    assert set(defaults.keys()) == {"colors", "ui", "model"}
+
+    # The default model is a non-empty string (ADR 0006 #3 — sourced from config).
+    assert isinstance(defaults["model"], str)
+    assert defaults["model"]
 
     assert set(defaults["colors"].keys()) == {"user", "assistant", "system", "context"}
     for value in defaults["colors"].values():

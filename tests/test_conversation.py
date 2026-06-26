@@ -19,7 +19,8 @@ import asyncio
 
 import pytest
 
-from ctx.core.conversation import DEFAULT_MODEL, MAX_TITLE_LENGTH, ConversationCore
+from ctx.core.config import DEFAULT_MODEL
+from ctx.core.conversation import MAX_TITLE_LENGTH, ConversationCore
 
 
 class CapturingProvider:
@@ -796,6 +797,31 @@ def test_c47_initial_state(repo, test_provider, workspace):
     assert core.conversation_title == ""
     assert core.model == DEFAULT_MODEL
     assert core.nodes == []
+
+
+# Task 0006 #3 — the default model is sourced from config.py (the user-overridable
+# default), not a hardcoded core constant. A custom config "model" must be adopted
+# both at construction and on /new reset. Guards against a mutation that hardcodes
+# the default (which the C21/C47 default-constant checks would not catch).
+def test_default_model_sourced_from_config(
+    repo, test_provider, workspace, tmp_path, monkeypatch
+):
+    import json
+
+    import ctx.core.config as config_module
+
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps({"model": "test/custom-default-model"}))
+    monkeypatch.setattr(config_module, "CONFIG_PATH", cfg)
+
+    core = ConversationCore(repo, test_provider(["hi"]), workspace)
+    assert core.model == "test/custom-default-model"
+
+    core.setup()
+    core.submit("hello")
+    core.set_model("other/switched-model")
+    core.new_conversation()
+    assert core.model == "test/custom-default-model"
 
 
 # C48 — new_conversation returns a notice with non-empty string content.

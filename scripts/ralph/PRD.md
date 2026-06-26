@@ -53,7 +53,7 @@ Top-to-bottom by priority; the loop always takes the topmost unchecked task.
       conversation, snapshot shows the conversation's model in the footer.
       `scripts/check.sh` green.
 
-- [ ] **Source the default model from `config.py`** — move the default model out of
+- [x] **Source the default model from `config.py`** — move the default model out of
       the `DEFAULT_MODEL` constant in `ctx/core/conversation.py` into the defaults
       in `ctx/core/config.py`; have `ConversationCore` read the default from config
       (read it once, e.g. at construction — don't do file I/O per call). Update the

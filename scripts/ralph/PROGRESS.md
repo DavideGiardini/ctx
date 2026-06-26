@@ -85,3 +85,36 @@ Git history is the source of truth for *what changed*; this file captures the
   (persist() is a no-op without a conversation_id). A bare `/model` before any message
   isn't saved — that's intended (nothing to attach it to). `/new` correctly resets to
   DEFAULT_MODEL.
+
+## 2026-06-26 — Task: Source the default model from config.py (ref 0006 #3)
+- `ctx/core/config.py`: added `DEFAULT_MODEL = "openrouter/google/gemma-4-26b-a4b-it"`
+  constant and wired it as the top-level `_DEFAULTS["model"]` (the default model is
+  now a user-overridable config key, alongside colors/ui). `_DEFAULTS` type annotation
+  widened from `dict[str, dict]` to `dict` since it now holds a scalar value too.
+  No special re-merge needed: a top-level scalar survives `merged.update(user_config)`
+  and is overridden when the user sets `"model"`.
+- `ctx/core/conversation.py`: removed the hardcoded `DEFAULT_MODEL` constant. `__init__`
+  now reads the default ONCE via `get_config()["model"]` into `self._default_model`
+  (no per-call file I/O — PRD requirement); both initial `self.model` and the `/new`
+  reset in `new_conversation()` use `self._default_model`.
+- `ctx/ui/app.py`: dropped the `DEFAULT_MODEL` import; the init log line now reads
+  `self.core.model` (the resolved default). `get_config` was already imported.
+- Tests: existing `DEFAULT_MODEL` import in `test_conversation.py` repointed to
+  `ctx.core.config` (moved symbol; C21/C47 assertions unchanged, still green — no
+  config file in CI so the default is unchanged). Added one focused test
+  `test_default_model_sourced_from_config`: monkeypatches `config.CONFIG_PATH` to a
+  temp config.json with a custom `"model"`, asserts a fresh core adopts it AND that
+  `/new` resets to it. This earns its place — C21/C47 only compare against the default
+  constant and would survive a mutation that hardcodes that same string; this test
+  actually verifies config-sourcing. Chose a direct deliberate test over the blind
+  test-spec-author: single observable assertion on an already-spec'd module, and the
+  contract (config drives the default) is inherently behavioral, not impl-mirroring.
+- Adjusted `tests/test_config.py` C3 (baseline shape) + `tests/specs/config.md` C3/A3:
+  the defaults' top level is now exactly `{colors, ui, model}` (was `{colors, ui}`).
+  Legitimate schema change driven by the task, not test-fudging — recorded here.
+- Verification: `bash scripts/check.sh` green (277 passed, was 276). Pure core-logic
+  task (acceptance is unit-only, no qa-tester line); production behavior unchanged
+  (no config file → same default string), so no qa-tester run.
+- Gotcha: `ConversationCore` now imports `ctx.core.config` — keep the core import
+  graph acyclic (config.py has no ctx imports, so fine). A bare `/model` before any
+  message still isn't persisted (unchanged from prior task).
