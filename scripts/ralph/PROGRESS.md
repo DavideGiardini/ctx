@@ -147,3 +147,32 @@ Git history is the source of truth for *what changed*; this file captures the
   Pure construction refactor with identical field combos verified by unit tests + the
   unchanged test_conversation.py suite — no UI/runtime behavior change, so no qa-tester.
 - Gotcha: next task (goes_to_model predicate) depends on these factories per the PRD.
+
+## 2026-06-26 — Task: Add `goes_to_model` predicate and route `build_context` through it (ref 0014 #1)
+- `ctx/models/nodes.py`: added instance method `Node.goes_to_model() -> bool` returning
+  `self.role in {"user", "assistant"} or self.node_type == "context"`. This is now the
+  single definition of "which nodes reach the LLM" — the derived classifier ADR 0014 #1
+  calls for, alongside the existing factory constructors.
+- `ctx/core/context.py`: routed the inclusion decision through it — added
+  `if not node.goes_to_model(): continue` at the top of the loop. Previously system/other
+  nodes were dropped *implicitly* (they fell through both the user and assistant branches);
+  now the skip is explicit and single-sourced. Behavior-preserving: the predicate is True
+  for exactly the kinds the old fall-through let through (context handled, user/assistant
+  appended) and False for system — so the produced messages are identical. The empty-content
+  skip (`content == ""`) stays separate inside the branches (kind vs. content are orthogonal).
+- `AGENTS.md`: documented the predicate in the models/ line (interface addition → map stays current).
+- Tests: code-blind `test-spec-author` wrote `tests/specs/nodes-goes-to-model.md` (G1–G9) +
+  `tests/test_goes_to_model.py` — the PRD truth table (user/assistant/context → True, system →
+  False) plus edge cases: unrecognized role → False, context recognized via node_type even with
+  a non-chat role (literal-OR semantics), chat role wins regardless of node_type, empty/default
+  node → False, and return is a real `bool`. Red on NotImplementedError (clean collection) →
+  green after the one-line impl.
+- Note on disjunctive semantics (test-spec-author flagged A1): the predicate is a literal OR,
+  so `node_type == "context"` alone (G6) and a chat role alone (G7) each independently return
+  True. The factories never construct such mixed nodes, but the predicate is intentionally
+  permissive (matches the PRD wording "role in {...} OR node_type == context").
+- Verification: `bash scripts/check.sh` green (296 passed, was 287; +9 predicate tests). Pure
+  core-logic task, produced messages unchanged (verified by the unchanged test_context.py suite),
+  so no UI/runtime change → no qa-tester run.
+- Gotcha: the build_context docstring already said "other roles (e.g. system) are skipped" — still
+  accurate, left as-is. Next PRD task (uniform persistence) is independent of this predicate.

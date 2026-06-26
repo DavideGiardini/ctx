@@ -72,7 +72,7 @@ Top-to-bottom by priority; the loop always takes the topmost unchecked task.
       the existing `tests/test_conversation.py` suite stays green.
       `scripts/check.sh` green.
 
-- [ ] **Add a `goes_to_model` predicate and route `build_context` through it**
+- [x] **Add a `goes_to_model` predicate and route `build_context` through it**
       *(depends on the factories task above)* — add `Node.goes_to_model() -> bool`
       (`role in {"user","assistant"}` or `node_type == "context"`) to
       `ctx/models/nodes.py`, and replace the inline role-based inclusion logic in

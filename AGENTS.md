@@ -74,7 +74,10 @@ plus factory classmethods (`Node.user`/`.assistant`/`.system`/`.context`) that a
 single source of truth for each kind's `role`/`node_type`/`content`/`meta`/
 `conversation_id` combination — call sites construct via these, not the bare dataclass
 (ADR 0014 #1). Note `Node.system` carries no `conversation_id` by design, so storage
-skips it (system breadcrumbs are session-local notices, not durable turns).
+skips it (system breadcrumbs are session-local notices, not durable turns). The
+`Node.goes_to_model()` predicate is the single definition of "which nodes reach the
+LLM" (user/assistant turns or `node_type == "context"`); `build_context` routes its
+inclusion decision through it rather than re-deriving role rules inline (ADR 0014 #1).
 
 **tools/agent/** (top-level, OUTSIDE the `ctx` package — never ships, ADR 0012) —
 headless QA tooling (see "Agent-driven testing"): `snapshot.py`, `harness.py`,

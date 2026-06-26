@@ -43,6 +43,17 @@ class Node:
         """
         return cls(role="system", content=content, node_type="system")
 
+    def goes_to_model(self) -> bool:
+        """Whether this node's content is sent to the LLM when building context.
+
+        The single source of truth for "which nodes reach the model": user and
+        assistant chat turns (``role in {"user", "assistant"}``) and context
+        imports (``node_type == "context"``) do; everything else — notably
+        ``system`` breadcrumbs — does not. ``build_context`` routes its inclusion
+        decision through this predicate so the rule has exactly one definition.
+        """
+        return self.role in {"user", "assistant"} or self.node_type == "context"
+
     @classmethod
     def context(cls, source_path: str, conversation_id: str) -> Node:
         """Build a context-import reference to a workspace file.

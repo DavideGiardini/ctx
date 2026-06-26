@@ -29,6 +29,9 @@ def build_context(
     messages: list[dict] = []
 
     for node in nodes:
+        if not node.goes_to_model():
+            continue
+
         node_content, node_role = node.content, node.role
 
         if node.node_type == "context":
