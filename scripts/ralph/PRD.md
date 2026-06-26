@@ -37,7 +37,7 @@ Top-to-bottom by priority; the loop always takes the topmost unchecked task.
       the sniff window); (d) a symlink under `.ctx/context/` that resolves outside it
       is not listed. `scripts/check.sh` green.
 
-- [ ] **Extract a `_derive_title` helper** — in `ctx/core/conversation.py`, factor the
+- [x] **Extract a `_derive_title` helper** — in `ctx/core/conversation.py`, factor the
       duplicated title logic (`content[:MAX_TITLE_LENGTH].replace("\n", " ")`, used in
       `_ensure_conversation` and `resume_conversation`) into one private helper and call
       it from both. Pure refactor, no behavior change. (Ref: 0006 #5.) _Acceptance:_

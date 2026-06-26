@@ -307,3 +307,20 @@ Git history is the source of truth for *what changed*; this file captures the
 - Gotcha for next iter: remaining PRD tasks are 2 (extract `_derive_title` — pure refactor,
   NO new tests) and 3 (annotate two stale ADRs — docs-only, ADRs are immutable, append a
   **Correction:** pointer, never rewrite the Decision/Consequences body).
+
+## 2026-06-26 — Task: Extract a `_derive_title` helper (ref 0006 #5)
+- `ctx/core/conversation.py`: added module-level pure helper
+  `_derive_title(content: str) -> str` returning
+  `content[:MAX_TITLE_LENGTH].replace("\n", " ")`. Replaced the two duplicated
+  inline copies — in `_ensure_conversation` (first-message title) and
+  `resume_conversation` (first user node's content) — with calls to it. Single
+  source of truth, so the two sites can't drift (closes 0006 #5).
+- Pure refactor, no behavior change → NO new tests (per PRD task 2 / PROMPT.md
+  test-strategy rule). Existing `tests/test_conversation.py` title tests are the
+  red/green: suite stayed green at 316 before and after (count unchanged).
+- No UI/runtime change → no qa-tester run (pure core logic).
+- Verification: `bash scripts/check.sh` green (ruff + mypy + 316 passed).
+- Gotcha for next iter: only PRD task 3 remains (annotate two stale ADRs —
+  docs-only; ADRs are IMMUTABLE, append a one-line **Correction:** pointer to the
+  observation note, never rewrite the Decision/Consequences body). Targets:
+  0003 (`:memory:` claim → point to 0013) and 0004 ("no side effects" → 0014 #3).

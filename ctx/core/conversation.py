@@ -12,6 +12,16 @@ from ctx.models.nodes import Node
 MAX_TITLE_LENGTH = 50
 
 
+def _derive_title(content: str) -> str:
+    """Derive a conversation title from a message's content.
+
+    Single source of truth for the title shape: the first ``MAX_TITLE_LENGTH``
+    characters with newlines flattened to spaces, so ``_ensure_conversation`` and
+    ``resume_conversation`` cannot drift (ADR 0006 #5).
+    """
+    return content[:MAX_TITLE_LENGTH].replace("\n", " ")
+
+
 class ConversationCore:
     """Deep module: owns conversation state, commands, and streaming lifecycle.
 
@@ -50,7 +60,7 @@ class ConversationCore:
         if not self.conversation_id:
             self.conversation_id = uuid4().hex
         if not self.conversation_title:
-            self.conversation_title = first_message[:MAX_TITLE_LENGTH].replace("\n", " ")
+            self.conversation_title = _derive_title(first_message)
 
     def persist(self) -> None:
         if not self.conversation_id:
@@ -114,11 +124,7 @@ class ConversationCore:
             # Empty/absent model (e.g. a pre-migration row) keeps the current default.
             self.model = stored_model
         self.conversation_title = next(
-            (
-                n.content[:MAX_TITLE_LENGTH].replace("\n", " ")
-                for n in self.nodes
-                if n.role == "user"
-            ),
+            (_derive_title(n.content) for n in self.nodes if n.role == "user"),
             "",
         )
         return self.nodes
