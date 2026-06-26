@@ -9,38 +9,80 @@ Operate as the autonomous engineer described in `AGENTS.md` (NOT professor mode)
 1. **Orient.** Read `AGENTS.md`, the PRD file at the path in the `PRD_FILE`
    environment variable (fallback `scripts/ralph/PRD.md`), and the tail of
    `scripts/ralph/PROGRESS.md`. Skim recent `git log` for what already happened.
-   Read `docs/decisions/` if your task touches settled architecture.
+   Read the `docs/decisions/` note your task cites (e.g. "Ref: 0014 #2") — it holds
+   the rationale the one-line task can't.
 
 2. **Pick the single highest-priority unchecked task** (`- [ ]`, top to bottom).
    Do only that one. Do not scaffold or stub future tasks.
 
-3. **Implement it** following the "Designing new modules" guidance in `AGENTS.md`
-   (deep modules, core stays framework-free, seams only when a second real
-   implementation exists, deletion test before abstraction).
+3. **Plan, and decide your test strategy.** Before editing code, write a short plan
+   in your output: the approach and the specific files you'll touch (follow
+   "Designing new modules" in `AGENTS.md` — deep modules, core framework-free,
+   deletion test before abstraction). Then decide whether the task warrants *new*
+   tests:
+   - The task's **_Acceptance:_ criterion in the PRD is the mandatory floor** — you
+     must satisfy it, always.
+   - Add tests *beyond* that floor only when the task introduces new behavior or an
+     invariant a realistic regression could break. **Do NOT** add tests for
+     behavior-preserving refactors (rely on the existing suite staying green), plain
+     pass-throughs/getters, framework behavior, or anything `mypy`/`ruff` already
+     guarantee. Prefer a few high-value tests over many shallow ones; apply the
+     deletion test to each test (if removing it loses no meaningful coverage, don't
+     write it). The bar: *would a plausible mutation to the logic survive without
+     this test, and would a human care?* If not, skip it.
 
-4. **Pass the gate.** Run `bash scripts/check.sh`. It must be green (ruff + mypy +
-   pytest). Fix what it reports; do not weaken checks to pass.
+4. **If tests are warranted: write the interface, then author the tests (red).** Use
+   a code-blind, test-first flow:
+   - First write the new public **signatures + docstrings** for what you'll build,
+     with **stub bodies** (`raise NotImplementedError` or a placeholder). The shape
+     exists; the behavior does not.
+   - Spawn the **`test-spec-author`** subagent (Task tool) with *only* that interface
+     (signatures + docstrings) and a **prose statement of intent derived from the PRD
+     task and its `docs/decisions` note** — never the implementation. It writes the
+     behavioral contract (`tests/specs/<module>.md`) and the pytest tests.
+   - Run the tests. They must **fail because the behavior is unimplemented (red),
+     while collecting cleanly**. If they error on *collection* (import error, missing
+     symbol), your interface stubs are incomplete — fix the stubs, not the tests.
 
-5. **Verify behavior.** For any task affecting UI or runtime behavior, delegate to
-   the `qa-tester` subagent (via the Task tool) to drive the real app through the
-   `ctx-agent` MCP server and confirm the task's acceptance criteria. Address any
-   FAIL it reports before continuing.
+   For a behavior-preserving refactor (no new tests warranted), skip this step; your
+   "red/green" is simply that the existing suite stays green before and after.
 
-6. **Commit only on green.** Once the gate passes and qa-tester confirms (where
+5. **Implement to green.** Fill in the real bodies until `bash scripts/check.sh` is
+   green (ruff + mypy + pytest). **Never weaken a check, and never edit the authored
+   tests to force them green** — if a generated test is genuinely wrong, fix it as a
+   deliberate change and record why in `PROGRESS.md`.
+
+6. **Refactor under green.** Clean up while the gate stays green (deep modules,
+   framework-free core, reuse existing seams/patterns).
+
+7. **Verify behavior.** For any task affecting UI or runtime behavior, delegate to
+   the `qa-tester` subagent (Task tool) to drive the real app through the
+   `ctx-agent` MCP server and confirm the task's acceptance criterion. Address any
+   FAIL it reports before continuing. (For pure core-logic tasks, the
+   `test-spec-author` tests + the gate are the verification; `qa-tester` is for
+   UI/runtime behavior.)
+
+8. **Commit only on green.** Once the gate passes and `qa-tester` confirms (where
    applicable), make ONE conventional-commit (`feat:`/`fix:`/`refactor:` …)
    describing the task. Never commit a red tree.
 
-7. **Record progress.**
+9. **Record progress.**
    - Mark the task done in the PRD: change its `- [ ]` to `- [x]`.
-   - Append a short dated entry to `scripts/ralph/PROGRESS.md`: what you did, key
+   - Append a short dated entry to `scripts/ralph/PROGRESS.md`: what you did, what
+     tests you added (or why none were warranted), the verification you ran, key
      decisions, and any gotcha a future fresh iteration must know.
 
-8. **If — and only if — every task in the PRD is now `- [x]`**, print the exact
-   line `RALPH_COMPLETE` on its own line as the last thing you do.
+10. **If — and only if — every task in the PRD is now `- [x]`**, print the exact
+    line `RALPH_COMPLETE` on its own line as the last thing you do.
 
 ## Rules
 - One task per iteration. If a task is too big to finish cleanly, split it: do the
   first coherent piece, commit it, leave the rest as new `- [ ]` items, and stop.
+- Treat code-blind authored tests as fixed: implement *to* them; do not rewrite them
+  to pass. The blind `test-spec-author` is what keeps tests from mirroring the code —
+  don't defeat it.
+- Don't over-test. The PRD acceptance criterion is the floor; tests beyond it must
+  earn their place (step 3). A bloated suite of trivial tests is a defect, not safety.
 - If you are blocked or a task is ambiguous, do NOT guess destructively. Append the
   blocker to `PROGRESS.md`, leave the task unchecked, and stop the iteration.
 - Never touch `main`/`develop` directly, never edit `uv.lock` by hand (use `uv`),

@@ -16,3 +16,19 @@ Git history is the source of truth for *what changed*; this file captures the
 - Gotcha: HistoryScreen caches the conversation list; call `refresh_list()` after
   mutations or the new entry won't appear until reopen.
 -->
+
+## 2026-06-25 — Seed (pre-loop context, not a task)
+- This PRD (`scripts/ralph/PRD.md`) comes from a code-reading triage recorded in
+  `docs/decisions/0006`–`0014`. Every task cites its source note (e.g. "Ref:
+  0014 #2"). **Read the referenced note before implementing** — it holds the *why*
+  the one-line task can't.
+- Cross-cutting intents to honor:
+  - Failures should be *visible*, not silent (drives tasks 1 & 7).
+  - The conversation's model is conversation state, not a global (task 2).
+  - One source of truth for node construction/classification — **factory
+    classmethods + predicates on the single `Node` dataclass, NOT subclasses**
+    (tasks 4–5).
+- Watch-outs: `core/` stays framework-free (zero `textual` imports); `StoragePort`
+  has a second implementation, `SaveCountingStorage` in `tests/test_conversation.py`,
+  that must be updated in lockstep with any interface change; the agent/QA tooling
+  now lives at `tools/agent/` (outside the shipped `ctx` package).
