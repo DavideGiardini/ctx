@@ -247,3 +247,20 @@ Git history is the source of truth for *what changed*; this file captures the
   (ADR 0011's chunk-shape concern) is now also surfaced as ProviderError — acceptable,
   arguably better. Remaining PRD task (decouple stream from node ordering, 0006 #1) is
   the last one and is independent of this.
+
+## 2026-06-26 — Task: Decouple stream() from node ordering (ref 0006 #1)
+- `ctx/core/conversation.py`: `stream` now builds context from
+  `[n for n in self.nodes if n is not assistant_node]` instead of the positional
+  `self.nodes[:-1]`. The streamed node is excluded by IDENTITY, not by being last —
+  same messages in the normal submit→stream flow, but no implicit ordering contract.
+- Behavior-preserving for the real call sequence (submit appends the assistant node
+  last), so no UI/runtime change → no qa-tester run (per loop rules; pure core logic).
+- Test: added `test_stream_excludes_streamed_node_by_identity` (C-series) directly in
+  `tests/test_conversation.py` — not via the code-blind subagent, because the public
+  interface of `stream` is unchanged and this asserts one new internal invariant. It
+  gives the assistant node sentinel content AND appends a later user node so the
+  assistant is no longer last; asserts the sentinel is NOT sent while the later node
+  IS. Verified RED against the reverted `[:-1]` slice (both asserts fail) and GREEN
+  with identity exclusion — the test discriminates the exact mutation.
+- Verification: `bash scripts/check.sh` green (312 passed, was 311: +1 new test).
+- This was the final unchecked PRD task — all tasks now `- [x]`.

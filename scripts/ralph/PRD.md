@@ -105,7 +105,7 @@ Top-to-bottom by priority; the loop always takes the topmost unchecked task.
       `LiteLLMProvider` itself is the network adapter and stays out of the unit suite
       by design. `scripts/check.sh` green.
 
-- [ ] **Decouple `stream()` from node ordering** — in `ConversationCore.stream`
+- [x] **Decouple `stream()` from node ordering** — in `ConversationCore.stream`
       (`ctx/core/conversation.py`), replace `build_context(self.nodes[:-1], …)` with
       a slice that excludes the streamed node *by identity*:
       `build_context([n for n in self.nodes if n is not assistant_node], …)`. Same

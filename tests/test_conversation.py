@@ -21,6 +21,7 @@ import pytest
 
 from ctx.core.config import DEFAULT_MODEL
 from ctx.core.conversation import MAX_TITLE_LENGTH, ConversationCore
+from ctx.models.nodes import Node
 
 
 class CapturingProvider:
@@ -588,6 +589,27 @@ async def test_stream_sends_prior_user_text_not_empty_assistant(repo, workspace)
         content = m.get("content") if isinstance(m, dict) else getattr(m, "content", None)
         if role == "assistant":
             assert content != ""
+
+
+async def test_stream_excludes_streamed_node_by_identity(repo, workspace):
+    # 0006 #1 — the streamed assistant node is excluded from the LLM context by
+    # identity, not by position: it must be dropped even when it is NOT the last
+    # node and even when it already carries (partial) content. A positional
+    # `self.nodes[:-1]` would wrongly send it once another node follows it.
+    provider = CapturingProvider(["ok"])
+    core = ConversationCore(repo, provider, workspace)
+    core.setup()
+    _, assistant_node = core.submit("What gets sent?")
+    # Give the streamed node detectable content and displace it from the tail.
+    assistant_node.content = "SENTINEL_PARTIAL_DRAFT"
+    core.nodes.append(Node.user("A later user turn", core.conversation_id))
+    await _collect(core.stream(assistant_node))
+    messages = provider.captured_messages
+    assert messages is not None
+    # The streamed node's own content must NOT be fed back as context...
+    assert all("SENTINEL_PARTIAL_DRAFT" not in str(m) for m in messages)
+    # ...while the node now occupying the tail position IS included.
+    assert any("A later user turn" in str(m) for m in messages)
 
 
 async def test_stream_persists_full_assistant_content(repo, test_provider, workspace):

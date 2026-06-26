@@ -141,7 +141,8 @@ class ConversationCore:
 
     async def stream(self, assistant_node: Node) -> AsyncIterator[str]:
         """Yield tokens, updating assistant_node.content internally."""
-        messages = build_context(self.nodes[:-1], self._workspace.read_file)
+        context_nodes = [n for n in self.nodes if n is not assistant_node]
+        messages = build_context(context_nodes, self._workspace.read_file)
         try:
             async for token in self._provider.stream(messages, self.model):
                 assistant_node.content += token
