@@ -33,15 +33,23 @@ class Node:
         return cls(role="assistant", content=content, conversation_id=conversation_id)
 
     @classmethod
-    def system(cls, content: str) -> Node:
-        """Build a transient system breadcrumb (e.g. "Model set to: …").
+    def system(cls, content: str, conversation_id: str = "") -> Node:
+        """Build a system breadcrumb (e.g. "Model set to: …").
 
-        ``role="system"`` and ``node_type="system"`` with the given content.
-        It deliberately carries **no** ``conversation_id`` — system breadcrumbs
-        are session-local UI notices, not durable conversation turns, and the
-        storage layer skips nodes without a ``conversation_id``. ``meta`` empty.
+        ``role="system"`` and ``node_type="system"`` with the given content and
+        ``meta`` empty. The optional ``conversation_id`` decides durability: a
+        breadcrumb raised *within* an active conversation carries that id and so
+        persists with it (model-change and connectivity notices reappear on
+        resume); one raised with no active conversation defaults to an empty
+        ``conversation_id`` and stays a session-local notice, because the storage
+        layer skips nodes without a ``conversation_id``.
         """
-        return cls(role="system", content=content, node_type="system")
+        return cls(
+            role="system",
+            content=content,
+            node_type="system",
+            conversation_id=conversation_id,
+        )
 
     def goes_to_model(self) -> bool:
         """Whether this node's content is sent to the LLM when building context.

@@ -13,7 +13,17 @@ MAX_TITLE_LENGTH = 50
 
 
 class ConversationCore:
-    """Deep module: owns conversation state, commands, and streaming lifecycle."""
+    """Deep module: owns conversation state, commands, and streaming lifecycle.
+
+    Persistence policy (uniform across commands): every command method that
+    mutates conversation state — ``submit``, ``set_model``, ``check_connectivity``,
+    ``add_system_message``, ``include_files`` — calls ``persist()`` after creating
+    its node(s), and constructs those nodes with the active ``conversation_id`` so
+    the storage layer actually writes them. A command run before any conversation
+    exists (``conversation_id == ""``) produces a transient node and ``persist()``
+    no-ops, so nothing is written until there is a conversation to own it. The
+    consequence is that model-change and connectivity breadcrumbs survive resume.
+    """
 
     def __init__(
         self,
@@ -65,7 +75,7 @@ class ConversationCore:
 
     def set_model(self, model: str) -> Node:
         self.model = model
-        node = Node.system(f"Model set to: {model}")
+        node = Node.system(f"Model set to: {model}", self.conversation_id)
         self.nodes.append(node)
         self.persist()
         return node
@@ -73,13 +83,15 @@ class ConversationCore:
     async def check_connectivity(self, model: str) -> Node:
         ok, msg = await self._provider.check_connectivity(model)
         if ok:
-            node = Node.system(f"✔ Connected to {model}")
+            node = Node.system(f"✔ Connected to {model}", self.conversation_id)
         else:
             node = Node.system(
                 f"⚠ Could not verify connectivity to {model} — "
-                f"the model may still work. Error: {msg}"
+                f"the model may still work. Error: {msg}",
+                self.conversation_id,
             )
         self.nodes.append(node)
+        self.persist()
         return node
 
     def new_conversation(self) -> Node:
@@ -122,8 +134,9 @@ class ConversationCore:
         return nodes
 
     def add_system_message(self, content: str) -> Node:
-        node = Node.system(content)
+        node = Node.system(content, self.conversation_id)
         self.nodes.append(node)
+        self.persist()
         return node
 
     async def stream(self, assistant_node: Node) -> AsyncIterator[str]:

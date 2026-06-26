@@ -75,7 +75,7 @@ class ConversationRepository:
     def save(
         self, conversation_id: str, title: str, nodes: list[Node], *, model: str = ""
     ) -> None:
-        # Only nodes carrying a conversation_id persist (system messages are skipped).
+        # Only nodes carrying a conversation_id persist (id-less breadcrumbs skipped).
         now = datetime.now(UTC).isoformat()
         persistable = [node for node in nodes if node.conversation_id]
         conn = self._connect()

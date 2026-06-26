@@ -277,16 +277,8 @@ def test_set_model_appends_system_notice(repo, test_provider, workspace):
     assert returned is notice
 
 
-def test_set_model_notice_is_transient_and_unpersisted(repo, test_provider, workspace):
-    # C15
-    core = ConversationCore(repo, test_provider(["hi"]), workspace)
-    core.setup()
-    core.submit("Start a conversation about models")
-    model_name = "openai/gpt-experimental"
-    notice = core.set_model(model_name)
-    assert notice.conversation_id == ""
-    loaded = repo.load(core.conversation_id)
-    assert all(n.content != notice.content for n in loaded)
+# C15 (set_model notice now persists within an active conversation) moved to
+# test_command_persistence.py CP1/CP3 under the uniform-persistence policy.
 
 
 def test_set_model_preserves_persisted_user_nodes(repo, test_provider, workspace):
@@ -329,13 +321,8 @@ async def test_check_connectivity_failure_reports_error(repo, workspace):
     assert "some-error-xyz" in notice.content
 
 
-async def test_check_connectivity_notice_is_transient(repo, test_provider, workspace):
-    # C19
-    core = ConversationCore(repo, test_provider(["hi"]), workspace)
-    core.setup()
-    core.submit("An active conversation before connectivity check")
-    notice = await core.check_connectivity("anthropic/claude-3")
-    assert notice.conversation_id == ""
+# C19 (connectivity notice now persists within an active conversation) moved to
+# test_command_persistence.py CP4 under the uniform-persistence policy.
 
 
 # --------------------------------------------------------------------------
@@ -547,19 +534,14 @@ def test_add_system_message_returns_transient_notice(repo, test_provider, worksp
     assert returned is core.nodes[-1]
 
 
-def test_add_system_message_does_not_persist(repo, test_provider, workspace):
-    # C34
-    core = ConversationCore(repo, test_provider(["hi"]), workspace)
-    core.setup()
-    core.submit("An active conversation before the notice")
-    snapshot = [(n.role, n.content) for n in repo.load(core.conversation_id)]
-    core.add_system_message("note about something transient")
-    after = [(n.role, n.content) for n in repo.load(core.conversation_id)]
-    assert after == snapshot
+# C34 (add_system_message now persists within an active conversation) moved to
+# test_command_persistence.py CP5 under the uniform-persistence policy.
 
 
-def test_add_system_message_notice_is_transient(repo, test_provider, workspace):
-    # C35
+def test_add_system_message_notice_is_transient_without_conversation(
+    repo, test_provider, workspace
+):
+    # C35 — no active conversation → notice carries empty conversation_id, stays transient
     core = ConversationCore(repo, test_provider(["hi"]), workspace)
     core.setup()
     returned = core.add_system_message("A transient system note")
@@ -745,17 +727,19 @@ def test_persist_without_conversation_is_noop(repo, test_provider, workspace):
     assert repo.load("") == []
 
 
-def test_persist_excludes_transient_notices(repo, test_provider, workspace):
-    # C45
+def test_persist_excludes_idless_notices(repo, test_provider, workspace):
+    # C45 — the storage filter is keyed on conversation_id, not "system-ness":
+    # a breadcrumb raised before any conversation exists is id-less and dropped on
+    # save, while the real turns that follow it persist.
     core = ConversationCore(repo, test_provider(["hi"]), workspace)
     core.setup()
+    idless_notice = core.add_system_message("Standalone notice before any chat")
+    assert idless_notice.conversation_id == ""
     user_text = "A real user message that must persist"
     core.submit(user_text)
-    notice = core.set_model("custom/non-default-model")
-    core.persist()
     loaded = repo.load(core.conversation_id)
     assert any(n.content == user_text for n in loaded)
-    assert all(n.content != notice.content for n in loaded)
+    assert all(n.content != idless_notice.content for n in loaded)
 
 
 def test_persisted_context_node_round_trips(repo, test_provider, workspace):

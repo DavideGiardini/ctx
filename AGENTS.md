@@ -73,8 +73,11 @@ a left `DetailInspector` and a right `#conversation` pane (the `MessageList` +
 plus factory classmethods (`Node.user`/`.assistant`/`.system`/`.context`) that are the
 single source of truth for each kind's `role`/`node_type`/`content`/`meta`/
 `conversation_id` combination — call sites construct via these, not the bare dataclass
-(ADR 0014 #1). Note `Node.system` carries no `conversation_id` by design, so storage
-skips it (system breadcrumbs are session-local notices, not durable turns). The
+(ADR 0014 #1). `Node.system(content, conversation_id="")` takes an optional
+`conversation_id`: a breadcrumb raised inside an active conversation carries it and so
+persists (model-change/connectivity notices reappear on resume — uniform-persistence
+policy, ADR 0006 #6); one raised with no active conversation defaults to `""` and stays
+session-local, because storage skips id-less nodes. The
 `Node.goes_to_model()` predicate is the single definition of "which nodes reach the
 LLM" (user/assistant turns or `node_type == "context"`); `build_context` routes its
 inclusion decision through it rather than re-deriving role rules inline (ADR 0014 #1).
