@@ -69,15 +69,22 @@ a user dict containing both "C BODY" and "u2", in that relative order.
 **C13. Empty input yields empty output.**
 Given `[]` → `[]`.
 
-**C14. A context node whose file fails to load is skipped; the rest survives.**
-Given `[context source_path="missing.txt", user "still here"]` where loading "missing.txt"
-raises `FileNotFoundError` (an `OSError`) → build does not raise; output contains a
-`role=="user"` dict containing `"still here"`; the failed node contributes no
-`"context_import"` text.
+**C14. A context node whose file fails to load surfaces a VISIBLE error marker; the
+rest survives.** *(changed 2026-06-26, Ralph task "Harden build_context against
+bad/empty nodes", refs 0007 #1: a failed import used to vanish silently — the file
+never reached the model and the UI showed nothing. It is now made visible.)*
+Given `[context source_path="missing.txt", user "still here"]` where loading
+"missing.txt" raises `FileNotFoundError` (an `OSError`) → build does not raise; the
+failed node emits a user-role `context_import` marker whose content references
+`"missing.txt"` and carries an error indication (`error`), and never becomes
+assistant content; the following `"still here"` user turn still appears.
 
-**C15. A failed context node does not corrupt or force-merge an adjacent user turn.**
-Given `[context source_path="missing.txt" (raises), user "my question"]` → exactly
-`[{"role":"user","content":"my question"}]` — no wrapper text, no source path, no partial body.
+**C15. A failed context marker coalesces into the adjacent user turn (same rule as a
+successful import).** *(changed 2026-06-26 — see C14.)*
+Given `[context source_path="missing.txt" (raises), user "my question"]` → exactly one
+`role=="user"` dict whose content contains `"my question"`, the source path
+`"missing.txt"`, an `error` indication, and the `context_import` marker. The failed
+marker must NOT contain a (non-existent) loaded body.
 
 **C16. A context node missing its `source_path` is skipped.**
 Given `[context with meta lacking "source_path", user "after"]` → build does not raise;
@@ -105,13 +112,27 @@ Given `[context source_path="empty.txt", user "go"]`, loader `{"empty.txt":""}` 
 raise; a single `role=="user"` dict whose content contains `"go"`, `"empty.txt"`, and
 `"context_import"`.
 
-**C20. A context node whose loader raises `ValueError` is skipped; the rest survives.**
-*(The injected loader is the workspace's sandboxed reader, which raises `ValueError` when a
-path escapes the context directory — a distinct failure from a missing file (C14, `OSError`).
-A rejected/escaping import must be skipped exactly like a failed read, not crash the build.)*
+**C20. A context node whose loader raises `ValueError` surfaces a VISIBLE error
+marker; the rest survives.** *(changed 2026-06-26 — see C14. The injected loader is
+the workspace's sandboxed reader, which raises `ValueError` when a path escapes the
+context directory — a distinct failure from a missing file (C14, `OSError`), but
+treated the same: surfaced, not silently dropped, and never crashing the build.)*
 Given `[context source_path="../escape.txt", user "still here"]` where loading
-"../escape.txt" raises `ValueError` → build does not raise; output contains a `role=="user"`
-dict containing `"still here"`; the rejected node contributes no `"context_import"` text.
+"../escape.txt" raises `ValueError` → build does not raise; output contains a
+`role=="user"` dict whose content references `"../escape.txt"` with an `error`
+indication and the `context_import` marker, never becoming assistant content; the
+`"still here"` user turn still appears.
+
+**C23. Empty `user`/`assistant` nodes produce no message.** *(added 2026-06-26, same
+task, ref 0007 #2: a cancelled/failed stream can persist a `content==""` assistant
+node; replayed through `build_context` it became `{"role":"assistant","content":""}`,
+which several provider APIs reject. Now skipped.)*
+A `user` or `assistant` node with `content == ""` yields no message dict for that node
+(no output dict has empty content). An empty assistant node between two real user turns
+leaves no assistant dict; an empty user node contributes nothing. This applies to plain
+message nodes only — a *context* node that successfully loads an empty file body still
+emits a marked import (C19, unchanged), and a *failed* context load still emits its
+error marker (C14/C20), since both are non-empty.
 
 **C21. A context node is imported as USER material regardless of its own declared role.**
 *(adjudicated A5 extended: a "context" node's `role` field is irrelevant — imported file
@@ -137,11 +158,14 @@ empty-source node. (Distinguishes "no source" from `source_path is None`.)
 - **A5 (unknown roles/types):** no product requirement; C4's drop-path coverage suffices.
 
 ## Mutation testing (mutmut)
-Coverage is 100% (lines + branches). mutmut: **66 mutants, 59 killed, 7 survivors —
-all equivalent.** Every survivor mutates the *arguments to `logger.warning(...)`* in the
-two skip branches (missing `source_path`; load failure) — log wording / interpolated
-values only. They do not change the return value or control flow, so they are equivalent
-with respect to this behavioral contract. We deliberately do **not** assert on log text:
+*(STALE since 2026-06-26 — the load-failure branch changed from a silent skip to a
+visible error marker (C14/C20) and empty `user`/`assistant` nodes are now skipped
+(C23). The figures below predate that change and need a re-run.)*
+
+Prior run: coverage 100% (lines + branches); mutmut **66 mutants, 59 killed, 7
+survivors — all equivalent**, every survivor mutating the *arguments to
+`logger.warning(...)`* in the skip branches (log wording / interpolated values only),
+not return value or control flow. We deliberately do **not** assert on log text:
 logging here is a diagnostic side-channel, not part of the model-facing output, and
-asserting exact log strings would couple tests to the implementation. Re-triage only if a
-future change makes the warnings contractual (e.g. surfaced to the user).
+asserting exact log strings would couple tests to the implementation. Re-triage the
+new branches with `mutmut` in a future pass.
