@@ -42,7 +42,12 @@ class ConversationCore:
     def persist(self) -> None:
         if not self.conversation_id:
             return
-        self._storage.save(self.conversation_id, self.conversation_title, self.nodes)
+        self._storage.save(
+            self.conversation_id,
+            self.conversation_title,
+            self.nodes,
+            model=self.model,
+        )
 
     def submit(self, text: str) -> tuple[Node, Node]:
         """Handle a user message. Returns (user_node, assistant_node)."""
@@ -93,6 +98,10 @@ class ConversationCore:
             return []
         self.nodes = loaded
         self.conversation_id = conv_id
+        stored_model = self._storage.get_model(conv_id)
+        if stored_model:
+            # Empty/absent model (e.g. a pre-migration row) keeps the current default.
+            self.model = stored_model
         self.conversation_title = next(
             (
                 n.content[:MAX_TITLE_LENGTH].replace("\n", " ")

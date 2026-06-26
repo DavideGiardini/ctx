@@ -40,7 +40,7 @@ Top-to-bottom by priority; the loop always takes the topmost unchecked task.
       absent); (b) an `assistant` node with `content=""` yields no message.
       `scripts/check.sh` green.
 
-- [ ] **Persist & restore the conversation's model** — add a `model` column to the
+- [x] **Persist & restore the conversation's model** — add a `model` column to the
       `conversations` table in `ctx/core/storage.py`; extend `StoragePort.save` and
       `ConversationRepository.save` to take and write the model; have
       `ConversationCore.persist` pass `self.model`; have

@@ -70,12 +70,15 @@ class SaveCountingStorage:
     def init(self):
         return self._inner.init()
 
-    def save(self, cid, title, nodes):
+    def save(self, cid, title, nodes, *, model=""):
         self.save_count += 1
-        return self._inner.save(cid, title, nodes)
+        return self._inner.save(cid, title, nodes, model=model)
 
     def load(self, cid):
         return self._inner.load(cid)
+
+    def get_model(self, cid):
+        return self._inner.get_model(cid)
 
     def list(self):
         return self._inner.list()

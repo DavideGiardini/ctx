@@ -53,3 +53,35 @@ Git history is the source of truth for *what changed*; this file captures the
 - Gotcha for next iteration: the mutmut figures in `tests/specs/context.md` are now
   marked STALE (the load-failure branch changed shape, empty-skip branches are new) —
   re-run mutmut on context.py in a future pass if you touch it.
+
+## 2026-06-26 — Task: Persist & restore the conversation's model (ref 0014 #2)
+- `ctx/core/storage.py`: added a `model` column to the `conversations` table. New DBs
+  get it from `_SCHEMA`; pre-existing DBs are migrated in `init()` via a new `_migrate`
+  helper that checks `PRAGMA table_info(conversations)` and `ALTER TABLE … ADD COLUMN
+  model TEXT NOT NULL DEFAULT ''` only when absent (SQLite has no ADD COLUMN IF NOT
+  EXISTS). `save` now writes model on both INSERT and UPDATE; new read method
+  `get_model(conversation_id) -> str | None` (None when no row).
+- **Interface decision:** `save` gained `model` as a **keyword-only arg with default ""**
+  (`save(cid, title, nodes, *, model="")`) rather than a 4th positional. This keeps the
+  ~40 existing positional `repo.save(id, title, nodes)` call sites in `test_storage.py`
+  valid (no churn) and reads as "model is optional metadata with a safe default". A
+  future iteration touching this can promote it if a real second caller needs it.
+- `ctx/core/conversation.py`: `persist()` passes `model=self.model`; `resume_conversation`
+  reads `get_model(conv_id)` and restores `self.model` **only when non-empty** — a
+  pre-migration row (model "") must NOT clobber the resumer's current/default model.
+- Updated the `SaveCountingStorage` double in `tests/test_conversation.py` (new `model`
+  kwarg on `save`, new `get_model` passthrough) — required or the StoragePort second impl
+  goes red.
+- Tests: code-blind `test-spec-author` wrote `tests/specs/model-persistence.md` (MP1–MP10)
+  + `tests/test_model_persistence.py` for the round-trip + backward-compat (empty model
+  doesn't clobber) + get_model-None behaviors. I added 3 migration tests to
+  `tests/test_storage.py` myself (legacy pre-model schema → init() adds column, preserves
+  rows, idempotent) since constructing a legacy-schema DB needs raw-sqlite setup the blind
+  author can't have.
+- Verification: `bash scripts/check.sh` green (276 passed, was 263). qa-tester confirmed
+  the UI round-trip: send msg → `/model test/distinct-model-xyz` → `/new` → `/resume` →
+  footer shows the restored model, no errors.
+- Gotcha: model only persists for a conversation that already has a persistable node
+  (persist() is a no-op without a conversation_id). A bare `/model` before any message
+  isn't saved — that's intended (nothing to attach it to). `/new` correctly resets to
+  DEFAULT_MODEL.
