@@ -55,17 +55,17 @@ class ConversationCore:
     def submit(self, text: str) -> tuple[Node, Node]:
         """Handle a user message. Returns (user_node, assistant_node)."""
         self._ensure_conversation(text)
-        user_node = Node(role="user", content=text, conversation_id=self.conversation_id)
+        user_node = Node.user(text, self.conversation_id)
         self.nodes.append(user_node)
         self.persist()
 
-        assistant_node = Node(role="assistant", content="", conversation_id=self.conversation_id)
+        assistant_node = Node.assistant(self.conversation_id)
         self.nodes.append(assistant_node)
         return user_node, assistant_node
 
     def set_model(self, model: str) -> Node:
         self.model = model
-        node = Node(role="system", content=f"Model set to: {model}", node_type="system")
+        node = Node.system(f"Model set to: {model}")
         self.nodes.append(node)
         self.persist()
         return node
@@ -73,15 +73,11 @@ class ConversationCore:
     async def check_connectivity(self, model: str) -> Node:
         ok, msg = await self._provider.check_connectivity(model)
         if ok:
-            node = Node(role="system", content=f"✔ Connected to {model}", node_type="system")
+            node = Node.system(f"✔ Connected to {model}")
         else:
-            node = Node(
-                role="system",
-                content=(
-                    f"⚠ Could not verify connectivity to {model} — "
-                    f"the model may still work. Error: {msg}"
-                ),
-                node_type="system",
+            node = Node.system(
+                f"⚠ Could not verify connectivity to {model} — "
+                f"the model may still work. Error: {msg}"
             )
         self.nodes.append(node)
         return node
@@ -92,7 +88,7 @@ class ConversationCore:
         self.conversation_id = ""
         self.conversation_title = ""
         self.model = self._default_model
-        return Node(role="system", content="Started a new conversation.", node_type="system")
+        return Node.system("Started a new conversation.")
 
     def resume_conversation(self, conv_id: str) -> list[Node]:
         loaded = self._storage.load(conv_id)
@@ -119,20 +115,14 @@ class ConversationCore:
         self._ensure_conversation("")
         nodes: list[Node] = []
         for path in paths:
-            node = Node(
-                role="context",
-                content=f"Included: {path}",
-                node_type="context",
-                conversation_id=self.conversation_id,
-                meta={"source_path": path},
-            )
+            node = Node.context(path, self.conversation_id)
             self.nodes.append(node)
             nodes.append(node)
         self.persist()
         return nodes
 
     def add_system_message(self, content: str) -> Node:
-        node = Node(role="system", content=content, node_type="system")
+        node = Node.system(content)
         self.nodes.append(node)
         return node
 

@@ -69,7 +69,12 @@ a left `DetailInspector` and a right `#conversation` pane (the `MessageList` +
   (conversation picker). CSS split across `app.css` and `widgets/*.css` plus
   widget `DEFAULT_CSS`.
 
-**models/** — `nodes.py`: the `Node` dataclass (one chat turn or context reference).
+**models/** — `nodes.py`: the `Node` dataclass (one chat turn or context reference),
+plus factory classmethods (`Node.user`/`.assistant`/`.system`/`.context`) that are the
+single source of truth for each kind's `role`/`node_type`/`content`/`meta`/
+`conversation_id` combination — call sites construct via these, not the bare dataclass
+(ADR 0014 #1). Note `Node.system` carries no `conversation_id` by design, so storage
+skips it (system breadcrumbs are session-local notices, not durable turns).
 
 **tools/agent/** (top-level, OUTSIDE the `ctx` package — never ships, ADR 0012) —
 headless QA tooling (see "Agent-driven testing"): `snapshot.py`, `harness.py`,

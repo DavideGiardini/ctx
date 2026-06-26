@@ -118,3 +118,32 @@ Git history is the source of truth for *what changed*; this file captures the
 - Gotcha: `ConversationCore` now imports `ctx.core.config` — keep the core import
   graph acyclic (config.py has no ctx imports, so fine). A bare `/model` before any
   message still isn't persisted (unchanged from prior task).
+
+## 2026-06-26 — Task: Add Node factory constructors and migrate ConversationCore (ref 0014 #1)
+- `ctx/models/nodes.py`: added 4 classmethod factories on the `Node` dataclass —
+  `Node.user(content, conversation_id)`, `Node.assistant(conversation_id, content="")`,
+  `Node.system(content)`, `Node.context(source_path, conversation_id)`. Each encodes
+  exactly one valid (role/node_type/content/meta/conversation_id) combination so call
+  sites can't get the mix wrong. Added `from __future__ import annotations` so the
+  classmethods can annotate their return type as `Node` (self-reference).
+- **Load-bearing invariant:** `Node.system` deliberately carries NO `conversation_id`
+  (empty default). This is what keeps system breadcrumbs out of persistence (storage
+  filters nodes without a conversation_id). Documented in the docstring + AGENTS map.
+  user/assistant/context all carry the conversation_id so they persist.
+- `ctx/core/conversation.py`: migrated all 8 `Node(...)` constructions to the factories
+  (submit user+assistant, set_model, check_connectivity ok+fail, new_conversation,
+  include_files, add_system_message). Pure behavior-preserving refactor — identical field
+  tuples. No other `Node(...)` construction exists in ctx/ except storage.py's
+  deserialization (out of scope — it rebuilds from stored columns, not a "kind" factory).
+- `AGENTS.md`: updated the models/ architecture line to document the factories + the
+  no-conversation_id-on-system invariant (interface change → map must stay current).
+- Tests: code-blind `test-spec-author` wrote `tests/specs/nodes.md` (N1–N10) +
+  `tests/test_nodes.py` — each factory's field tuple (PRD acceptance floor), the
+  system empty-conversation_id invariant, context's "Included: <path>" content +
+  meta["source_path"], assistant default-empty vs explicit content, unique ids, and
+  no mutable-default meta aliasing across calls. Red on NotImplementedError (clean
+  collection) → green after impl.
+- Verification: `bash scripts/check.sh` green (287 passed, was 277; +10 node tests).
+  Pure construction refactor with identical field combos verified by unit tests + the
+  unchanged test_conversation.py suite — no UI/runtime behavior change, so no qa-tester.
+- Gotcha: next task (goes_to_model predicate) depends on these factories per the PRD.

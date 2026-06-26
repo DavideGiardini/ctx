@@ -61,7 +61,7 @@ Top-to-bottom by priority; the loop always takes the topmost unchecked task.
       the default model and a freshly constructed `ConversationCore` uses it; the
       hardcoded constant is gone. `scripts/check.sh` green.
 
-- [ ] **Add `Node` factory constructors and migrate `ConversationCore`** — add
+- [x] **Add `Node` factory constructors and migrate `ConversationCore`** — add
       classmethods `Node.user`, `Node.assistant`, `Node.system`, `Node.context` to
       `ctx/models/nodes.py`, each encoding the correct `role`/`node_type`/`content`/
       `meta` combination (e.g. `Node.context(source_path, conversation_id)` sets
