@@ -5,7 +5,13 @@ from pathlib import Path
 CONFIG_DIR = Path.home() / ".config" / "ctx"
 CONFIG_PATH = CONFIG_DIR / "config.json"
 
-_DEFAULTS: dict[str, dict] = {
+# Default LLM model, user-overridable via config.json's top-level "model" key.
+# Lives here (not in the framework-free conversation core) so it sits alongside
+# the other user-settable defaults (ADR 0006 #3).
+DEFAULT_MODEL = "openrouter/google/gemma-4-26b-a4b-it"
+
+_DEFAULTS: dict = {
+    "model": DEFAULT_MODEL,
     "colors": {
         "user": "#3b82f6",
         "assistant": "#f97316",

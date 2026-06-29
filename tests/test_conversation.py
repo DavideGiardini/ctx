@@ -19,7 +19,9 @@ import asyncio
 
 import pytest
 
-from ctx.core.conversation import DEFAULT_MODEL, MAX_TITLE_LENGTH, ConversationCore
+from ctx.core.config import DEFAULT_MODEL
+from ctx.core.conversation import MAX_TITLE_LENGTH, ConversationCore
+from ctx.models.nodes import Node
 
 
 class CapturingProvider:
@@ -70,12 +72,15 @@ class SaveCountingStorage:
     def init(self):
         return self._inner.init()
 
-    def save(self, cid, title, nodes):
+    def save(self, cid, title, nodes, *, model=""):
         self.save_count += 1
-        return self._inner.save(cid, title, nodes)
+        return self._inner.save(cid, title, nodes, model=model)
 
     def load(self, cid):
         return self._inner.load(cid)
+
+    def get_model(self, cid):
+        return self._inner.get_model(cid)
 
     def list(self):
         return self._inner.list()
@@ -273,16 +278,8 @@ def test_set_model_appends_system_notice(repo, test_provider, workspace):
     assert returned is notice
 
 
-def test_set_model_notice_is_transient_and_unpersisted(repo, test_provider, workspace):
-    # C15
-    core = ConversationCore(repo, test_provider(["hi"]), workspace)
-    core.setup()
-    core.submit("Start a conversation about models")
-    model_name = "openai/gpt-experimental"
-    notice = core.set_model(model_name)
-    assert notice.conversation_id == ""
-    loaded = repo.load(core.conversation_id)
-    assert all(n.content != notice.content for n in loaded)
+# C15 (set_model notice now persists within an active conversation) moved to
+# test_command_persistence.py CP1/CP3 under the uniform-persistence policy.
 
 
 def test_set_model_preserves_persisted_user_nodes(repo, test_provider, workspace):
@@ -325,13 +322,8 @@ async def test_check_connectivity_failure_reports_error(repo, workspace):
     assert "some-error-xyz" in notice.content
 
 
-async def test_check_connectivity_notice_is_transient(repo, test_provider, workspace):
-    # C19
-    core = ConversationCore(repo, test_provider(["hi"]), workspace)
-    core.setup()
-    core.submit("An active conversation before connectivity check")
-    notice = await core.check_connectivity("anthropic/claude-3")
-    assert notice.conversation_id == ""
+# C19 (connectivity notice now persists within an active conversation) moved to
+# test_command_persistence.py CP4 under the uniform-persistence policy.
 
 
 # --------------------------------------------------------------------------
@@ -543,19 +535,14 @@ def test_add_system_message_returns_transient_notice(repo, test_provider, worksp
     assert returned is core.nodes[-1]
 
 
-def test_add_system_message_does_not_persist(repo, test_provider, workspace):
-    # C34
-    core = ConversationCore(repo, test_provider(["hi"]), workspace)
-    core.setup()
-    core.submit("An active conversation before the notice")
-    snapshot = [(n.role, n.content) for n in repo.load(core.conversation_id)]
-    core.add_system_message("note about something transient")
-    after = [(n.role, n.content) for n in repo.load(core.conversation_id)]
-    assert after == snapshot
+# C34 (add_system_message now persists within an active conversation) moved to
+# test_command_persistence.py CP5 under the uniform-persistence policy.
 
 
-def test_add_system_message_notice_is_transient(repo, test_provider, workspace):
-    # C35
+def test_add_system_message_notice_is_transient_without_conversation(
+    repo, test_provider, workspace
+):
+    # C35 — no active conversation → notice carries empty conversation_id, stays transient
     core = ConversationCore(repo, test_provider(["hi"]), workspace)
     core.setup()
     returned = core.add_system_message("A transient system note")
@@ -602,6 +589,27 @@ async def test_stream_sends_prior_user_text_not_empty_assistant(repo, workspace)
         content = m.get("content") if isinstance(m, dict) else getattr(m, "content", None)
         if role == "assistant":
             assert content != ""
+
+
+async def test_stream_excludes_streamed_node_by_identity(repo, workspace):
+    # 0006 #1 — the streamed assistant node is excluded from the LLM context by
+    # identity, not by position: it must be dropped even when it is NOT the last
+    # node and even when it already carries (partial) content. A positional
+    # `self.nodes[:-1]` would wrongly send it once another node follows it.
+    provider = CapturingProvider(["ok"])
+    core = ConversationCore(repo, provider, workspace)
+    core.setup()
+    _, assistant_node = core.submit("What gets sent?")
+    # Give the streamed node detectable content and displace it from the tail.
+    assistant_node.content = "SENTINEL_PARTIAL_DRAFT"
+    core.nodes.append(Node.user("A later user turn", core.conversation_id))
+    await _collect(core.stream(assistant_node))
+    messages = provider.captured_messages
+    assert messages is not None
+    # The streamed node's own content must NOT be fed back as context...
+    assert all("SENTINEL_PARTIAL_DRAFT" not in str(m) for m in messages)
+    # ...while the node now occupying the tail position IS included.
+    assert any("A later user turn" in str(m) for m in messages)
 
 
 async def test_stream_persists_full_assistant_content(repo, test_provider, workspace):
@@ -741,17 +749,19 @@ def test_persist_without_conversation_is_noop(repo, test_provider, workspace):
     assert repo.load("") == []
 
 
-def test_persist_excludes_transient_notices(repo, test_provider, workspace):
-    # C45
+def test_persist_excludes_idless_notices(repo, test_provider, workspace):
+    # C45 — the storage filter is keyed on conversation_id, not "system-ness":
+    # a breadcrumb raised before any conversation exists is id-less and dropped on
+    # save, while the real turns that follow it persist.
     core = ConversationCore(repo, test_provider(["hi"]), workspace)
     core.setup()
+    idless_notice = core.add_system_message("Standalone notice before any chat")
+    assert idless_notice.conversation_id == ""
     user_text = "A real user message that must persist"
     core.submit(user_text)
-    notice = core.set_model("custom/non-default-model")
-    core.persist()
     loaded = repo.load(core.conversation_id)
     assert any(n.content == user_text for n in loaded)
-    assert all(n.content != notice.content for n in loaded)
+    assert all(n.content != idless_notice.content for n in loaded)
 
 
 def test_persisted_context_node_round_trips(repo, test_provider, workspace):
@@ -793,6 +803,31 @@ def test_c47_initial_state(repo, test_provider, workspace):
     assert core.conversation_title == ""
     assert core.model == DEFAULT_MODEL
     assert core.nodes == []
+
+
+# Task 0006 #3 — the default model is sourced from config.py (the user-overridable
+# default), not a hardcoded core constant. A custom config "model" must be adopted
+# both at construction and on /new reset. Guards against a mutation that hardcodes
+# the default (which the C21/C47 default-constant checks would not catch).
+def test_default_model_sourced_from_config(
+    repo, test_provider, workspace, tmp_path, monkeypatch
+):
+    import json
+
+    import ctx.core.config as config_module
+
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps({"model": "test/custom-default-model"}))
+    monkeypatch.setattr(config_module, "CONFIG_PATH", cfg)
+
+    core = ConversationCore(repo, test_provider(["hi"]), workspace)
+    assert core.model == "test/custom-default-model"
+
+    core.setup()
+    core.submit("hello")
+    core.set_model("other/switched-model")
+    core.new_conversation()
+    assert core.model == "test/custom-default-model"
 
 
 # C48 — new_conversation returns a notice with non-empty string content.

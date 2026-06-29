@@ -9,7 +9,10 @@ recorded confirmed bugs as strict-xfail; those bugs are now fixed and the marker
 removed. See tests/specs/FOUND-BUGS.md.
 """
 
+import sqlite3
 from datetime import UTC, datetime
+
+from ctx.core.storage import ConversationRepository
 
 
 # C1
@@ -414,3 +417,81 @@ def test_empty_title_stored_verbatim(repo, make_node):
     entries = [entry for entry in listing if entry["id"] == "conv-empty"]
     assert len(entries) == 1
     assert entries[0]["title"] == "Now named"
+
+
+# Migration: a pre-model conversations table (no `model` column) must gain the
+# column on init() without losing existing rows, and behave like a default ""
+# model thereafter. This complements tests/test_model_persistence.py, which
+# covers the round-trip but cannot construct a legacy-schema DB through the
+# public interface alone.
+_PRE_MODEL_SCHEMA = """
+CREATE TABLE conversations (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE nodes (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL REFERENCES conversations(id),
+    role TEXT NOT NULL,
+    content TEXT NOT NULL DEFAULT '',
+    node_type TEXT NOT NULL DEFAULT 'message',
+    meta TEXT NOT NULL DEFAULT '{}'
+);
+"""
+
+
+def _make_legacy_db(path: str) -> None:
+    conn = sqlite3.connect(path)
+    conn.executescript(_PRE_MODEL_SCHEMA)
+    conn.execute(
+        "INSERT INTO conversations (id, title, created_at, updated_at) "
+        "VALUES ('legacy', 'Legacy chat', '2020-01-01', '2020-01-01')"
+    )
+    conn.execute(
+        "INSERT INTO nodes (id, conversation_id, role, content) "
+        "VALUES ('n1', 'legacy', 'user', 'old message')"
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_init_migrates_pre_model_db_preserving_rows(tmp_path):
+    db = str(tmp_path / "legacy.db")
+    _make_legacy_db(db)
+
+    repo = ConversationRepository(db)
+    repo.init()  # must add the model column, not raise, not drop rows
+
+    # Existing data survives the migration.
+    assert [d["id"] for d in repo.list()] == ["legacy"]
+    assert [n.content for n in repo.load("legacy")] == ["old message"]
+    # The migrated row reports an empty (default) model.
+    assert repo.get_model("legacy") == ""
+
+
+def test_migrated_db_persists_model_on_subsequent_save(tmp_path, make_node):
+    db = str(tmp_path / "legacy.db")
+    _make_legacy_db(db)
+    repo = ConversationRepository(db)
+    repo.init()
+
+    repo.save(
+        "legacy",
+        "Legacy chat",
+        [make_node(content="new turn", conversation_id="legacy")],
+        model="some/model",
+    )
+
+    assert repo.get_model("legacy") == "some/model"
+
+
+def test_init_is_idempotent_after_migration(tmp_path):
+    db = str(tmp_path / "legacy.db")
+    _make_legacy_db(db)
+    repo = ConversationRepository(db)
+    repo.init()
+    repo.init()  # second migration pass must be a no-op, not a duplicate-column error
+
+    assert repo.get_model("legacy") == ""

@@ -200,6 +200,56 @@ def test_c26_list_files_skips_unreadable_file(workspace):
 
 
 # ---------------------------------------------------------------------------
+# list_files() — bounded text-sniff + traversal guard (ADR 0008 #1/#2)
+# ---------------------------------------------------------------------------
+
+def test_list_files_lists_extensionless_text_file(workspace):
+    # (a) An extensionless text file (e.g. Dockerfile) is listed — no allowlist.
+    (workspace.context_dir / "Dockerfile").write_text(
+        "FROM python:3.11-slim\nRUN pip install uv\n", encoding="utf-8"
+    )
+    assert "Dockerfile" in workspace.list_files()
+
+
+def test_list_files_skips_file_with_leading_nul_byte(workspace):
+    # (b) A file whose first bytes contain a NUL byte is skipped.
+    (workspace.context_dir / "notes.md").write_text(
+        "Plain readable text.", encoding="utf-8"
+    )
+    (workspace.context_dir / "blob.dat").write_bytes(b"abc\x00def more text after")
+    result = workspace.list_files()
+    assert "blob.dat" not in result
+    assert "notes.md" in result
+
+
+def test_list_files_lists_large_text_file_sniffing_only_prefix(workspace):
+    # (c) A large valid-UTF-8 text file is listed, and only its prefix is read:
+    # the file is >> the sniff window and clean for the first 8 KB, but carries a
+    # NUL byte far past SNIFF_BYTES. If the whole file were validated it would be
+    # skipped; being listed proves the read is bounded to the prefix.
+    big = workspace.context_dir / "big.txt"
+    clean_prefix = ("lorem ipsum dolor sit amet\n" * 1000).encode("utf-8")
+    assert len(clean_prefix) > 8192
+    big.write_bytes(clean_prefix + b"\x00trailing binary garbage")
+    assert "big.txt" in workspace.list_files()
+
+
+def test_list_files_skips_symlink_resolving_outside_context(workspace, tmp_path):
+    # (d) A symlink under context/ whose target resolves outside it is not listed,
+    # so list_files never surfaces a file read_file would reject (C25 parity).
+    outside = tmp_path / "outside_secret.md"
+    outside.write_text("secret outside the sandbox", encoding="utf-8")
+    os.symlink(outside, workspace.context_dir / "link.md")
+
+    inside = workspace.context_dir / "inside.md"
+    inside.write_text("legitimate note", encoding="utf-8")
+
+    result = workspace.list_files()
+    assert "link.md" not in result
+    assert "inside.md" in result
+
+
+# ---------------------------------------------------------------------------
 # read_file() and security boundary
 # ---------------------------------------------------------------------------
 

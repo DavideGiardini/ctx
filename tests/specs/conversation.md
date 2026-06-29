@@ -109,10 +109,11 @@ it.** Given any core → after `set_model(m)`, `nodes[-1]` is a system-notice no
 (`role == "system"`, `node_type == "system"`) whose `content` contains `m` as a substring;
 the return value `is nodes[-1]`.
 
-**C15. The set_model notice is transient and never persisted.** Given an active
-conversation, then `set_model(m)` → the appended notice has `conversation_id == ""`; after
-the persist set_model performs, `repo.load(conversation_id)` contains no node matching the
-notice's content.
+**C15. The set_model notice persists within an active conversation.** *(reversed by the
+uniform-persistence policy — see `command-persistence.md` CP1/CP3; canonical tests now live
+in `test_command_persistence.py`.)* Given an active conversation, `set_model(m)` → the
+appended notice carries the active `conversation_id` and `repo.load(conversation_id)`
+contains a node matching the notice's content, so it reappears on resume.
 
 **C16. set_model persists the real conversation (prior real nodes survive).** Given an
 active conversation with ≥1 real user node, then `set_model(m)` →
@@ -132,8 +133,10 @@ provider whose `check_connectivity` returns `(False, "<err>")` → the returned 
 `is nodes[-1]`, is a system notice, and its content contains `"<err>"` as a substring and
 reads as a warning (distinguishable from success).
 
-**C19. The connectivity notice is transient and not persisted.** The returned notice has
-`conversation_id == ""`; a reload of an active conversation does not contain it.
+**C19. The connectivity notice persists within an active conversation.** *(reversed by the
+uniform-persistence policy — see `command-persistence.md` CP4; canonical test now lives in
+`test_command_persistence.py`.)* The returned notice carries the active `conversation_id`
+and a reload of the active conversation contains it.
 
 ### new_conversation()
 
@@ -207,12 +210,15 @@ fresh core → after `include_files(["docs/spec.md"])`, `repo.load(conversation_
 `add_system_message("…")` returns a node whose `content` equals the supplied text, is a
 system notice (`role == "system"`, `node_type == "system"`), and `is nodes[-1]`.
 
-**C34. add_system_message does NOT persist on its own.** Given an active conversation;
-record what storage holds; then `add_system_message("note")` → `repo.load(conversation_id)`
-returns the same node set as before the call (no write triggered).
+**C34. add_system_message persists within an active conversation.** *(reversed by the
+uniform-persistence policy — see `command-persistence.md` CP5; canonical test now lives in
+`test_command_persistence.py`.)* Given an active conversation, `add_system_message("note")`
+→ the appended notice carries the active `conversation_id` and `repo.load(conversation_id)`
+contains it.
 
-**C35. the add_system_message notice is transient (`conversation_id == ""`).** Even an
-unrelated later `persist()` would not write it.
+**C35. the add_system_message notice is transient when no conversation is active
+(`conversation_id == ""`).** Raised before any conversation exists, the notice carries an
+empty `conversation_id` and is not persisted (storage skips id-less nodes).
 
 ### stream(assistant_node) — async generator
 
@@ -268,10 +274,11 @@ safely before any real conversation exists.)
 
 ### Cross-cutting invariant: system notices are never persisted; context nodes are
 
-**C45. After appending a system notice and persisting, a reload omits the notice.** Given
-an active conversation with real user content; append a notice (via `set_model` or
-`add_system_message` + a `persist()`) → `repo.load(conversation_id)` returns the real nodes
-but NO node matching the notice's content.
+**C45. The persistence filter is keyed on `conversation_id`, not "system-ness".** *(updated
+under the uniform-persistence policy — breadcrumbs raised inside a conversation now persist,
+see `command-persistence.md`.)* Given a breadcrumb raised with NO active conversation (so it
+is id-less), then a real `submit(...)` that establishes the conversation and persists →
+`repo.load(conversation_id)` returns the real turn but NOT the id-less breadcrumb.
 
 **C46. Context nodes DO persist (the filter is keyed on `conversation_id`, not
 "system-ness").** Given an active conversation; `include_files(["docs/spec.md"])`; reload →

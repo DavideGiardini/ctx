@@ -34,9 +34,11 @@ the baseline defaults `D`; does not raise.
 
 **C3. Defaults expose the documented structure.** Baseline `D` contains a `"colors"`
 dict whose keys are exactly `{user, assistant, system, context}` (values are
-strings); and a `"ui"` dict containing a `"truncation_lines"` dict whose keys are
-exactly `{human, assistant, context, system}` (values are ints). *(adjudicated A3:
-the defaults' top level is exactly `{colors, ui}` — no other top-level keys.)*
+strings); a `"ui"` dict containing a `"truncation_lines"` dict whose keys are
+exactly `{human, assistant, context, system}` (values are ints); and a top-level
+`"model"` string (non-empty — the user-overridable default model, ADR 0006 #3).
+*(adjudicated A3: the defaults' top level is exactly `{colors, ui, model}` — no
+other top-level keys.)*
 
 **C4. Never crashes on a missing file.** File absent → returns a dict, raises nothing.
 
@@ -157,8 +159,8 @@ All other items (C1–C16, C20) pass against the current implementation.
 - **A1 (deep isolation):** resolved as IN contract (C17). Currently a bug.
 - **A2 (unknown `ui` sub-keys):** resolved — `ui` merges, unknown sub-keys added,
   defaults preserved (C12).
-- **A3 (top-level keys):** resolved — defaults are exactly `{colors, ui}`; no scalar
-  known top-level keys, so the draft's C15 folded into C14.
+- **A3 (top-level keys):** resolved — defaults are exactly `{colors, ui, model}`;
+  `model` is the lone scalar top-level key (a plain string override, ADR 0006 #3).
 - **A4 (empty file):** resolved — treated as no-overrides, yields `D` (C6).
 - **A5 (wrong-type section):** resolved as IN contract — must not crash (C18).
   Currently a bug. Recovered structure intentionally not pinned.

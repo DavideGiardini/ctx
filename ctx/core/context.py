@@ -14,11 +14,24 @@ def build_context(
     content is coalesced into one user message; assistant nodes are appended
     as their own; other roles (e.g. system) are skipped.
 
+    Failures are made *visible* rather than silent: when a context node's file
+    fails to load (``load_file`` raises ``OSError``/``ValueError``), a marked
+    ``<context_import source="…" error="…">`` block is emitted as user material
+    so the model — and, through it, the user — sees that the import failed,
+    instead of the file silently disappearing. A context node with no usable
+    ``source_path`` has nothing to import and is dropped.
+
+    Empty ``user``/``assistant`` nodes (``content == ""``) are skipped so no
+    empty-content message reaches the provider (several APIs reject those).
+
     ``load_file`` is injected so this stays pure and testable without I/O.
     """
     messages: list[dict] = []
 
     for node in nodes:
+        if not node.goes_to_model():
+            continue
+
         node_content, node_role = node.content, node.role
 
         if node.node_type == "context":
@@ -32,16 +45,26 @@ def build_context(
                 logger.warning(
                     "failed to read context file | path=%s | error=%s", source_path, exc
                 )
-                continue
-            node_content = f'<context_import source="{source_path}">\n{content}\n</context_import>'
+                node_content = (
+                    f'<context_import source="{source_path}" error="{exc}">'
+                    "</context_import>"
+                )
+            else:
+                node_content = (
+                    f'<context_import source="{source_path}">\n{content}\n</context_import>'
+                )
             node_role = "user"
 
         if node_role == "user":
+            if not node_content:
+                continue
             if messages and messages[-1]["role"] == "user":
                 messages[-1]["content"] += node_content
             else:
                 messages.append({"role": "user", "content": node_content})
         elif node_role == "assistant":
+            if not node_content:
+                continue
             messages.append({"role": "assistant", "content": node_content})
 
     return messages

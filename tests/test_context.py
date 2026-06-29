@@ -208,8 +208,9 @@ def test_c13_empty_nodes(make_node):
     assert result == []
 
 
-def test_c14_failed_load_does_not_raise_keeps_following_user(make_node, stub_loader):
-    # C14
+def test_c14_failed_load_surfaces_visible_marker_keeps_following_user(make_node, stub_loader):
+    # C14: a failed context load is now made VISIBLE (not silently dropped) — it
+    # emits an error-marked import referencing the path; the following user survives.
     loader = stub_loader({"present.txt": "x"})
     nodes = [
         make_node(
@@ -222,12 +223,17 @@ def test_c14_failed_load_does_not_raise_keeps_following_user(make_node, stub_loa
     ]
     result = build_context(nodes, loader)
     user_dicts = [d for d in result if d["role"] == "user"]
-    assert any("still here" in d["content"] for d in user_dicts)
-    assert all("context_import" not in d["content"] for d in result)
+    user_text = "\n".join(d["content"] for d in user_dicts)
+    assert "still here" in user_text
+    assert "missing.txt" in user_text
+    assert "error" in user_text.lower()
+    assert "context_import" in user_text
+    assert all(d["role"] != "assistant" for d in result)
 
 
-def test_c15_failed_load_solo_context_dropped(make_node, stub_loader):
-    # C15
+def test_c15_failed_load_surfaces_marker_alongside_user(make_node, stub_loader):
+    # C15: a failed context load no longer vanishes — its error marker merges into
+    # the adjacent user turn (same coalescing rule as a successful import).
     loader = stub_loader({"present.txt": "x"})
     nodes = [
         make_node(
@@ -239,9 +245,13 @@ def test_c15_failed_load_solo_context_dropped(make_node, stub_loader):
         make_node(role="user", content="my question"),
     ]
     result = build_context(nodes, loader)
-    assert result == [{"role": "user", "content": "my question"}]
-    assert all("context_import" not in d["content"] for d in result)
-    assert all("missing.txt" not in d["content"] for d in result)
+    user_dicts = [d for d in result if d["role"] == "user"]
+    assert len(user_dicts) == 1
+    content = user_dicts[0]["content"]
+    assert "my question" in content
+    assert "missing.txt" in content
+    assert "error" in content.lower()
+    assert "context_import" in content
 
 
 def test_c16_context_without_source_path(make_node, stub_loader):
@@ -344,8 +354,9 @@ def test_c19_empty_file_body_still_imports(make_node, stub_loader):
     assert "context_import" in content
 
 
-# C20. A context node whose loader raises ValueError is skipped; the rest survives.
-def test_context_node_loader_valueerror_is_skipped(make_node):
+# C20. A context node whose loader raises ValueError surfaces a visible error
+# marker (not silently dropped); the rest survives.
+def test_context_node_loader_valueerror_surfaces_marker(make_node):
     def loader(path):
         raise ValueError("escapes sandbox")
 
@@ -361,12 +372,15 @@ def test_context_node_loader_valueerror_is_skipped(make_node):
 
     result = build_context(nodes, loader)
 
-    # The skipped context node must not raise and must not surface its import.
-    assert all("context_import" not in msg["content"] for msg in result)
+    # The rejected import is surfaced as a user-role error marker, never raising
+    # and never becoming assistant content.
+    user_text = "\n".join(m["content"] for m in result if m["role"] == "user")
+    assert "../escape.txt" in user_text
+    assert "error" in user_text.lower()
+    assert "context_import" in user_text
     # The surviving user message must still be present.
-    assert any(
-        msg["role"] == "user" and "still here" in msg["content"] for msg in result
-    )
+    assert "still here" in user_text
+    assert all(m["role"] != "assistant" for m in result)
 
 
 # C21. A context node is imported as USER material regardless of its own declared role.

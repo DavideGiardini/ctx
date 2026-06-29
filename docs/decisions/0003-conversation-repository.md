@@ -32,3 +32,10 @@ Introduce a `ConversationRepository` class.
   persistence surface sits behind `StoragePort`. `HistoryScreen` receives the
   repository and calls `self._repo.list()`.
 - All SQL and serialization logic is encapsulated behind a small interface.
+
+---
+
+**Correction:** the Decision's claim that the constructor "supports `:memory:` for
+tests" is stale — the connection-per-method design (each method opens a fresh
+connection) makes an in-memory DB invisible across calls, so tests use a temp-file
+DB instead. See [0013](0013-storage-observations.md).

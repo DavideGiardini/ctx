@@ -10,8 +10,11 @@ class StoragePort(Protocol):
     """Seam for conversation persistence."""
 
     def init(self) -> None: ...
-    def save(self, conversation_id: str, title: str, nodes: list[Node]) -> None: ...
+    def save(
+        self, conversation_id: str, title: str, nodes: list[Node], *, model: str = ""
+    ) -> None: ...
     def load(self, conversation_id: str) -> list[Node]: ...
+    def get_model(self, conversation_id: str) -> str | None: ...
     def list(self) -> list[dict]: ...
     def get_last(self) -> str | None: ...
 
@@ -19,6 +22,7 @@ _SCHEMA = """
 CREATE TABLE IF NOT EXISTS conversations (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL DEFAULT '',
+    model TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -52,11 +56,26 @@ class ConversationRepository:
 
     def init(self) -> None:
         conn = self._connect()
-        conn.executescript(_SCHEMA)
-        conn.close()
+        try:
+            conn.executescript(_SCHEMA)
+            self._migrate(conn)
+            conn.commit()
+        finally:
+            conn.close()
 
-    def save(self, conversation_id: str, title: str, nodes: list[Node]) -> None:
-        # Only nodes carrying a conversation_id persist (system messages are skipped).
+    def _migrate(self, conn: sqlite3.Connection) -> None:
+        # SQLite has no ADD COLUMN IF NOT EXISTS; add the model column to DBs whose
+        # conversations table predates it. New DBs already have it from _SCHEMA.
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(conversations)")}
+        if "model" not in columns:
+            conn.execute(
+                "ALTER TABLE conversations ADD COLUMN model TEXT NOT NULL DEFAULT ''"
+            )
+
+    def save(
+        self, conversation_id: str, title: str, nodes: list[Node], *, model: str = ""
+    ) -> None:
+        # Only nodes carrying a conversation_id persist (id-less breadcrumbs skipped).
         now = datetime.now(UTC).isoformat()
         persistable = [node for node in nodes if node.conversation_id]
         conn = self._connect()
@@ -66,14 +85,15 @@ class ConversationRepository:
             ).fetchone()
             if existing:
                 conn.execute(
-                    "UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?",
-                    (title, now, conversation_id),
+                    "UPDATE conversations SET title = ?, model = ?, updated_at = ? "
+                    "WHERE id = ?",
+                    (title, model, now, conversation_id),
                 )
             elif persistable:
                 conn.execute(
-                    "INSERT INTO conversations (id, title, created_at, updated_at)"
-                    " VALUES (?, ?, ?, ?)",
-                    (conversation_id, title, now, now),
+                    "INSERT INTO conversations (id, title, model, created_at, updated_at)"
+                    " VALUES (?, ?, ?, ?, ?)",
+                    (conversation_id, title, model, now, now),
                 )
             else:
                 # A brand-new conversation with nothing to persist must not create a
@@ -123,6 +143,16 @@ class ConversationRepository:
             )
             nodes.append(node)
         return nodes
+
+    def get_model(self, conversation_id: str) -> str | None:
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT model FROM conversations WHERE id = ?", (conversation_id,)
+            ).fetchone()
+        finally:
+            conn.close()
+        return row[0] if row else None
 
     def list(self) -> list[dict]:
         conn = self._connect()

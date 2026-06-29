@@ -39,15 +39,26 @@ reach end users (ADR 0012). See `docs/decisions/` for *why* it's shaped this way
   `StoragePort`, and a `Workspace` by injection (ADR 0001).
 - `provider.py` — `Provider` protocol (`stream()`, `check_connectivity()`) with
   adapters `LiteLLMProvider` (real) and `TestProvider` (canned, no network) (ADR 0002).
+  `LiteLLMProvider.stream` passes a finite `STREAM_TIMEOUT` to the backend and maps
+  any backend failure (request-time or mid-stream) to the domain error `ProviderError`
+  so litellm types never leak through the seam; `CancelledError`/`GeneratorExit`
+  (BaseException) pass through unwrapped (ADR 0011 #1).
 - `storage.py` — `StoragePort` protocol + `ConversationRepository(db_path)`
   encapsulating all SQLite (WAL) schema/serialization (ADR 0003).
 - `context.py` — pure `build_context(nodes, load_file)` → litellm message list;
   expands `context` nodes via the injected loader, no I/O of its own (ADR 0004).
 - `workspace.py` — `Workspace(root_path)`: `.ctx/` discovery, `ensure()`,
   `list_files()`, `read_file()`; the sole `Path.cwd()` lives at its call site (ADR 0005).
-- `config.py` — `~/.config/ctx/config.json` merged over defaults (`colors`,
-  `ui.truncation_lines` — per-role node line caps; `"auto"` disables). `log.py`
-  — file logging to `~/.local/state/ctx/ctx.log`.
+  `list_files` classifies a file as text by a **bounded ~8 KB sniff** (`SNIFF_BYTES`):
+  no NUL byte + UTF-8-decodable prefix (incremental decode, so a multi-byte char split
+  at the boundary isn't a false negative) — no extension allowlist, so `Dockerfile`/`LICENSE`
+  pass. It also applies `read_file`'s containment guard (`resolve()` + `is_relative_to`),
+  so a symlink escaping the sandbox is never listed and the picker can't surface a file
+  the reader would reject (ADR 0008 #1/#2).
+- `config.py` — `~/.config/ctx/config.json` merged over defaults (`model` — the
+  user-overridable default LLM model, read once by `ConversationCore` at
+  construction; `colors`; `ui.truncation_lines` — per-role node line caps; `"auto"`
+  disables). `log.py` — file logging to `~/.local/state/ctx/ctx.log`.
 
 **ui/** — dual-pane "conversation IDE" shell (Product Concept §7): docked
 `AppHeader` (top) / `AppFooter` (bottom), a permanent `Horizontal#body` split with
@@ -68,7 +79,18 @@ a left `DetailInspector` and a right `#conversation` pane (the `MessageList` +
   (conversation picker). CSS split across `app.css` and `widgets/*.css` plus
   widget `DEFAULT_CSS`.
 
-**models/** — `nodes.py`: the `Node` dataclass (one chat turn or context reference).
+**models/** — `nodes.py`: the `Node` dataclass (one chat turn or context reference),
+plus factory classmethods (`Node.user`/`.assistant`/`.system`/`.context`) that are the
+single source of truth for each kind's `role`/`node_type`/`content`/`meta`/
+`conversation_id` combination — call sites construct via these, not the bare dataclass
+(ADR 0014 #1). `Node.system(content, conversation_id="")` takes an optional
+`conversation_id`: a breadcrumb raised inside an active conversation carries it and so
+persists (model-change/connectivity notices reappear on resume — uniform-persistence
+policy, ADR 0006 #6); one raised with no active conversation defaults to `""` and stays
+session-local, because storage skips id-less nodes. The
+`Node.goes_to_model()` predicate is the single definition of "which nodes reach the
+LLM" (user/assistant turns or `node_type == "context"`); `build_context` routes its
+inclusion decision through it rather than re-deriving role rules inline (ADR 0014 #1).
 
 **tools/agent/** (top-level, OUTSIDE the `ctx` package — never ships, ADR 0012) —
 headless QA tooling (see "Agent-driven testing"): `snapshot.py`, `harness.py`,

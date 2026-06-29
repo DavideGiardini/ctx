@@ -267,3 +267,20 @@ Survivors, by category (none change observable behavior under this contract):
 - **1 — `self._root = None` (in `__init__`).** Survives because `self._root` is **never read**
   (`_workspace`/`_context` derive from the `root_path` parameter directly). A harmless dead
   attribute; candidate for a one-line cleanup (drop `self._root`), not a bug.
+
+## Addendum — list_files hardening (ADR 0008 #1/#2)
+
+`list_files` was later hardened (round-2 cleanup, 2026-06-26). Its public signature is
+unchanged, so these four behaviors are pinned by named tests in `test_workspace.py`
+rather than new C-items:
+
+- `test_list_files_lists_extensionless_text_file` — (a) no extension allowlist; a
+  `Dockerfile` is listed.
+- `test_list_files_skips_file_with_leading_nul_byte` — (b) a NUL byte in the prefix
+  disqualifies a file.
+- `test_list_files_lists_large_text_file_sniffing_only_prefix` — (c) the read is bounded
+  to ~8 KB: a file clean for its first 8 KB but carrying a NUL far past the window is
+  still listed, proving the whole file is not validated.
+- `test_list_files_skips_symlink_resolving_outside_context` — (d) the containment guard
+  (`resolve()` + `is_relative_to`) is applied at listing time, mirroring C25 for
+  `read_file`, so picker and reader agree.
