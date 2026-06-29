@@ -60,7 +60,13 @@ Operate as the autonomous engineer described in `AGENTS.md` (NOT professor mode)
    `ctx-agent` MCP server and confirm the task's acceptance criterion. Address any
    FAIL it reports before continuing. (For pure core-logic tasks, the
    `test-spec-author` tests + the gate are the verification; `qa-tester` is for
-   UI/runtime behavior.)
+   UI/runtime behavior.) Two harness limits to respect: (a) it runs the app
+   **in-process** with `ctx.*` cached, so it cannot see code you edited *this*
+   iteration — `qa-tester` confirms committed/prior behavior, not your uncommitted
+   edit; for a rendering change you just made, rely on unit/Pilot tests, not
+   `qa-tester`. (b) It **cannot perceive vertical spacing/margins/layout**, so put any
+   spacing or layout invariant in a unit test and have `qa-tester` assert on queryable
+   state (CSS classes, content, snapshot fields) instead.
 
 8. **Commit only on green.** Once the gate passes and `qa-tester` confirms (where
    applicable), make ONE conventional-commit (`feat:`/`fix:`/`refactor:` …)

@@ -43,6 +43,22 @@ toggle Insert/Edit `esc`, enter Insert `i` (vim-style, from Edit), navigate node
 Prompt/Content/Output `1`/`2`/`3` (Edit + context node selected), switch pane focus
 `tab`, cancel stream / exit `ctrl+c`; commands `/model`, `/new`, `/resume`, `/include`.
 
+## What the harness can't see
+
+Two structural limits — work within them, don't fight them:
+
+- **No layout/spacing.** `textual_snapshot`/`textual_query` carry no computed margins
+  and `textual_screenshot` is an unreliable character grid. You cannot reliably judge
+  vertical spacing, margins, or pixel alignment. Verify the *queryable proxy* instead —
+  CSS classes (e.g. a `pass-start` marker), content, screen stack, `ctx_snapshot`
+  fields. If a request is fundamentally about spacing/layout, say so in your report and
+  state what you *can* confirm (the classes/state), rather than guessing from a
+  screenshot.
+- **Stale code within a session.** The app runs in-process and the MCP server caches
+  `ctx.*` modules, so source edits made in the same session you're testing are **not**
+  reflected — relaunching the app does not reload them. If you suspect you're seeing
+  pre-edit behavior, flag it; the fix is a server restart, not another relaunch.
+
 ## Modes
 
 You will be told which mode to run. If unclear, ask.
