@@ -157,6 +157,19 @@ snapshot→act→snapshot→check-errors loop, and the key bindings, and keeps t
 token-heavy traffic out of your context. Drive the MCP tools yourself only for a
 quick one-off check.
 
+**Two harness limits to design around:**
+- *It runs the app in-process.* The MCP server imports `ctx.*` once and caches it in
+  `sys.modules`; relaunching the app (`textual_stop` + `textual_launch`) does **not**
+  reload edited code. Source you change in a session is invisible to the harness until
+  the **server process** restarts. So never edit code and UI-verify it in the same
+  session — verify in a later Ralph iteration (a fresh `claude -p` gets a fresh server)
+  or, interactively, after a `/mcp` reconnect of `ctx-agent`.
+- *It can't see layout.* `textual_snapshot`/`textual_query` carry no computed margins
+  and `textual_screenshot` is an unreliable character grid, so the harness cannot judge
+  vertical spacing, margins, or pixel-level layout. Assert on queryable state (CSS
+  classes, content, `ctx_snapshot` fields); put layout/spacing invariants in unit
+  tests, not in `qa-tester`.
+
 > Dependency note: `textual-mcp-server` 1.0.0 pins `textual<8` conservatively;
 > `[tool.uv] override-dependencies` keeps the app on textual 8 while reusing the
 > library. Run the server manually with `uv run python -m tools.agent.mcp_server`

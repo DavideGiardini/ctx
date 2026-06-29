@@ -13,17 +13,18 @@ _TRUNCATION_KEY = {
     "system": "system",
 }
 
-# Which "conversation pass" a role belongs to. context/system inherit the
-# previous node's side, so they are resolved positionally (see _pass_starts).
-_SIDE = {"user": "human", "assistant": "assistant"}
+# Which "conversation pass" a role belongs to. context imports are always
+# human-invoked (/include), so they take the human side; only system nodes
+# inherit the previous node's side, resolved positionally (see _pass_starts).
+_SIDE = {"user": "human", "assistant": "assistant", "context": "human"}
 
 
 def _pass_starts(roles: list[str]) -> list[bool]:
     """For an ordered list of node roles, return whether each node begins a new
     conversation pass (gets a top margin). A pass is a human turn (query + its
-    context imports) or an assistant turn (response + its imports); context and
-    system nodes inherit the side of the preceding node. The first node is never
-    a pass start.
+    context imports) or an assistant turn (response + its imports); context nodes
+    take the human side (they come from /include) and system nodes inherit the
+    side of the preceding node. The first node is never a pass start.
     """
     starts: list[bool] = []
     prev_side: str | None = None
