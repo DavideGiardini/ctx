@@ -46,8 +46,6 @@ class ChatApp(App):
         Binding("i", "enter_insert", "Insert Mode", show=False),
         Binding("up", "up", "Up", show=False),
         Binding("down", "down", "Down", show=False),
-        Binding("pageup", "page_up", "Page up", show=False),
-        Binding("pagedown", "page_down", "Page down", show=False),
         Binding("enter", "detail_enter", "Select split", show=False),
         Binding("home", "jump_home", "Jump to top", show=False),
         Binding("1", "maximize_split('prompt')", "Prompt split", show=False),
@@ -276,14 +274,6 @@ class ChatApp(App):
             )
         idx = (start + step) % len(self.core.nodes)
         self._select_message(self.core.nodes[idx].id)
-
-    def action_page_up(self) -> None:
-        if self.mode == "edit" and self._focus_in_detail():
-            self.query_one(DetailInspector).scroll_page(-1)
-
-    def action_page_down(self) -> None:
-        if self.mode == "edit" and self._focus_in_detail():
-            self.query_one(DetailInspector).scroll_page(1)
 
     def action_detail_enter(self) -> None:
         if self.mode != "edit" or not self._focus_in_detail():

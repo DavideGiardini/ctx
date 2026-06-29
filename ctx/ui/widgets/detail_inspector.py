@@ -36,6 +36,12 @@ class _Split(VerticalScroll):
 
     can_focus = True
 
+    def action_page_up(self) -> None:
+        self.scroll_page_up(animate=False)
+
+    def action_page_down(self) -> None:
+        self.scroll_page_down(animate=False)
+
 
 # Logical split name -> (container id, text-widget id).
 _SPLITS = {
@@ -114,7 +120,8 @@ class DetailInspector(Container):
         if self.node_state is None or self.node_state.node_type == "context":
             return
         self.query_one("#detail-standard-md", Markdown).update(content)
-        self.query_one("#detail-standard", VerticalScroll).scroll_end()
+        box = self.query_one("#detail-standard", VerticalScroll)
+        self.call_after_refresh(lambda: box.scroll_end(animate=False))
 
     def enter_pane(self) -> str:
         """Tab into the pane. Returns the sub-state entered: "none" (empty),
@@ -200,15 +207,6 @@ class DetailInspector(Container):
     def scroll_lines(self, delta: int) -> None:
         if self.pane_mode == "maximized" and self._max_box:
             self.query_one(self._max_box, _Split).scroll_relative(y=delta, animate=False)
-
-    def scroll_page(self, delta: int) -> None:
-        if self.pane_mode != "maximized" or not self._max_box:
-            return
-        box = self.query_one(self._max_box, _Split)
-        if delta > 0:
-            box.scroll_page_down(animate=False)
-        else:
-            box.scroll_page_up(animate=False)
 
     def back(self) -> str:
         """Esc: step back one level. Returns "browse" (un-maximized to Browse) or
