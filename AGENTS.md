@@ -45,7 +45,13 @@ reach end users (ADR 0012). See `docs/decisions/` for *why* it's shaped this way
   `LiteLLMProvider.stream` passes a finite `STREAM_TIMEOUT` to the backend and maps
   any backend failure (request-time or mid-stream) to the domain error `ProviderError`
   so litellm types never leak through the seam; `CancelledError`/`GeneratorExit`
-  (BaseException) pass through unwrapped (ADR 0011 #1).
+  (BaseException) pass through unwrapped (ADR 0011 #1). `stream` also takes an optional
+  out-of-band `on_usage: Callable[[Usage], None]`: when the provider reports exact token
+  counts it fires `on_usage` exactly once with a `Usage(prompt_tokens, completion_tokens,
+  total_tokens)`, keeping the stream plain `str` (ADR 0015). `LiteLLMProvider` requests
+  `stream_options={"include_usage": True}` and guards the chunk loop so the final
+  empty-`choices` usage chunk can't `IndexError`; `TestProvider(tokens, usage=None)` fires
+  the canned `usage` after its tokens (default `None` keeps the `test_provider` fixture green).
 - `storage.py` — `StoragePort` protocol + `ConversationRepository(db_path)`
   encapsulating all SQLite (WAL) schema/serialization (ADR 0003).
 - `context.py` — pure `build_context(nodes, load_file)` → litellm message list;

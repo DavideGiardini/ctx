@@ -94,7 +94,7 @@ Dependencies are noted; every prerequisite sits above its dependent.
       `textual_check_errors`. (qa-tester may lag one iteration due to the in-process
       cache — the Pilot test is the floor.)
 
-- [ ] **4. Provider `on_usage` seam + `stream_options` + TestProvider usage** — in
+- [x] **4. Provider `on_usage` seam + `stream_options` + TestProvider usage** — in
       `ctx/core/provider.py` define a small `Usage` type (`prompt_tokens`,
       `completion_tokens`, `total_tokens`) and add an optional
       `on_usage: Callable[[Usage], None] | None = None` to the `Provider` protocol and

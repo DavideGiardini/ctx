@@ -5,9 +5,14 @@ code-blind from intent (see `.claude/skills/write-tests`), then human-adjudicate
 Tests in `tests/test_provider.py` cite these item ids. **When behavior changes, update
 this contract first**, then the tests.
 
-`Provider` is the streaming-LLM seam: `stream(messages, model) -> AsyncIterator[str]`
-yields the assistant's reply token-by-token, and `check_connectivity(model) -> (ok, msg)`
-probes whether a model is reachable without ever raising. Two implementations exist:
+`Provider` is the streaming-LLM seam: `stream(messages, model, on_usage=None) ->
+AsyncIterator[str]` yields the assistant's reply token-by-token, and
+`check_connectivity(model) -> (ok, msg)` probes whether a model is reachable without ever
+raising. The optional `on_usage: Callable[[Usage], None]` is an **out-of-band** seam: when
+the provider reports exact token counts for the completion it invokes `on_usage` exactly
+once with a `Usage(prompt_tokens, completion_tokens, total_tokens)`; the token stream stays
+plain `str` (ADR 0015). A provider with no usage to report never calls it, so passing
+`on_usage` is always safe and never required. Two implementations exist:
 
 - **`TestProvider`** — a deterministic double that streams a fixed token list and reports
   constant health. Covered by C1–C4 (the `TestProvider` section below).
@@ -83,6 +88,54 @@ reported, not propagated, so a model that cannot be reached degrades gracefully.
 Given an upstream probe that raises an exception carrying a recognizable message → 
 `check_connectivity(model)` returns `(False, msg)` where `ok is False` and `msg` is a string
 reflecting the failure (contains the upstream error's text). The exception does not escape.
+
+### Usage seam — `on_usage` callback (Task 4 / ADR 0015)
+
+`Usage` is a frozen dataclass `(prompt_tokens, completion_tokens, total_tokens)`. Usage is
+delivered out-of-band via the optional `on_usage` callback, never on the token stream.
+
+**C10. `TestProvider` with canned usage: callback fires exactly once with that `Usage`.**
+Given `TestProvider(tokens, usage=Usage(p, c, t))` and `stream(..., on_usage=cb)` consumed to
+completion → `cb` is invoked **exactly once**; the single argument has the exact field values
+`(p, c, t)` the provider was constructed with.
+
+**C11. `TestProvider` with canned usage: all tokens still stream, in order, undropped.**
+Same construction as C10 → the yielded tokens equal the original `tokens` list exactly (same
+elements, same order, none dropped or duplicated). Usage delivery does not consume or alter the
+token stream.
+
+**C12. `TestProvider` with canned usage: callback fires *after* the tokens.**
+Same construction as C10, with a callback that records how many tokens have been yielded when it
+fires (the consumer appends as it iterates) → at callback time all tokens have already been
+yielded (recorded count equals `len(tokens)`); the callback reports a completed completion.
+*(Adjudication: the interface exposes no direct ordering oracle; ordering is made observable via
+the consumer's running count, not via internals.)*
+
+**C13. `TestProvider` with no usage: callback never fires even when supplied.**
+Given `TestProvider(tokens)` (default `usage=None`) and `stream(..., on_usage=cb)` consumed
+fully → `cb` is **never** called; all tokens still stream in order.
+
+**C14. `on_usage` omitted / `None` behaves exactly like before.**
+Streaming with `on_usage=None` (or omitted entirely) → all tokens stream in order exactly as the
+plain token list and consumption completes normally; the absent callback has no observable effect.
+
+**C15. `LiteLLMProvider`: final empty-`choices` usage chunk does not crash; tokens still stream.**
+Given an upstream stream of content chunks followed by a FINAL chunk with `choices == []` (empty)
+and a `.usage` object → consumption completes **without raising** (no `IndexError` from
+`choices[0]`); the yielded tokens equal exactly the earlier content chunks' content, in order,
+with nothing extra appended from the usage chunk.
+
+**C16. `LiteLLMProvider`: usage chunk drives `on_usage` once with mapped fields.**
+Same fake stream as C15 whose final chunk carries `usage.prompt_tokens=P`,
+`usage.completion_tokens=C`, `usage.total_tokens=T`, consumed with `on_usage=cb` → `cb` is invoked
+**exactly once** with a `Usage` whose fields equal `(P, C, T)`. *(Adjudication: "usage present" is
+detected via `chunk.usage` being non-`None`, not via empty choices; fields are asserted
+individually rather than via `__eq__` against the upstream namespace.)*
+
+**C17. `LiteLLMProvider`: no usage chunk ⇒ callback never fires, tokens still stream.**
+Given a fake stream of content chunks where no chunk ever carries `.usage`, consumed with
+`on_usage=cb` → `cb` is **never** called; the yielded tokens equal exactly the content chunks'
+content, in order.
 
 ## Adjudication notes
 - **A1 (test seam):** `LiteLLMProvider` is tested by monkeypatching

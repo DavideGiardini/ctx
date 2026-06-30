@@ -452,3 +452,43 @@ Git history is the source of truth for *what changed*; this file captures the
   `usage`-off-the-stream seam shape), so it MUST add an ADR in `docs/decisions/`.
   Keep the `test_provider` fixture green: TestProvider's new `usage` arg defaults to
   `None`.
+
+## 2026-06-30 — Task 4: Provider `on_usage` seam + `stream_options` + TestProvider usage
+- Added an out-of-band usage seam to `ctx/core/provider.py`: a frozen `Usage`
+  dataclass (`prompt_tokens`, `completion_tokens`, `total_tokens`) and an optional
+  `on_usage: Callable[[Usage], None] | None = None` on the `Provider` protocol and
+  both impls. `stream` keeps yielding plain `str`; usage rides the callback.
+  - `LiteLLMProvider`: now passes `stream_options={"include_usage": True}`, GUARDS the
+    chunk loop with `if chunk.choices:` (the include_usage final chunk has empty
+    `choices` — the old `chunk.choices[0]` `IndexError`'d on it, a real latent crash),
+    and fires `on_usage(Usage(...))` once when `getattr(chunk, "usage", None)` is set.
+  - `TestProvider.__init__(tokens, usage=None)`: stores the canned usage and, after
+    yielding its tokens, calls `on_usage(self._usage)` only when both usage and the
+    callback are non-None. Default `None` keeps the `test_provider` conftest fixture
+    (and every existing `stream(messages, model)` caller) green — backward compatible.
+- ADR: recorded `docs/decisions/0015-usage-off-the-stream.md` (Accepted) — callback
+  chosen over a `str | StreamChunk` union (a union would tax every consumer on every
+  chunk for an at-most-once value); provider-agnostic; documents the empty-choices
+  latent-crash fix. Indexed in `docs/decisions/README.md`.
+- Tests (code-blind, per PRD): spawned `test-spec-author` with ONLY the interface
+  (signatures + docstrings) + prose intent + the documented litellm chunk seam. It
+  authored contract items C10–C17 and the pytest tests; I merged them into
+  `tests/test_provider.py` (+8 tests) and `tests/specs/provider.md`. Verified RED
+  first against the stubs (4 failed: the on_usage-fires cases + the empty-choices
+  crash; the "never fires"/"tokens still stream" cases passed even on stubs — exactly
+  the right red/green split), then implemented to green. Authored tests treated as
+  fixed — not edited to pass.
+- Gotchas for future iters:
+  - Blind author wrote a `_drain` helper that duplicates the existing `_collect`;
+    kept it as-authored (harmless, don't rewrite blind tests). Its scratch deliverables
+    `tests/_task4_*.{py,md}` were merged then deleted.
+  - In test_provider.py import `TestProvider as CannedProvider` (pytest would try to
+    collect a bare `Test*` class otherwise) — ruff `--fix` split the import into two lines.
+- Verification: `bash scripts/check.sh` green (ruff + mypy + 363 passed; +8 new). Pure
+  core-logic seam (no UI/runtime change) → NO qa-tester per PROMPT step 7 (the contract
+  tests + gate are the verification).
+- Next: Task 5 (`conversation.py` calibration) wires this seam — `ConversationCore.stream`
+  computes the local sum (`tokens.count_messages`) and passes an `on_usage` that
+  sanity-checks usage and stores `last_usage` + `calibration = prompt_tokens / local_sum`.
+  The extended `test_provider` fixture path: construct `TestProvider(tokens, usage=...)`
+  directly (the conftest factory still builds usage-less providers).
