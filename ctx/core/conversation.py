@@ -2,12 +2,19 @@ import asyncio
 from collections.abc import AsyncIterator, Callable
 from uuid import uuid4
 
+from ctx.core import tokens
 from ctx.core.config import get_config
 from ctx.core.context import build_context
-from ctx.core.provider import Provider
+from ctx.core.provider import Provider, Usage
 from ctx.core.storage import StoragePort
 from ctx.core.workspace import Workspace
 from ctx.models.nodes import Node
+
+# A provider's reported prompt-token count is accepted as a calibration anchor
+# only when it lands within this factor of the local estimate (either
+# direction). A count wildly off the local sum signals a mismatched tokenizer or
+# a buggy provider report and is rejected rather than poisoning the gauge.
+CALIBRATION_TOLERANCE = 10.0
 
 MAX_TITLE_LENGTH = 50
 
@@ -51,6 +58,35 @@ class ConversationCore:
         self.conversation_id: str = ""
         self.conversation_title: str = ""
         self.model: str = self._default_model
+        # Provider-anchored token accounting for the header gauge. Both stay
+        # None until a streamed turn reports usage that passes the sanity check.
+        self._last_usage: Usage | None = None
+        self._calibration: float | None = None
+
+    @property
+    def last_usage(self) -> Usage | None:
+        """The provider's exact ``Usage`` for the most recent streamed turn.
+
+        ``None`` until a turn completes whose provider-reported usage passes the
+        sanity check (see ``calibration``); thereafter it is that turn's
+        ``Usage``. A turn whose provider reports no usage, or reports usage that
+        fails the sanity check, leaves the previous value unchanged.
+        """
+        return self._last_usage
+
+    @property
+    def calibration(self) -> float | None:
+        """Provider prompt-token count ÷ local estimate for the latest turn.
+
+        The factor the header gauge uses to scale its provider-agnostic local
+        estimate onto the provider's own tokenizer. It is
+        ``prompt_tokens / local_sum`` for the most recent turn whose usage passed
+        the sanity check — ``prompt_tokens > 0``, a positive local sum, and the
+        two within ``CALIBRATION_TOLERANCE``× of each other. ``None`` until such a
+        turn occurs; a turn with no usage, or with usage that fails the sanity
+        check, leaves the previous value unchanged.
+        """
+        return self._calibration
 
     @property
     def read_file(self) -> Callable[[str], str]:
@@ -155,12 +191,42 @@ class ConversationCore:
         self.persist()
         return node
 
+    def _calibrate(self, local_sum: int, usage: Usage) -> None:
+        """Adopt a provider ``Usage`` as the gauge calibration anchor, if sane.
+
+        Trusts the report only when ``prompt_tokens`` is positive, the local
+        estimate is positive, and the two agree within ``CALIBRATION_TOLERANCE``×
+        either way. A sane report sets ``last_usage`` and
+        ``calibration = prompt_tokens / local_sum``; a bogus one (zero or wildly
+        off the local sum) is ignored so a previously trusted anchor survives.
+        """
+        if usage.prompt_tokens <= 0 or local_sum <= 0:
+            return
+        ratio = usage.prompt_tokens / local_sum
+        if not (1 / CALIBRATION_TOLERANCE <= ratio <= CALIBRATION_TOLERANCE):
+            return
+        self._last_usage = usage
+        self._calibration = ratio
+
     async def stream(self, assistant_node: Node) -> AsyncIterator[str]:
-        """Yield tokens, updating assistant_node.content internally."""
+        """Yield tokens, updating assistant_node.content internally.
+
+        Also anchors the header gauge: the local token estimate of the context
+        just built (``tokens.count_messages`` of the exact ``messages`` sent) is
+        measured, and an ``on_usage`` callback is handed to the provider. When the
+        provider reports a sane ``Usage`` (see ``_calibrate``) it updates
+        ``last_usage`` and ``calibration`` for this turn; otherwise both are left
+        unchanged. The yielded values stay plain ``str``.
+        """
         context_nodes = [n for n in self.nodes if n is not assistant_node]
         messages = build_context(context_nodes, self._workspace.read_file)
+        local_sum = tokens.count_messages(messages, self.model)
+
+        def on_usage(usage: Usage) -> None:
+            self._calibrate(local_sum, usage)
+
         try:
-            async for token in self._provider.stream(messages, self.model):
+            async for token in self._provider.stream(messages, self.model, on_usage):
                 assistant_node.content += token
                 yield token
         except asyncio.CancelledError:

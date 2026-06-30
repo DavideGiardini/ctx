@@ -113,7 +113,7 @@ Dependencies are noted; every prerequisite sits above its dependent.
       LiteLLM path tolerates a usage/empty-`choices` chunk without crashing.
       `scripts/check.sh` green.
 
-- [ ] **5. `conversation.py` calibration** _(deps: 1, 4)_ — in `ConversationCore.stream`
+- [x] **5. `conversation.py` calibration** _(deps: 1, 4)_ — in `ConversationCore.stream`
       (`ctx/core/conversation.py:148`) compute the local sum of the context just sent
       (`tokens.count_messages(messages, self.model)`) and pass an `on_usage` callback to
       `self._provider.stream`. On callback, **sanity-check** the usage

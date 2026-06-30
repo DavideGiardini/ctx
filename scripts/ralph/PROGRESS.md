@@ -492,3 +492,44 @@ Git history is the source of truth for *what changed*; this file captures the
   sanity-checks usage and stores `last_usage` + `calibration = prompt_tokens / local_sum`.
   The extended `test_provider` fixture path: construct `TestProvider(tokens, usage=...)`
   directly (the conftest factory still builds usage-less providers).
+
+## 2026-06-30 — Task 5: `conversation.py` calibration (wires the on_usage seam)
+- `ConversationCore.stream` now anchors the header gauge: it measures the local
+  token sum of the exact context it sends (`tokens.count_messages(messages, model)`)
+  and hands the provider an `on_usage` callback. A reported `Usage` is adopted only
+  if SANE — `prompt_tokens > 0`, `local_sum > 0`, and the ratio within
+  `CALIBRATION_TOLERANCE` (= 10.0) either way. Sane → set `last_usage` +
+  `calibration = prompt_tokens / local_sum`; bogus/usage-less → leave both unchanged
+  (so a trusted anchor survives a later bad turn). Logic lives in a private
+  `_calibrate(local_sum, usage)` helper. Added read-only `last_usage` (`Usage | None`)
+  and `calibration` (`float | None`) properties, both `None` until a sane turn.
+  `stream` still yields plain `str` — the app is untouched (Task 6 reads the accessors).
+- Code-blind flow (changed core behavior): wrote interface stubs (the two properties
+  returning None-backed attrs, `stream` left unwired) → spawned `test-spec-author` with
+  ONLY the interface + prose intent (PRD + ADR 0015) → it authored contract C58–C65 and
+  the pytest tests. Verified RED first: 4/8 failed (the calibration-must-be-SET cases:
+  C58 sane, C59 ratio invariant, C64 survives-no-usage, C65 survives-bogus), 4/8 passed
+  on the stub (C60 no-usage, C61 zero, C62 out-of-range, C63 fresh — all expect None,
+  which the stub gives) — the correct red/green split, clean collection. Then
+  implemented to green. Authored tests treated as fixed.
+- The ratio-invariant test (C59) pins the formula `prompt_tokens / local_sum` WITHOUT
+  hardcoding a tokenizer count: two identically-built cores measure the same context,
+  so `local_sum` cancels and `calib_a / calib_b == pa / pb`. Clever and robust.
+- New conftest fixtures (the blind author needed them; legitimate reusable test infra):
+  `repo_factory`/`workspace_factory` (independent DB/workspace per call — C59 needs two
+  unrelated cores) and `varying_provider` (a `_VaryingProvider` whose per-turn tokens +
+  usage vary by call count — C64/C65 drive sane-then-bad on ONE core). Also extended the
+  `test_provider` factory to accept optional `usage` (backward-compatible default `None`).
+- GOTCHA (bit me, will bite future iters): `ConversationCore.stream` now calls
+  `provider.stream(messages, model, on_usage)` with THREE args. Every in-file provider
+  DOUBLE in the test suite had `stream(self, messages, model)` and `TypeError`'d. Fixed
+  all of them to `stream(self, messages, model, on_usage=None)`: 5 doubles in
+  `test_conversation.py` + `_FailingProvider` in `test_provider_errors.py`. If you add a
+  new provider double anywhere, give it the `on_usage=None` param.
+- Verification: `bash scripts/check.sh` green (ruff + mypy + 371 passed; +8 new). Pure
+  core-logic seam (no UI/runtime change) → NO qa-tester per PROMPT step 7.
+- Docs: updated AGENTS.md core map (conversation.py calibration/last_usage accessors).
+- Next: Task 6 (UI header gauge + `~` marker) reads `self.core.calibration` and feeds
+  `tokens.gauge(local_total, model_window, calibration)`; `~` rides the absolute gauge
+  only (no calibration yet OR node set changed since last usage = stale). Per-node % never
+  shows `~`. Needs `AppHeader.set_context_pct`/`_gauge` extended to take `approximate: bool`.

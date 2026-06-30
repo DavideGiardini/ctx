@@ -39,7 +39,13 @@ reach end users (ADR 0012). See `docs/decisions/` for *why* it's shaped this way
   `StoragePort`, and a `Workspace` by injection (ADR 0001). Exposes a `read_file`
   property — the very loader it hands `build_context` — so the UI's token
   accounting renders nodes exactly as the model sees them without reaching past
-  the core into the workspace.
+  the core into the workspace. `stream` also anchors the header gauge: it measures
+  the local token sum of the context it sends (`tokens.count_messages`) and hands
+  the provider an `on_usage` callback; a reported `Usage` that passes a sanity check
+  (`prompt_tokens > 0`, positive local sum, within `CALIBRATION_TOLERANCE`× of it)
+  sets the read-only `last_usage`/`calibration` (= `prompt_tokens / local_sum`)
+  accessors, otherwise both are left unchanged so a trusted anchor survives a bogus
+  or usage-less turn (ADR 0015).
 - `provider.py` — `Provider` protocol (`stream()`, `check_connectivity()`) with
   adapters `LiteLLMProvider` (real) and `TestProvider` (canned, no network) (ADR 0002).
   `LiteLLMProvider.stream` passes a finite `STREAM_TIMEOUT` to the backend and maps
