@@ -533,3 +533,48 @@ Git history is the source of truth for *what changed*; this file captures the
   `tokens.gauge(local_total, model_window, calibration)`; `~` rides the absolute gauge
   only (no calibration yet OR node set changed since last usage = stale). Per-node % never
   shows `~`. Needs `AppHeader.set_context_pct`/`_gauge` extended to take `approximate: bool`.
+
+## 2026-06-30 — Task 6: UI header gauge + `~` marker (reads core calibration)
+- `ctx/ui/widgets/app_header.py`: `set_context_pct`/`_gauge` now take
+  `approximate: bool = False` (backward-compatible) and render a leading `~` on a
+  numeric pct when true. Deliberate call: `~` rides only a real number — `--%`
+  (unknown window) stays bare since there is no figure to qualify. `compose()`'s
+  `self._gauge(None)` placeholder still works via the default.
+- `ctx/ui/app.py`:
+  - `describe_state()` emits a `context_gauge` `{pct, approximate}` from new
+    `_gauge_state()` = `tokens.gauge(count_messages(build_context(full nodes)),
+    model_window, core.calibration)`. Uses `count_messages` of the FULL context
+    (not summed `per_node_tokens`) so `local_total` shares the core's calibration
+    basis (`count_messages` of the sent context) → `local_total × calibration`
+    tracks the provider's count right after a turn.
+  - Staleness (decision #5): `_node_signature()` = `tuple((id, len(content)) …)`;
+    `_gauge_anchor` is captured in `_stream_response` ONLY when that turn produced a
+    fresh `usage` (`core.last_usage is not usage_before`) — i.e. a turn with no
+    provider usage does NOT re-bless the gauge. `_gauge_state` ORs `approximate`
+    (calibration is None) with `signature != anchor`, so the gauge wears `~` before
+    any anchor AND again once the node set drifts (a `/include` before the next turn).
+  - Renamed `_refresh_weights` → `_refresh_token_ui` (only app.py referenced it) and
+    folded the gauge push into it — the per-node %s and the header gauge always
+    refresh together after a node-list/content change, so one method, one call site
+    set (submit/new/resume/include/stream-complete).
+- Tests (UI/integration, NOT code-blind — PRD designates the Pilot test as Task 6's
+  floor, not a core contract): new `tests/test_app_gauge.py` (+3):
+  (1) unit test on `AppHeader._gauge` pinning the `~`-only-when-numeric marker;
+  (2) Pilot test: `approximate` True before any usage → False after a streamed turn
+  with sane canned `usage` → True again (stale) after `core.include_files`;
+  (3) Pilot test: an unknown model degrades to `pct=None`/approximate, no crash.
+  Canned `Usage(prompt_tokens=12,…)` is within ~10× of a short message's local sum so
+  the core's sanity check accepts it (calibration set).
+- Verification: `bash scripts/check.sh` green (ruff + mypy + 374 passed; +3 new).
+  Per PROMPT step 7 (a) + PRD note: NO qa-tester this iteration — the in-process
+  harness caches `ctx.*` and can't see this edit; the Pilot test is the floor.
+  Task 7 is the dedicated qa-tester e2e pass (it will read the gauge via
+  `textual_query` on `#hdr-context`, which holds `~12% [== …]`).
+- Docs: updated AGENTS.md (AppHeader gauge no longer a placeholder; app.py gauge
+  wiring + `_refresh_token_ui` rename + `context_gauge` field).
+- Pre-existing uncommitted `scripts/ralph/loop.sh` (sentinel-on-own-line + all-checked
+  guard) was NOT mine — left unstaged, not part of this commit.
+- Next: Task 7 — end-to-end qa-tester verify-feature against `HarnessApp` (needs the
+  harness's TestProvider wired with a canned `usage` so calibration is exercised;
+  confirm gauge moves on `/include`, `~` clears after a turn and reappears stale).
+  Task 7 makes no code changes — if it finds a defect, file a new `- [ ]` and stop.

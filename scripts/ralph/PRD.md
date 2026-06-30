@@ -128,7 +128,7 @@ Dependencies are noted; every prerequisite sits above its dependent.
       rejected and `calibration` stays unset. No `StoragePort` change →
       `SaveCountingStorage` double untouched. `scripts/check.sh` green.
 
-- [ ] **6. UI: header gauge + `~` marker** _(deps: 1, 5)_ — in `describe_state()`
+- [x] **6. UI: header gauge + `~` marker** _(deps: 1, 5)_ — in `describe_state()`
       (`ctx/ui/app.py`) add gauge fields from `tokens.gauge(local_total,
       tokens.model_window(self.core.model), self.core.calibration)` where `local_total`
       is the summed `per_node_tokens` (or `count_messages` of the full context). Extend

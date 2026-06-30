@@ -96,14 +96,23 @@ a left `DetailInspector` and a right `#conversation` pane (the `MessageList` +
   stream). `describe_state()` exposes observable state for snapshots. Per-node
   weight %s come from `tokens.weight_pct` (basis from `ui.weight_basis`, window
   from `tokens.model_window`) via `_node_weights()`, which both `describe_state`
-  and `_refresh_weights` read; `_refresh_weights` pushes them onto the mounted
-  `MessageWidget`s after every node-list/content change (submit, stream-complete,
+  and `_refresh_token_ui` read. The header gauge comes from `_gauge_state()`
+  (`tokens.gauge` of the full context's `count_messages`, window from
+  `tokens.model_window`, calibration from `core.calibration`); it is `approximate`
+  (`~`) when there is no calibration yet *or* the node set drifted from
+  `_gauge_anchor` — the signature (`_node_signature`) captured at stream-complete
+  whenever a turn produced fresh `usage`. `describe_state()` emits both per-node
+  `weight_pct` and a `context_gauge` `{pct, approximate}`. `_refresh_token_ui`
+  pushes the per-node %s onto the mounted `MessageWidget`s and the gauge onto the
+  `AppHeader` after every node-list/content change (submit, stream-complete,
   `/include`, `/resume`, `/new`).
 - `widgets/` — `MessageList`/`MessageWidget` (truncated nodes via per-role
   `max-height`, right-docked weight slot, conversation-pass margins),
   `DetailInspector` (reactive `show(NodeView)`; standard Markdown view vs. 3-split
   Prompt/Content/Output context view, empty splits hidden), `AppHeader` (title /
-  logo / context-% gauge — gauge is a placeholder pending token counting),
+  logo / context-window gauge — `set_context_pct(pct, approximate)` renders a
+  filled bar and a leading `~` when the figure is only an estimate; `--%` when
+  the window is unknown),
   `AppFooter` (mode-driven keybinding hints + model), `InputBar` (command
   suggest/cycle), `IncludeScreen` (file-picker modal), `HistoryScreen`
   (conversation picker). CSS split across `app.css` and `widgets/*.css` plus

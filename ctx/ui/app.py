@@ -11,6 +11,7 @@ from textual.worker import Worker, WorkerState
 
 from ctx.core import tokens
 from ctx.core.config import get_config
+from ctx.core.context import build_context
 from ctx.core.conversation import ConversationCore
 from ctx.core.log import logger
 from ctx.core.provider import LiteLLMProvider, Provider
@@ -74,6 +75,11 @@ class ChatApp(App):
         self._stream_worker: Worker | None = None
         self.mode = "insert"
         self._selected_node_id: str | None = None
+        # Node-set signature captured the last time a streamed turn produced a
+        # fresh provider ``usage`` anchor. The header gauge is exact only while
+        # the conversation still matches it; any later change makes it stale
+        # (``~``). ``None`` until the first anchored turn.
+        self._gauge_anchor: tuple | None = None
         logger.info("app initialized | default_model=%s", self.core.model)
 
     def compose(self) -> ComposeResult:
@@ -351,7 +357,7 @@ class ChatApp(App):
     def _node_weights(self) -> list[int | None]:
         """Per-node weight percentages parallel to ``self.core.nodes``.
 
-        The single computation both ``describe_state`` and ``_refresh_weights``
+        The single computation both ``describe_state`` and ``_refresh_token_ui``
         read, so the snapshot and the rendered ``--%`` slots cannot drift. Basis
         comes from config; the window denominator (only used by ``"window"``
         basis) from the active model, ``None`` when unknown.
@@ -364,12 +370,42 @@ class ChatApp(App):
             tokens.model_window(self.core.model),
         )
 
-    def _refresh_weights(self) -> None:
-        """Push current per-node weights onto the mounted message widgets.
+    def _node_signature(self) -> tuple:
+        """A cheap fingerprint of the current node set's content.
+
+        Pairs each node's stable id with its content length, so the tuple
+        differs whenever a node is added, removed, reordered, or grows (a
+        streamed reply). The gauge compares it against ``_gauge_anchor`` to tell
+        a provider-exact figure from a now-stale one.
+        """
+        return tuple((n.id, len(n.content)) for n in self.core.nodes)
+
+    def _gauge_state(self) -> tuple[int | None, bool]:
+        """Header gauge ``(pct, approximate)`` for the current context.
+
+        ``pct`` is used ÷ model window (``None`` → ``--%`` when the window is
+        unknown), with the local estimate scaled by any provider calibration.
+        ``approximate`` is ``True`` when there is no calibration yet *or* the
+        node set has drifted from the last anchored turn — either way the
+        absolute figure is only an estimate and the UI marks it ``~``.
+        """
+        messages = build_context(self.core.nodes, self.core.read_file)
+        local_total = tokens.count_messages(messages, self.core.model)
+        pct, approximate = tokens.gauge(
+            local_total,
+            tokens.model_window(self.core.model),
+            self.core.calibration,
+        )
+        stale = self._node_signature() != self._gauge_anchor
+        return pct, approximate or stale
+
+    def _refresh_token_ui(self) -> None:
+        """Refresh both token-budget surfaces after a node-list/content change.
 
         Called after any change to the node list or to node content (a new turn,
-        a finished stream, ``/include``, ``/resume``, ``/new``) so each node's
-        ``--%`` slot reflects its current share of the conversation."""
+        a finished stream, ``/include``, ``/resume``, ``/new``): pushes each
+        node's per-node weight ``--%`` onto its message widget and the
+        used-÷-window gauge (with its ``~`` marker) onto the header."""
         message_list = self.query_one(MessageList)
         for node, pct in zip(self.core.nodes, self._node_weights(), strict=True):
             try:
@@ -377,6 +413,8 @@ class ChatApp(App):
             except Exception:
                 continue
             widget.set_weight_pct(pct)
+        gauge_pct, approximate = self._gauge_state()
+        self.query_one(AppHeader).set_context_pct(gauge_pct, approximate)
 
     # --- state snapshot -------------------------------------------------
 
@@ -393,6 +431,7 @@ class ChatApp(App):
         nodes = self.core.nodes
         truncation = get_config()["ui"]["truncation_lines"]
         weights = self._node_weights()
+        gauge_pct, gauge_approximate = self._gauge_state()
         selected_index: int | None = None
         selected_role: str | None = None
         node_states: list[dict] = []
@@ -466,6 +505,7 @@ class ChatApp(App):
                 "maximized_split": inspector.maximized_split(),
                 "locked": self.mode == "insert",
             },
+            "context_gauge": {"pct": gauge_pct, "approximate": gauge_approximate},
             "truncation": truncation,
             "input": input_bar.value,
             "command_menu": command_menu,
@@ -536,7 +576,7 @@ class ChatApp(App):
         await message_list.add_node(user_node)
         await message_list.add_node(assistant_node)
         self.query_one(AppHeader).set_title(self.core.conversation_title)
-        self._refresh_weights()
+        self._refresh_token_ui()
         if self.mode == "insert":
             self._lock_inspector_to_last()
         self._stream_worker = self._stream_response(assistant_node)
@@ -578,7 +618,7 @@ class ChatApp(App):
         await message_list.add_node(node)
         self.query_one(AppHeader).set_title(self.core.conversation_title)
         self._update_model_label()
-        self._refresh_weights()
+        self._refresh_token_ui()
         if self.mode == "insert":
             self._lock_inspector_to_last()
 
@@ -603,7 +643,7 @@ class ChatApp(App):
             await message_list.add_node(node)
         self.query_one(AppHeader).set_title(self.core.conversation_title)
         self._update_model_label()
-        self._refresh_weights()
+        self._refresh_token_ui()
         if self.mode == "insert":
             self._lock_inspector_to_last()
         logger.info("loaded conversation | id=%s | nodes=%d", result, len(nodes))
@@ -625,7 +665,7 @@ class ChatApp(App):
         for node in nodes:
             await message_list.add_node(node)
             logger.info("context included | path=%s", node.meta.get("source_path", ""))
-        self._refresh_weights()
+        self._refresh_token_ui()
         if self.mode == "insert":
             self._lock_inspector_to_last()
 
@@ -635,11 +675,17 @@ class ChatApp(App):
     async def _stream_response(self, assistant_node: Node) -> None:
         message_list = self.query_one(MessageList)
         inspector = self.query_one(DetailInspector)
+        usage_before = self.core.last_usage
         try:
             async for _token in self.core.stream(assistant_node):
                 message_list.update_content(assistant_node.id, assistant_node.content)
                 self._stream_to_inspector(inspector, assistant_node)
             logger.info("response finalized | length=%d", len(assistant_node.content))
+            if self.core.last_usage is not usage_before:
+                # This turn produced a fresh provider anchor: the gauge is now
+                # exact for the current node set. Remember it so a later change
+                # (a /include before the next turn) re-marks the gauge stale.
+                self._gauge_anchor = self._node_signature()
         except asyncio.CancelledError:
             assistant_node.meta["interrupted"] = True
             message_list.update_content(assistant_node.id, assistant_node.content or "▌")
@@ -671,4 +717,4 @@ class ChatApp(App):
             self._stream_worker = None
             # The assistant node now carries its full text — its weight (and the
             # context-basis share of every other node) only just became real.
-            self._refresh_weights()
+            self._refresh_token_ui()
