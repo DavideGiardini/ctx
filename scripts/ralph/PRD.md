@@ -146,7 +146,7 @@ Dependencies are noted; every prerequisite sits above its dependent.
       confirms the header shows a numeric `%` with a filled bar that moves on `/include`
       and the `~` behaves; no `textual_check_errors`.
 
-- [ ] **7. End-to-end verify (qa-tester, verify-feature)** _(deps: all)_ — run the full
+- [x] **7. End-to-end verify (qa-tester, verify-feature)** _(deps: all)_ — run the full
       plan brief against `tools.agent.harness:HarnessApp` (TestProvider wired with a
       canned `usage` so calibration is exercised): (1) snapshot empty → gauge `0%`/`--%`;
       (2) user message + canned assistant turn → numeric `weight_pct` per model-bound
@@ -157,6 +157,30 @@ Dependencies are noted; every prerequisite sits above its dependent.
       `textual_check_errors` clean. _Acceptance:_ `qa-tester` reports PASS on all
       checkpoints. This task makes no code changes; if it finds a defect, file it as a
       new `- [ ]` task and stop (do not patch under a green-required commit).
+
+- [ ] **8. Harden the gauge staleness anchor against `Usage` object identity**
+      _(found by Task 7 qa-tester, Finding B)_ — `_stream_response`
+      (`ctx/ui/app.py:684`) decides whether a turn produced a fresh provider anchor
+      with `if self.core.last_usage is not usage_before:`. This relies on the provider
+      minting a **new** `Usage` object every turn (true for `LiteLLMProvider`, which
+      builds `Usage(...)` per chunk) — an undocumented invariant on the `Provider`
+      seam. A provider that reuses one `Usage` object across turns (the QA harness's
+      module-level `CANNED_USAGE`, `tools/agent/harness.py`) wedges the gauge: only
+      the first turn passes the identity check, so `_gauge_anchor` never updates again
+      and the `~` estimate marker sticks permanently for turns 2+. Production is
+      unaffected today; this removes a fragile coupling and makes the harness a
+      faithful multi-turn gauge testbed. Replace the identity check with a turn-scoped
+      signal the core sets when `_calibrate` actually adopts a usage this turn (e.g. a
+      private monotonic "usage generation" counter or a per-turn flag exposed
+      read-only on `ConversationCore`), so the anchor updates for any provider
+      regardless of object identity; keep `core` framework-free. _Acceptance:_ a
+      unit/Pilot test where the provider returns the **same** `Usage` object on two
+      consecutive turns asserts `describe_state()["context_gauge"]["approximate"]` is
+      `False` after the **second** turn (today it stays `True`); all existing tests
+      stay green. `scripts/check.sh` green. Then re-run `qa-tester` (verify-feature)
+      to confirm the multi-turn `~` lifecycle clears on a known-window model
+      (`/model gpt-4o`): `~` before usage → cleared after each turn → reappears stale
+      after a following `/include`. No `textual_check_errors`.
 
 ## Out of scope
 - Any DB / persistence change (Sprint 2) — no `StoragePort`/schema edits.

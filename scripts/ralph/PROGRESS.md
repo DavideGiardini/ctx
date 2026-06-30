@@ -578,3 +578,56 @@ Git history is the source of truth for *what changed*; this file captures the
   harness's TestProvider wired with a canned `usage` so calibration is exercised;
   confirm gauge moves on `/include`, `~` clears after a turn and reappears stale).
   Task 7 makes no code changes — if it finds a defect, file a new `- [ ]` and stop.
+
+## 2026-06-30 — Task 7: End-to-end qa-tester verify-feature (token accounting)
+- Wired the QA harness's `TestProvider` with a canned `usage` so the gauge
+  calibration path is exercised headlessly: `tools/agent/harness.py` now imports
+  `Usage` and constructs `TestProvider(CANNED_RESPONSE, usage=CANNED_USAGE)` where
+  `CANNED_USAGE = Usage(prompt_tokens=20, completion_tokens=6, total_tokens=26)`.
+  `prompt_tokens=20` stays within the core's `CALIBRATION_TOLERANCE` (10×) of any
+  short typed message's local estimate, so the first turn calibrates and the gauge
+  sheds its `~`. This is QA-tooling setup (non-shipping, ADR 0012), not product code
+  — the only edit this iteration; `scripts/check.sh` green (374 passed, unchanged).
+- qa-tester (verify-feature, `tools.agent.harness:HarnessApp`) result: all observable
+  PRODUCT logic PASS — numeric per-node `weight_pct` for model-bound nodes,
+  `"context"`-basis %s ≈ 100 (50/50 → after `/include` 25/25/50, correct
+  redistribution), system breadcrumb `weight_pct` null/0, `context_gauge.approximate`
+  flips True→False after the calibrated turn and back to True (stale) after `/include`,
+  `/new` returns to empty, no crashes, `textual_check_errors` clean throughout.
+- Two qa-tester findings, BOTH analyzed against the code as harness artifacts, NOT
+  product defects:
+  * Finding A: the harness default model `openrouter/google/gemma-4-26b-a4b-it` has no
+    `max_input_tokens` in litellm → `tokens.model_window` returns `None` → the header
+    renders `--%` (no number to qualify, so no `~`). This is the DOCUMENTED, CORRECT
+    unknown-window degradation; CP1 explicitly allows `--%`. The numeric-pct + `~`
+    lifecycle is pinned by the deterministic Pilot test (`tests/test_app_gauge.py`, the
+    PRD-designated floor) and spot-confirmed by qa-tester via `/model gpt-4o` → `~0%`.
+    NOTE: "gauge moves up" on `/include` is sub-1% for a toy conversation against any
+    real model window (rounds to 0%), so it is only checkable as the numeric
+    `context_gauge.pct` field rising, never as a visibly filling bar — the Pilot test
+    rightly asserts only the `approximate` flag, not pct movement.
+  * Finding B (filed as new Task 8): `_stream_response` (`ctx/ui/app.py:684`) detects
+    "fresh usage this turn" via `Usage` OBJECT IDENTITY (`is not usage_before`). Correct
+    for `LiteLLMProvider` (fresh `Usage` per turn) but an undocumented `Provider`-seam
+    invariant: the harness's module-level singleton `CANNED_USAGE` is reused every turn,
+    so only turn 1 passes the identity check and `_gauge_anchor` never updates again →
+    the `~` sticks permanently for turns 2+. Production unaffected; it's a fragile
+    coupling + makes the harness unfaithful for MULTI-turn gauge QA. Does NOT affect the
+    Task 7 checkpoint sequence (one turn before the `/include`), which is why CP2/CP3
+    still verified correctly.
+- Per PROMPT step + Task 7 mandate ("if it finds a defect, file a new `- [ ]` and stop;
+  do not patch under a green-required commit"): filed Finding B as **Task 8** (harden
+  the staleness anchor off object identity onto a turn-scoped core signal). Did NOT
+  patch it under this commit.
+- Decision: marked Task 7 done. Its verification intent is met — the feature is
+  confirmed correct (observable logic PASS + deterministic Pilot floor + gpt-4o
+  spot-check). The CP2/CP3 "PARTIAL" marks were the realistic-default-model `--%`
+  (correct behavior), not failures.
+- GOTCHA for the Task 8 iteration: do NOT switch to value-equality (`!=`) for the
+  anchor — two consecutive turns with identical token counts would then falsely read
+  as "no fresh usage." Use a monotonic usage-generation counter or a per-turn flag set
+  in `_calibrate`, kept framework-free on `ConversationCore`. Also: the in-process MCP
+  harness caches `ctx.*`, but it DID pick up this iteration's `harness.py` edit (the
+  qa-tester saw calibration fire), so a fresh `textual_launch` reloads the harness
+  module — the staleness caveat is about `ctx.*`, not a same-session edit to harness.py
+  before first launch.
