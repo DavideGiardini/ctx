@@ -263,9 +263,19 @@ configures keys on a clean machine; migration preserves existing data; qa-tester
 - **S1 — settled:** two-denominator model (local-relative per-node %, exact provider
   total), framed-per-node counting, global-ratio calibration to sum to 100%, count
   generically over `goes_to_model()` node types, `ui.weight_basis` config flag.
-- **S1 — still open:** the `usage`-off-the-stream provider seam (design when we build it);
-  default value for `ui.weight_basis`; whether calibration ships in S1 or as a fast-follow
-  (per-node % works with zero provider changes regardless).
+- **S1 — shipped (2026-06-30):** all of the above plus the `usage`-off-the-stream
+  provider seam (`on_usage` callback, ADR-0015), in-conversation calibration, the header
+  gauge, and the `~` estimate marker. `ui.weight_basis` defaults to `"context"`.
+- **S1 — known gap (deferred, revisit as a fast-follow):** the header gauge renders
+  `--%` for any model litellm has **no window metadata** for — including the default
+  `openrouter/google/gemma-…` (`get_model_info` → "model isn't mapped yet", so
+  `tokens.model_window` returns `None`). Per-node **%** is unaffected (pure local ratio,
+  no window needed); only the absolute gauge needs the denominator. We *do* have the
+  exact used-token numerator from `usage`. Candidate fixes when we pick it up: (a) a
+  config-settable `model_windows` map / fallback consulted by `model_window()` — offline,
+  provider-agnostic, fits the "full control" ethos; (b) render absolute used-tokens
+  (e.g. `1.2k ~`) instead of `--%` when the window is unknown. _Decided to defer
+  2026-06-30._
 - **S2 visibility:** Sprint 2 ships no user-visible feature (pure groundwork, de-risks
   S3–S6). Alternative: merge S2 + S3a so the foundation lands *with* the first
   compression slice. _(To decide during S2 refinement.)_
