@@ -372,3 +372,32 @@ Git history is the source of truth for *what changed*; this file captures the
   extend `tests/test_config.py` + `tests/specs/config.md`. Tasks 1+2 are the deps for
   Task 3 (first Pilot test). `tokens.weight_pct` deliberately takes no calibration arg
   — calibration only ever touches `gauge`'s absolutes (Task 5/6).
+
+## 2026-06-30 — Task 2: `ui.weight_basis` config flag
+- Added `"weight_basis": "context"` under the `"ui"` section of `_DEFAULTS` in
+  `ctx/core/config.py` (legal values `"context"`/`"window"`), plus a module-level
+  `_WEIGHT_BASES` tuple. In `get_config()`, after the existing depth-2 `ui` merge,
+  coerce an out-of-domain value back to the default:
+  `if merged["ui"].get(...) not in _WEIGHT_BASES: -> "context"`. Placed AFTER the
+  `ui` merge (covers both the valid-`ui`-dict branch and the fallback branch) and
+  before `return`. `["context"]` (list) works with `in` on a tuple — `==` compare,
+  no hashing — so a list value coerces cleanly, no TypeError.
+- Code-blind flow (PROMPT.md step 4): the signature `get_config() -> dict` is
+  unchanged, so the natural RED is the missing key (KeyError) rather than a stub.
+  Spawned `test-spec-author` with ONLY the intent + the `get_config` docstring +
+  the existing fixture conventions (`config_file`, `_baseline`); it produced C21
+  (default "context"), C22 ("window" preserved), C23 (parametrized over
+  "banana"/42/None/["context"] → coerced to "context", no raise, sibling
+  `truncation_lines` untouched). Merged its tests into `tests/test_config.py` and
+  its contract items into `tests/specs/config.md` (deleted the temp addendum +
+  temp test file). Verified RED first (C21 KeyError, C23 fails on uncoerced value;
+  C22 already green since the merge preserves a legal value), then GREEN.
+- Pure core-config task, no UI/runtime change → NO qa-tester (per loop rules).
+- Verification: `bash scripts/check.sh` green (ruff + mypy + 353 passed; +6 new).
+- Gotcha for next iter: Task 3 (UI per-node weight %) is next and is the FIRST
+  Pilot test (`App.run_test()`) in the repo — no Pilot infra exists yet. It reads
+  `get_config()["ui"]["weight_basis"]` (now available) and needs a `read_file`
+  accessor on `ConversationCore` (the same loader injected into `build_context`)
+  exposed without breaking core's framework-free rule. Mandatory floor is the
+  Pilot test asserting numeric `weight_pct` in `describe_state()`; qa-tester is
+  confirmation and may lag one iteration (in-process cache).

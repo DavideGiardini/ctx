@@ -68,7 +68,7 @@ Dependencies are noted; every prerequisite sits above its dependent.
       (no raise) for an unknown model; `gauge` `approximate` is `True` with `calibration=None`.
       `scripts/check.sh` green.
 
-- [ ] **2. `ui.weight_basis` config flag** — in `ctx/core/config.py` add
+- [x] **2. `ui.weight_basis` config flag** — in `ctx/core/config.py` add
       `"weight_basis": "context"` under the `"ui"` section of `_DEFAULTS` (the existing
       depth-2 `ui` merge already carries nested keys). Coerce an invalid value (not in
       `{"context","window"}`) back to `"context"` in `get_config()`. _Acceptance:_
