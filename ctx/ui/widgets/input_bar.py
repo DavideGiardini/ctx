@@ -45,20 +45,12 @@ class InputBar(Input):
     async def action_submit(self) -> None:
         text = self.value
         logger.info("InputBar.action_submit called | text=%r", text)
-        if text.startswith("/"):
-            selected = self.COMMANDS[self._selected_command]
-            # Respect arrow-key selection if it matches the current prefix.
-            if selected.startswith(text):
-                cmd = selected
-            else:
-                for c in self.COMMANDS:
-                    if c.startswith(text):
-                        cmd = c
-                        break
-                else:
-                    self.value = ""
-                    self.post_message(self.Submitted(text))
-                    return
+        if text.startswith("/") and any(c.startswith(text) for c in self.COMMANDS):
+            # The suggestions popup is an active command selector whenever the
+            # typed text is a prefix of some command. The highlighted entry —
+            # which the user steers with the arrow keys and sees marked in the
+            # popup — is authoritative, not the typed prefix.
+            cmd = self.COMMANDS[self._selected_command]
             if cmd in self.COMMANDS_WITH_ARGS:
                 self.value = cmd + " "
                 self.cursor_position = len(self.value)
