@@ -44,8 +44,10 @@ reach end users (ADR 0012). See `docs/decisions/` for *why* it's shaped this way
   the provider an `on_usage` callback; a reported `Usage` that passes a sanity check
   (`prompt_tokens > 0`, positive local sum, within `CALIBRATION_TOLERANCE`× of it)
   sets the read-only `last_usage`/`calibration` (= `prompt_tokens / local_sum`)
-  accessors, otherwise both are left unchanged so a trusted anchor survives a bogus
-  or usage-less turn (ADR 0015).
+  accessors and bumps a monotonic `usage_generation` counter, otherwise all three
+  are left unchanged so a trusted anchor survives a bogus or usage-less turn. The
+  UI samples `usage_generation` before/after a turn to detect a fresh anchor without
+  depending on the provider minting a new `Usage` object each turn (ADR 0015 #2).
 - `provider.py` — `Provider` protocol (`stream()`, `check_connectivity()`) with
   adapters `LiteLLMProvider` (real) and `TestProvider` (canned, no network) (ADR 0002).
   `LiteLLMProvider.stream` passes a finite `STREAM_TIMEOUT` to the backend and maps
@@ -101,7 +103,7 @@ a left `DetailInspector` and a right `#conversation` pane (the `MessageList` +
   `tokens.model_window`, calibration from `core.calibration`); it is `approximate`
   (`~`) when there is no calibration yet *or* the node set drifted from
   `_gauge_anchor` — the signature (`_node_signature`) captured at stream-complete
-  whenever a turn produced fresh `usage`. `describe_state()` emits both per-node
+  whenever a turn bumped `core.usage_generation` (i.e. adopted fresh `usage`). `describe_state()` emits both per-node
   `weight_pct` and a `context_gauge` `{pct, approximate}`. `_refresh_token_ui`
   pushes the per-node %s onto the mounted `MessageWidget`s and the gauge onto the
   `AppHeader` after every node-list/content change (submit, stream-complete,

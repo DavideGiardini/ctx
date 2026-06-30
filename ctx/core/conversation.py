@@ -62,6 +62,10 @@ class ConversationCore:
         # None until a streamed turn reports usage that passes the sanity check.
         self._last_usage: Usage | None = None
         self._calibration: float | None = None
+        # Monotonically bumped each time _calibrate adopts a usage. Lets the UI
+        # detect "a fresh anchor landed this turn" without depending on the
+        # provider minting a new Usage object per turn (ADR 0015 #2).
+        self._usage_generation: int = 0
 
     @property
     def last_usage(self) -> Usage | None:
@@ -87,6 +91,19 @@ class ConversationCore:
         check, leaves the previous value unchanged.
         """
         return self._calibration
+
+    @property
+    def usage_generation(self) -> int:
+        """Counter incremented each time a streamed turn adopts provider usage.
+
+        Starts at ``0`` and bumps by one every time ``_calibrate`` accepts a
+        sane ``Usage`` (and so updates ``last_usage``/``calibration``); a turn
+        that reports no usage or a usage that fails the sanity check leaves it
+        unchanged. The UI samples it before and after a turn to tell whether
+        *this* turn produced a fresh exact anchor — robust regardless of whether
+        the provider reuses one ``Usage`` object across turns (ADR 0015 #2).
+        """
+        return self._usage_generation
 
     @property
     def read_file(self) -> Callable[[str], str]:
@@ -207,6 +224,7 @@ class ConversationCore:
             return
         self._last_usage = usage
         self._calibration = ratio
+        self._usage_generation += 1
 
     async def stream(self, assistant_node: Node) -> AsyncIterator[str]:
         """Yield tokens, updating assistant_node.content internally.

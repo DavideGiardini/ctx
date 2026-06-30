@@ -58,6 +58,32 @@ async def test_gauge_approximate_until_anchored_then_stale_after_include(
         assert app.describe_state()["context_gauge"]["approximate"] is True
 
 
+async def test_gauge_clears_tilde_on_second_turn_with_reused_usage_object(
+    repo, workspace
+):
+    # A provider that reports the SAME Usage object on every turn (the QA
+    # harness's module-level singleton, and any provider that caches one Usage).
+    # The fresh-anchor decision must not hinge on Usage object identity: turn 2
+    # adds nodes, so the gauge goes stale, and must clear again once the turn's
+    # (re-adopted) usage anchors the new node set.
+    app = ChatApp(
+        provider=CannedProvider(["ok"], usage=_SANE_USAGE),
+        workspace=workspace,
+        storage=repo,
+    )
+    async with app.run_test():
+        await app.on_input_bar_submitted(InputBar.Submitted("first turn"))
+        await app.workers.wait_for_complete()
+        assert app.describe_state()["context_gauge"]["approximate"] is False
+
+        await app.on_input_bar_submitted(InputBar.Submitted("second turn"))
+        await app.workers.wait_for_complete()
+        # With the old identity check this stayed True because the provider
+        # reused the same Usage object; the generation counter updates the
+        # anchor so the gauge is exact again after turn 2.
+        assert app.describe_state()["context_gauge"]["approximate"] is False
+
+
 async def test_unknown_model_gauge_degrades_to_placeholder(repo, workspace):
     app = ChatApp(
         provider=CannedProvider(["ok"], usage=_SANE_USAGE),

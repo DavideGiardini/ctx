@@ -65,3 +65,29 @@ safe and never required.
 - If a future need arises for *multiple* mid-stream signals (e.g. tool-call
   events), revisit: a richer event seam may then earn its keep. For one
   at-most-once usage value, the callback is the minimal seam.
+
+## Amendment #2 — the staleness anchor reads a generation counter, not object identity
+
+The header gauge marks itself `~` (an estimate) once the node set drifts from
+the turn that last produced an exact provider anchor. The UI
+(`_stream_response`) needs to know whether *this* turn adopted a fresh usage.
+The first cut compared `Usage` object identity (`core.last_usage is not
+usage_before`). That silently assumed an undocumented `Provider`-seam invariant:
+that a provider mints a **new** `Usage` object every turn. `LiteLLMProvider`
+happens to (it builds `Usage(...)` per chunk), but a provider that caches one
+`Usage` — exactly what the QA harness's module-level `CANNED_USAGE` singleton
+does — wedges the gauge: only turn 1 trips the identity check, so the anchor
+never updates and the `~` sticks permanently for turns 2+.
+
+**Decision:** `ConversationCore` owns a private monotonic `_usage_generation`
+counter, bumped inside `_calibrate` only when a usage is *adopted* (i.e. passes
+the sanity check), and exposes it read-only as `usage_generation`. The UI
+samples it before and after a turn and updates the anchor when it changed. This
+is robust for any provider regardless of `Usage` object identity.
+
+**Why a counter, not value-equality:** comparing `Usage` *values* (`!=`) would
+mis-fire the other way — two consecutive turns with identical token counts would
+read as "no fresh usage" and never clear the `~`. A monotonic counter bumped on
+each adoption captures exactly "an anchor landed this turn" with no dependence on
+identity or value. It also correctly *ignores* no-usage and bogus-usage turns
+(which don't adopt), so a stale gauge stays stale until a real anchor arrives.

@@ -675,13 +675,13 @@ class ChatApp(App):
     async def _stream_response(self, assistant_node: Node) -> None:
         message_list = self.query_one(MessageList)
         inspector = self.query_one(DetailInspector)
-        usage_before = self.core.last_usage
+        usage_gen_before = self.core.usage_generation
         try:
             async for _token in self.core.stream(assistant_node):
                 message_list.update_content(assistant_node.id, assistant_node.content)
                 self._stream_to_inspector(inspector, assistant_node)
             logger.info("response finalized | length=%d", len(assistant_node.content))
-            if self.core.last_usage is not usage_before:
+            if self.core.usage_generation != usage_gen_before:
                 # This turn produced a fresh provider anchor: the gauge is now
                 # exact for the current node set. Remember it so a later change
                 # (a /include before the next turn) re-marks the gauge stale.

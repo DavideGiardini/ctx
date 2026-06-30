@@ -1090,6 +1090,37 @@ async def test_sane_calibration_survives_later_no_usage_turn(
     assert core.last_usage == fed
 
 
+# C66 - usage_generation bumps only when a usage is ADOPTED, and is immune to
+# the provider reusing one Usage object across turns. A fresh core is 0; a sane
+# turn bumps it; a no-usage turn and a bogus-usage turn leave it; a later turn
+# reporting the SAME object as turn 1 bumps it again (identity must not matter).
+async def test_usage_generation_bumps_only_on_adoption(
+    repo, varying_provider, workspace
+):
+    fed = Usage(prompt_tokens=12, completion_tokens=5, total_tokens=17)
+    bogus = Usage(prompt_tokens=10_000_000, completion_tokens=3, total_tokens=10_000_003)
+    # turn 4 feeds the SAME `fed` object as turn 1 on purpose.
+    provider = varying_provider(
+        [(["a"], fed), (["b"], None), (["c"], bogus), (["d"], fed)]
+    )
+    core = ConversationCore(repo, provider, workspace)
+    core.setup()
+
+    assert core.usage_generation == 0
+
+    await _run_turn(core, "First question please")
+    assert core.usage_generation == 1
+
+    await _run_turn(core, "Second question please")  # no usage
+    assert core.usage_generation == 1
+
+    await _run_turn(core, "Third question please")  # bogus usage
+    assert core.usage_generation == 1
+
+    await _run_turn(core, "Fourth question please")  # same Usage object as turn 1
+    assert core.usage_generation == 2
+
+
 # C65 - a trusted calibration survives a later BOGUS-USAGE turn (left unchanged).
 async def test_sane_calibration_survives_later_bogus_usage_turn(
     repo, varying_provider, workspace
