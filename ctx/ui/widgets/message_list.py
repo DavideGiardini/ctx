@@ -1,3 +1,5 @@
+from textual.actions import SkipAction
+from textual.binding import Binding
 from textual.color import Color
 from textual.containers import Vertical, VerticalScroll
 from textual.widgets import Markdown, Static
@@ -92,6 +94,23 @@ class MessageWidget(Vertical):
 
 class MessageList(VerticalScroll):
     DEFAULT_CSS = ""
+
+    # In Edit mode the App owns up/down/home: they move the selection between
+    # messages and scroll the selected one into view. VerticalScroll's inherited
+    # scroll-by-arrow bindings only fall through to the App while the list fits
+    # the viewport (action_scroll_* raises SkipAction when nothing can scroll);
+    # once the list overflows they'd consume the keys and scroll instead of
+    # navigating. Re-bind those keys to SkipAction unconditionally so navigation
+    # always reaches the App. Programmatic scrolling (scroll_visible/scroll_end),
+    # the mouse wheel, and pageup/pagedown/end are unaffected.
+    BINDINGS = [
+        Binding("up", "delegate_nav", show=False),
+        Binding("down", "delegate_nav", show=False),
+        Binding("home", "delegate_nav", show=False),
+    ]
+
+    def action_delegate_nav(self) -> None:
+        raise SkipAction()
 
     async def add_node(self, node: Node) -> None:
         widget = MessageWidget(node)
