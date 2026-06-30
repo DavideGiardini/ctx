@@ -631,3 +631,45 @@ Git history is the source of truth for *what changed*; this file captures the
   qa-tester saw calibration fire), so a fresh `textual_launch` reloads the harness
   module — the staleness caveat is about `ctx.*`, not a same-session edit to harness.py
   before first launch.
+
+## 2026-06-30 — Task 8: Gauge staleness anchor off Usage object identity
+- Root cause (Task 7 Finding B): `_stream_response` (`ctx/ui/app.py`) detected
+  "fresh provider anchor this turn" via `self.core.last_usage is not usage_before`
+  — `Usage` OBJECT IDENTITY. Correct for `LiteLLMProvider` (new `Usage` per chunk)
+  but an undocumented `Provider`-seam invariant. A provider reusing one `Usage`
+  object (harness `CANNED_USAGE` singleton) → only turn 1 trips the check, anchor
+  never updates, `~` sticks for turns 2+.
+- Fix: `ConversationCore` now owns a private monotonic `_usage_generation` (int),
+  bumped inside `_calibrate` ONLY when a usage is adopted (after the sanity check
+  passes — so no-usage and bogus-usage turns do NOT bump). Exposed read-only as
+  `usage_generation`. `_stream_response` samples `usage_generation` before/after the
+  turn (`gen_before`) and updates `_gauge_anchor` when it changed. Core stays
+  framework-free; no new seam. Identity- AND value-independent — per the prior
+  iteration's GOTCHA, value-equality (`!=`) was the wrong fix (two consecutive turns
+  with identical token counts would falsely read as "no fresh usage").
+- ADR: recorded as Amendment #2 in `docs/decisions/0015-usage-off-the-stream.md`.
+  Updated AGENTS.md (conversation.py + app.py `_gauge_anchor` notes).
+- Tests added (2):
+  * `tests/test_app_gauge.py::test_gauge_clears_tilde_on_second_turn_with_reused_usage_object`
+    — the PRD acceptance FLOOR. Pilot test: `CannedProvider(usage=_SANE_USAGE)` reuses
+    one `Usage` object; two consecutive turns → `context_gauge.approximate` is `False`
+    after the SECOND turn. Fails under the old identity check (stayed `True`), passes now.
+  * `tests/test_conversation.py::C66 test_usage_generation_bumps_only_on_adoption`
+    — pins increment semantics the Pilot test can't (it only drives sane turns):
+    fresh core = 0; sane turn → 1; no-usage turn stays 1; bogus-usage turn stays 1;
+    a 4th turn feeding the SAME `fed` object as turn 1 → 2 (identity must not matter).
+    Catches the mutation "bump unconditionally / on every turn".
+- `scripts/check.sh` green (376 passed, was 374; +2). ruff + mypy clean.
+- qa-tester NOT run this iteration: the in-process MCP harness caches `ctx.*` at
+  session start, so it cannot see this iteration's `ctx/core/conversation.py` +
+  `ctx/ui/app.py` edits — it would test STALE code and falsely reproduce the bug.
+  The deterministic Pilot test is the PRD-designated floor and directly encodes the
+  acceptance, so the fix IS verified. For belt-and-suspenders confirmation in a future
+  fresh session (fresh server), run qa-tester verify-feature against
+  `tools.agent.harness:HarnessApp` with `/model gpt-4o` (known window so a numeric % +
+  `~` are visible): `~` before usage → cleared after EACH of two turns (the multi-turn
+  lifecycle that was broken) → reappears stale after a following `/include`; no
+  `textual_check_errors`. Harness already wires `CANNED_USAGE` (reused singleton), so
+  it now faithfully exercises the multi-turn gauge.
+- Pre-existing uncommitted `scripts/ralph/loop.sh` (not mine) left unstaged again.
+- ALL PRD TASKS NOW CHECKED — Sprint 1 (token accounting & context budget) complete.

@@ -158,7 +158,7 @@ Dependencies are noted; every prerequisite sits above its dependent.
       checkpoints. This task makes no code changes; if it finds a defect, file it as a
       new `- [ ]` task and stop (do not patch under a green-required commit).
 
-- [ ] **8. Harden the gauge staleness anchor against `Usage` object identity**
+- [x] **8. Harden the gauge staleness anchor against `Usage` object identity**
       _(found by Task 7 qa-tester, Finding B)_ — `_stream_response`
       (`ctx/ui/app.py:684`) decides whether a turn produced a fresh provider anchor
       with `if self.core.last_usage is not usage_before:`. This relies on the provider
