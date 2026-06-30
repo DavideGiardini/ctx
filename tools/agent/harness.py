@@ -14,11 +14,18 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from ctx.core.provider import TestProvider
+from ctx.core.provider import TestProvider, Usage
 from ctx.core.workspace import Workspace
 from ctx.ui import app as ctx_app
 
 CANNED_RESPONSE = ["This ", "is ", "a ", "canned ", "test ", "response."]
+
+# A canned provider usage so the header-gauge calibration path is exercised in
+# headless runs. ``prompt_tokens`` is small enough to stay within the core's
+# ``CALIBRATION_TOLERANCE`` (10×) of any short typed message's local estimate,
+# so the gauge sheds its ``~`` after a turn instead of staying perpetually
+# approximate.
+CANNED_USAGE = Usage(prompt_tokens=20, completion_tokens=6, total_tokens=26)
 
 SAMPLE_FILE_NAME = "sample.txt"
 SAMPLE_FILE_BODY = "Sample context file for agent testing.\nLine two.\n"
@@ -43,4 +50,7 @@ class HarnessApp(ctx_app.ChatApp):
         (workspace.context_dir / SAMPLE_FILE_NAME).write_text(
             SAMPLE_FILE_BODY, encoding="utf-8"
         )
-        super().__init__(provider=TestProvider(CANNED_RESPONSE), workspace=workspace)
+        super().__init__(
+            provider=TestProvider(CANNED_RESPONSE, usage=CANNED_USAGE),
+            workspace=workspace,
+        )

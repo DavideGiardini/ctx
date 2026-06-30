@@ -410,3 +410,115 @@ instead of a hang. The remaining non-killed mutants are:
   - `include_files` (context node `content="Included: {path}"` dropped): the context node's
     `content` is vestigial — `build_context` replaces it via `meta["source_path"]`, so it is
     not behaviorally observable through the core's contract.
+
+## Calibration
+
+The header context-window gauge scales a provider-agnostic LOCAL token estimate
+onto the provider's own tokenizer using a calibration factor derived from the
+provider's exact `prompt_tokens` for a turn. `ConversationCore.stream` measures
+the local sum of the context it sends and passes the provider an `on_usage`
+callback; a reported `Usage` is trusted only after a sanity check. The two
+observable surfaces are `core.calibration` (a `float | None`) and
+`core.last_usage` (a `Usage | None`). Local token counts are tokenizer- and
+model-dependent and MUST NOT be hardcoded in tests; the contract pins the formula
+indirectly via a ratio invariant (see C59).
+
+C58. Sane usage produces a positive calibration and stores the exact Usage.
+  Setup:  Construct `ConversationCore(repo, test_provider(tokens, usage=Usage(...)), workspace)`
+          where the `Usage.prompt_tokens` is positive and plausibly close to the
+          local token count of a short submitted message (e.g. prompt_tokens ~ 12
+          for a few-word context, comfortably within CALIBRATION_TOLERANCE× of the
+          local sum). `setup()`, `submit("...")`, then fully consume `stream(assistant)`.
+  Expect: `core.calibration` is a finite positive `float` (> 0); `core.last_usage`
+          is exactly the `Usage` instance/value that was fed (equal by value, same
+          prompt/completion/total token fields).
+  Rationale: Intent: when a provider reports sane exact usage, calibration is set
+          to `prompt_tokens / local_sum` (a positive float since both are positive)
+          and `last_usage` records that turn's reported `Usage`.
+
+C59. Calibration formula is prompt_tokens / local_sum (ratio invariant).
+  Setup:  Build TWO independent cores constructed identically (same `repo`-style
+          storage state path is per-test, same `workspace`, SAME `tokens` list,
+          SAME submitted message text) differing ONLY in the canned
+          `Usage.prompt_tokens`: core_a uses prompt_tokens = pa (e.g. 12), core_b
+          uses prompt_tokens = pb (e.g. 24). Both values are clearly sane (close to
+          the small local sum of a short message, within tolerance). Submit the
+          SAME message to each, fully consume each stream.
+  Expect: Because the context measured is identical for both turns, `local_sum` is
+          identical, so calibration is linear in prompt_tokens:
+          `core_a.calibration / core_b.calibration == pa / pb` within a small
+          epsilon (e.g. 1e-6 relative). Both calibrations are positive floats.
+  Rationale: Pins the formula as `prompt_tokens / local_sum` without depending on
+          the exact tokenizer count: dividing the two calibrations cancels the
+          shared `local_sum`, leaving the ratio of the prompt_tokens. Uses two
+          separate cores so each turn measures the same context (a second submit on
+          one core would grow the context and change local_sum).
+
+C60. No reported usage leaves calibration and last_usage at None.
+  Setup:  `test_provider(tokens)` with NO `usage` argument (provider never fires
+          `on_usage`). Fresh core, `setup()`, `submit(...)`, fully consume stream.
+  Expect: `core.calibration is None` and `core.last_usage is None`.
+  Rationale: Intent: a provider that reports no usage leaves both values unchanged;
+          from the fresh (None) baseline they remain None.
+
+C61. Usage with prompt_tokens == 0 is rejected.
+  Setup:  `test_provider(tokens, usage=Usage(prompt_tokens=0, completion_tokens=k,
+          total_tokens=k))`. Fresh core, `setup()`, `submit(...)`, consume stream.
+  Expect: `core.calibration is None` and `core.last_usage is None`.
+  Rationale: Sanity check requires `prompt_tokens > 0`; a zero count is bogus and
+          rejected, leaving the prior (None) values unchanged.
+
+C62. Usage with prompt_tokens wildly out of range is rejected.
+  Setup:  `test_provider(tokens, usage=Usage(prompt_tokens=10_000_000, ...))` for a
+          tiny short-message context whose local sum is on the order of ~10-30
+          tokens (so 10_000_000 is far beyond CALIBRATION_TOLERANCE× the local sum).
+          Fresh core, `setup()`, `submit("a few words")`, consume stream.
+  Expect: `core.calibration is None` and `core.last_usage is None`.
+  Rationale: Sanity check rejects a `prompt_tokens` whose ratio to local_sum exceeds
+          CALIBRATION_TOLERANCE; a mismatched/buggy provider count must not corrupt
+          the gauge, so prior (None) values are left unchanged.
+
+C63. Fresh core has no calibration and no usage.
+  Setup:  Construct a `ConversationCore`; do NOT stream any turn (optionally call
+          `setup()`). No `submit`/`stream` performed.
+  Expect: `core.calibration is None` and `core.last_usage is None`.
+  Rationale: Intent: before any streamed turn both values are None (no turn has
+          produced a trusted usage yet).
+
+C64. A trusted calibration SURVIVES a later no-usage turn (left unchanged, not reset).
+  Setup:  One core. Turn 1: provider returns SANE usage -> calibration/last_usage
+          get set. Turn 2 on the SAME core: a fresh provider reporting NO usage
+          (the test swaps in a no-usage provider for the second turn, or the core is
+          driven through a second turn whose provider never fires on_usage). Fully
+          consume each stream.
+  Expect: After turn 2, `core.calibration` still equals the positive float set by
+          turn 1 (unchanged), and `core.last_usage` still equals turn 1's fed `Usage`.
+  Rationale: Intent: a turn with no usage "leaves the previous value unchanged" — a
+          previously-set value must persist. Guards against a mutation that resets to
+          None on every turn.
+
+C65. A trusted calibration SURVIVES a later bogus-usage turn (left unchanged, not reset).
+  Setup:  One core. Turn 1: SANE usage sets calibration/last_usage. Turn 2 on the
+          SAME core: provider reports BOGUS usage (e.g. prompt_tokens == 0 or wildly
+          out of range) that fails the sanity check. Fully consume each stream.
+  Expect: After turn 2, `core.calibration` still equals turn 1's positive float, and
+          `core.last_usage` still equals turn 1's fed `Usage` (both unchanged).
+  Rationale: Intent: rejected usage "leaves the previous value unchanged" — a bogus
+          later turn must not corrupt or reset an already-trusted calibration.
+
+### Intent ambiguities assumed past (flag for human)
+- A1. Exact boundary behavior of CALIBRATION_TOLERANCE (inclusive vs exclusive at
+  exactly ratio == 10.0 or == 1/10.0) is deliberately NOT tested; per instructions we
+  use clearly-inside / clearly-outside values only.
+- A2. C64/C65 "same core, second turn" assumes the provider used by a core can be
+  changed between turns OR that a second turn can be driven with a different provider.
+  If `ConversationCore` binds one provider for its lifetime, the test must instead use
+  a single provider configured to fire sane usage on turn 1 and nothing/bogus on turn
+  2. The TestProvider factory as described yields a fixed `usage` per construction; if
+  per-turn variation is unsupported by the fixture, this needs a small fixture
+  enhancement or a provider that varies its on_usage by call count. Flagged.
+- A3. "Local sum is the same for the same context" (C59) assumes `stream` measures
+  exactly the context built from existing nodes excluding the streamed assistant node,
+  and that two identically-constructed cores given the same submitted text build
+  identical contexts. If construction injects any nondeterministic/per-instance context
+  (e.g. timestamps in the prompt), the ratio invariant could drift; assumed not the case.

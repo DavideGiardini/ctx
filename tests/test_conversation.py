@@ -21,6 +21,7 @@ import pytest
 
 from ctx.core.config import DEFAULT_MODEL
 from ctx.core.conversation import MAX_TITLE_LENGTH, ConversationCore
+from ctx.core.provider import Usage
 from ctx.models.nodes import Node
 
 
@@ -29,7 +30,7 @@ class CapturingProvider:
         self._tokens = tokens
         self.captured_messages = None
 
-    async def stream(self, messages, model):
+    async def stream(self, messages, model, on_usage=None):
         self.captured_messages = messages
         for t in self._tokens:
             yield t
@@ -42,7 +43,7 @@ class FailingProvider:
     def __init__(self, tokens):
         self._tokens = tokens
 
-    async def stream(self, messages, model):
+    async def stream(self, messages, model, on_usage=None):
         for t in self._tokens:
             yield t
         raise RuntimeError("boom")
@@ -56,7 +57,7 @@ class FailingConnectivityProvider:
         self._tokens = tokens
         self._error = error
 
-    async def stream(self, messages, model):
+    async def stream(self, messages, model, on_usage=None):
         for t in self._tokens:
             yield t
 
@@ -100,7 +101,7 @@ class BlockingProvider:
         self._before = before          # tokens to yield before blocking
         self._gate = gate              # an asyncio.Event that is never set
 
-    async def stream(self, messages, model):
+    async def stream(self, messages, model, on_usage=None):
         for t in self._before:
             yield t
         await self._gate.wait()        # suspend here until cancelled
@@ -786,7 +787,7 @@ class ModelCapturingProvider:
         self.captured_messages = None
         self.captured_model = None
 
-    async def stream(self, messages, model):
+    async def stream(self, messages, model, on_usage=None):
         self.captured_messages = messages
         self.captured_model = model
         for t in self._tokens:
@@ -958,3 +959,184 @@ def test_c57_include_files_empty_list_is_noop(repo, test_provider, workspace):
     assert len(core.nodes) == count_before
     # no context node created
     assert not any(node.node_type == "context" for node in core.nodes)
+
+
+# --------------------------------------------------------------------------
+# Calibration (Task 5 — provider usage anchors the header gauge)
+# --------------------------------------------------------------------------
+
+async def _run_turn(core, message):
+    """Submit a message and fully drain the resulting stream."""
+    _, assistant = core.submit(message)
+    tokens = [tok async for tok in core.stream(assistant)]
+    return tokens
+
+
+# C58 - sane usage -> positive float calibration; last_usage is exactly the fed Usage.
+async def test_sane_usage_sets_positive_calibration_and_exact_usage(
+    repo, test_provider, workspace
+):
+    fed = Usage(prompt_tokens=12, completion_tokens=5, total_tokens=17)
+    core = ConversationCore(
+        repo, test_provider(["Hello", " there"], usage=fed), workspace
+    )
+    core.setup()
+
+    await _run_turn(core, "Summarize the meeting notes for me")
+
+    assert isinstance(core.calibration, float)
+    assert core.calibration > 0
+    assert core.last_usage == fed
+
+
+# C59 - calibration formula is prompt_tokens / local_sum (ratio invariant).
+# Two identically-built cores measure the SAME context, so local_sum cancels:
+# calibration_a / calibration_b == prompt_tokens_a / prompt_tokens_b.
+async def test_calibration_ratio_matches_prompt_token_ratio(
+    repo_factory, test_provider, workspace_factory
+):
+    message = "Draft a short reply to the client"
+    pa, pb = 12, 24
+
+    core_a = ConversationCore(
+        repo_factory(),
+        test_provider(["ok"], usage=Usage(pa, 4, pa + 4)),
+        workspace_factory(),
+    )
+    core_a.setup()
+    await _run_turn(core_a, message)
+
+    core_b = ConversationCore(
+        repo_factory(),
+        test_provider(["ok"], usage=Usage(pb, 4, pb + 4)),
+        workspace_factory(),
+    )
+    core_b.setup()
+    await _run_turn(core_b, message)
+
+    assert core_a.calibration > 0
+    assert core_b.calibration > 0
+    # local_sum identical for identical context -> ratio of calibrations == ratio of prompt_tokens
+    assert abs(
+        (core_a.calibration / core_b.calibration) - (pa / pb)
+    ) < 1e-6
+
+
+# C60 - no reported usage leaves both values at None.
+async def test_no_usage_leaves_calibration_and_last_usage_none(
+    repo, test_provider, workspace
+):
+    core = ConversationCore(repo, test_provider(["one", " two"]), workspace)
+    core.setup()
+
+    await _run_turn(core, "What is on the agenda today")
+
+    assert core.calibration is None
+    assert core.last_usage is None
+
+
+# C61 - prompt_tokens == 0 is rejected.
+async def test_zero_prompt_tokens_rejected(repo, test_provider, workspace):
+    bogus = Usage(prompt_tokens=0, completion_tokens=6, total_tokens=6)
+    core = ConversationCore(repo, test_provider(["resp"], usage=bogus), workspace)
+    core.setup()
+
+    await _run_turn(core, "Tell me a quick fact")
+
+    assert core.calibration is None
+    assert core.last_usage is None
+
+
+# C62 - prompt_tokens wildly out of range is rejected.
+async def test_out_of_range_prompt_tokens_rejected(repo, test_provider, workspace):
+    bogus = Usage(prompt_tokens=10_000_000, completion_tokens=3, total_tokens=10_000_003)
+    core = ConversationCore(repo, test_provider(["resp"], usage=bogus), workspace)
+    core.setup()
+
+    # tiny context -> local sum ~10-30 tokens, 10M is far beyond CALIBRATION_TOLERANCE x
+    await _run_turn(core, "Hi")
+
+    assert core.calibration is None
+    assert core.last_usage is None
+
+
+# C63 - fresh core (no streamed turn) has no calibration and no usage.
+async def test_fresh_core_has_no_calibration_or_usage(repo, test_provider, workspace):
+    core = ConversationCore(repo, test_provider(["unused"]), workspace)
+    core.setup()
+
+    assert core.calibration is None
+    assert core.last_usage is None
+
+
+# C64 - a trusted calibration survives a later NO-USAGE turn (left unchanged).
+async def test_sane_calibration_survives_later_no_usage_turn(
+    repo, varying_provider, workspace
+):
+    fed = Usage(prompt_tokens=12, completion_tokens=5, total_tokens=17)
+    # turn 1 reports sane usage; turn 2 reports nothing.
+    provider = varying_provider([(["a"], fed), (["b"], None)])
+    core = ConversationCore(repo, provider, workspace)
+    core.setup()
+
+    await _run_turn(core, "First question please")
+    sane_calibration = core.calibration
+    assert sane_calibration is not None
+    assert core.last_usage == fed
+
+    await _run_turn(core, "Second question please")
+
+    assert core.calibration == sane_calibration
+    assert core.last_usage == fed
+
+
+# C66 - usage_generation bumps only when a usage is ADOPTED, and is immune to
+# the provider reusing one Usage object across turns. A fresh core is 0; a sane
+# turn bumps it; a no-usage turn and a bogus-usage turn leave it; a later turn
+# reporting the SAME object as turn 1 bumps it again (identity must not matter).
+async def test_usage_generation_bumps_only_on_adoption(
+    repo, varying_provider, workspace
+):
+    fed = Usage(prompt_tokens=12, completion_tokens=5, total_tokens=17)
+    bogus = Usage(prompt_tokens=10_000_000, completion_tokens=3, total_tokens=10_000_003)
+    # turn 4 feeds the SAME `fed` object as turn 1 on purpose.
+    provider = varying_provider(
+        [(["a"], fed), (["b"], None), (["c"], bogus), (["d"], fed)]
+    )
+    core = ConversationCore(repo, provider, workspace)
+    core.setup()
+
+    assert core.usage_generation == 0
+
+    await _run_turn(core, "First question please")
+    assert core.usage_generation == 1
+
+    await _run_turn(core, "Second question please")  # no usage
+    assert core.usage_generation == 1
+
+    await _run_turn(core, "Third question please")  # bogus usage
+    assert core.usage_generation == 1
+
+    await _run_turn(core, "Fourth question please")  # same Usage object as turn 1
+    assert core.usage_generation == 2
+
+
+# C65 - a trusted calibration survives a later BOGUS-USAGE turn (left unchanged).
+async def test_sane_calibration_survives_later_bogus_usage_turn(
+    repo, varying_provider, workspace
+):
+    fed = Usage(prompt_tokens=12, completion_tokens=5, total_tokens=17)
+    bogus = Usage(prompt_tokens=10_000_000, completion_tokens=3, total_tokens=10_000_003)
+    provider = varying_provider([(["a"], fed), (["b"], bogus)])
+    core = ConversationCore(repo, provider, workspace)
+    core.setup()
+
+    await _run_turn(core, "First question please")
+    sane_calibration = core.calibration
+    assert sane_calibration is not None
+    assert core.last_usage == fed
+
+    await _run_turn(core, "Second question please")
+
+    assert core.calibration == sane_calibration
+    assert core.last_usage == fed

@@ -41,3 +41,4 @@ don't rewrite.
 | [0012](0012-agent-tooling-should-not-ship.md) | agent/ is dev-only tooling but currently ships | Notes |
 | [0013](0013-storage-observations.md) | storage.py observations | Notes |
 | [0014](0014-wiring-observations.md) | System-level / wiring observations | Notes |
+| [0015](0015-usage-off-the-stream.md) | Report provider token usage via an `on_usage` callback | Accepted |

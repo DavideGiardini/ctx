@@ -36,17 +36,44 @@ reach end users (ADR 0012). See `docs/decisions/` for *why* it's shaped this way
 **core/** (no `textual` imports)
 - `conversation.py` — `ConversationCore`: owns conversation state (nodes, model,
   id/title) plus the command + streaming lifecycle. Takes a `Provider`, a
-  `StoragePort`, and a `Workspace` by injection (ADR 0001).
+  `StoragePort`, and a `Workspace` by injection (ADR 0001). Exposes a `read_file`
+  property — the very loader it hands `build_context` — so the UI's token
+  accounting renders nodes exactly as the model sees them without reaching past
+  the core into the workspace. `stream` also anchors the header gauge: it measures
+  the local token sum of the context it sends (`tokens.count_messages`) and hands
+  the provider an `on_usage` callback; a reported `Usage` that passes a sanity check
+  (`prompt_tokens > 0`, positive local sum, within `CALIBRATION_TOLERANCE`× of it)
+  sets the read-only `last_usage`/`calibration` (= `prompt_tokens / local_sum`)
+  accessors and bumps a monotonic `usage_generation` counter, otherwise all three
+  are left unchanged so a trusted anchor survives a bogus or usage-less turn. The
+  UI samples `usage_generation` before/after a turn to detect a fresh anchor without
+  depending on the provider minting a new `Usage` object each turn (ADR 0015 #2).
 - `provider.py` — `Provider` protocol (`stream()`, `check_connectivity()`) with
   adapters `LiteLLMProvider` (real) and `TestProvider` (canned, no network) (ADR 0002).
   `LiteLLMProvider.stream` passes a finite `STREAM_TIMEOUT` to the backend and maps
   any backend failure (request-time or mid-stream) to the domain error `ProviderError`
   so litellm types never leak through the seam; `CancelledError`/`GeneratorExit`
-  (BaseException) pass through unwrapped (ADR 0011 #1).
+  (BaseException) pass through unwrapped (ADR 0011 #1). `stream` also takes an optional
+  out-of-band `on_usage: Callable[[Usage], None]`: when the provider reports exact token
+  counts it fires `on_usage` exactly once with a `Usage(prompt_tokens, completion_tokens,
+  total_tokens)`, keeping the stream plain `str` (ADR 0015). `LiteLLMProvider` requests
+  `stream_options={"include_usage": True}` and guards the chunk loop so the final
+  empty-`choices` usage chunk can't `IndexError`; `TestProvider(tokens, usage=None)` fires
+  the canned `usage` after its tokens (default `None` keeps the `test_provider` fixture green).
 - `storage.py` — `StoragePort` protocol + `ConversationRepository(db_path)`
   encapsulating all SQLite (WAL) schema/serialization (ADR 0003).
 - `context.py` — pure `build_context(nodes, load_file)` → litellm message list;
   expands `context` nodes via the injected loader, no I/O of its own (ADR 0004).
+- `tokens.py` — pure, stateless token accounting for the context-budget UI (no
+  Protocol seam — single impl). `count_messages` (the sole home of litellm's
+  `token_counter`/tiktoken fallback), `per_node_tokens` (per-node local estimate,
+  each node rendered in isolation via `build_context` so a context node counts its
+  resolved file body; `0` when not `goes_to_model()`), `weight_pct` (per-node
+  `"context"`/`"window"`-basis %, a *local provider-agnostic ratio* — no calibration
+  arg; `0`-token nodes → `None`), `gauge(local_total, max_input_tokens, calibration)`
+  → `(pct, approximate)` (absolute used÷window, scaled by an optional provider
+  calibration; `approximate=True` whenever `calibration is None`; pct unclamped),
+  `model_window` (wraps `get_model_info`, unknown model → `None`, never raises).
 - `workspace.py` — `Workspace(root_path)`: `.ctx/` discovery, `ensure()`,
   `list_files()`, `read_file()`; the sole `Path.cwd()` lives at its call site (ADR 0005).
   `list_files` classifies a file as text by a **bounded ~8 KB sniff** (`SNIFF_BYTES`):
@@ -68,12 +95,26 @@ a left `DetailInspector` and a right `#conversation` pane (the `MessageList` +
   dependencies; owns widgets, focus, Insert/Edit mode-switching (`_set_mode`),
   keybindings, selection→inspector wiring, and the `@work` streaming worker (which
   feeds both the truncated right-pane node and, when locked, the full left-pane
-  stream). `describe_state()` exposes observable state for snapshots.
+  stream). `describe_state()` exposes observable state for snapshots. Per-node
+  weight %s come from `tokens.weight_pct` (basis from `ui.weight_basis`, window
+  from `tokens.model_window`) via `_node_weights()`, which both `describe_state`
+  and `_refresh_token_ui` read. The header gauge comes from `_gauge_state()`
+  (`tokens.gauge` of the full context's `count_messages`, window from
+  `tokens.model_window`, calibration from `core.calibration`); it is `approximate`
+  (`~`) when there is no calibration yet *or* the node set drifted from
+  `_gauge_anchor` — the signature (`_node_signature`) captured at stream-complete
+  whenever a turn bumped `core.usage_generation` (i.e. adopted fresh `usage`). `describe_state()` emits both per-node
+  `weight_pct` and a `context_gauge` `{pct, approximate}`. `_refresh_token_ui`
+  pushes the per-node %s onto the mounted `MessageWidget`s and the gauge onto the
+  `AppHeader` after every node-list/content change (submit, stream-complete,
+  `/include`, `/resume`, `/new`).
 - `widgets/` — `MessageList`/`MessageWidget` (truncated nodes via per-role
   `max-height`, right-docked weight slot, conversation-pass margins),
   `DetailInspector` (reactive `show(NodeView)`; standard Markdown view vs. 3-split
   Prompt/Content/Output context view, empty splits hidden), `AppHeader` (title /
-  logo / context-% gauge — gauge is a placeholder pending token counting),
+  logo / context-window gauge — `set_context_pct(pct, approximate)` renders a
+  filled bar and a leading `~` when the figure is only an estimate; `--%` when
+  the window is unknown),
   `AppFooter` (mode-driven keybinding hints + model), `InputBar` (command
   suggest/cycle), `IncludeScreen` (file-picker modal), `HistoryScreen`
   (conversation picker). CSS split across `app.css` and `widgets/*.css` plus

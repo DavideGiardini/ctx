@@ -338,3 +338,338 @@ Git history is the source of truth for *what changed*; this file captures the
 - Verification: `bash scripts/check.sh` green (ruff + mypy + 316 passed, unchanged).
 - This was the **last unchecked task** in `scripts/ralph/PRD.md` (round-2 cleanups).
   All three tasks now `- [x]`. PRD complete.
+
+## 2026-06-30 — Task 1: core/tokens.py deep module + code-blind contract tests (Sprint 1)
+- Seeded the new Sprint 1 PRD (token accounting & context budget) in a separate
+  `docs:` commit first (the working tree carried the uncommitted replacement), then
+  did Task 1.
+- New framework-free module `ctx/core/tokens.py` (zero textual, no Protocol seam —
+  single impl). Public surface: `count_messages` (sole home of litellm
+  `token_counter`/tiktoken fallback; empty list → 0), `per_node_tokens` (renders each
+  node in isolation via `build_context([node], read_file)` then counts — so a context
+  node counts its resolved file body, a non-goes_to_model node → 0), `weight_pct`
+  (`"context"`/`"window"` basis; provider-agnostic ratio, **no calibration arg**;
+  0-token nodes → `None`; empty/0 denominator → all `None`, no ZeroDivision),
+  `gauge(local_total, max_input_tokens, calibration)` → `(pct, approximate)`
+  (`approximate = calibration is None`; pct **unclamped**, can exceed 100; unknown
+  window → `(None, ...)`), `model_window` (wraps `get_model_info`, unknown model →
+  `None` via broad `except Exception`, never raises).
+- Code-blind flow per PROMPT.md step 4: wrote signatures+docstrings+`NotImplementedError`
+  stubs, confirmed clean collection, spawned `test-spec-author` with ONLY the interface
+  + prose intent. It produced `tests/specs/tokens.md` (C1–C25) + `tests/test_tokens.py`
+  (25 tests). Verified RED (25 fail on NotImplementedError, collect clean), implemented
+  to GREEN. Did NOT touch the authored tests.
+- Decisions baked into the docstrings the blind author saw: 0-token node → `None` (not
+  0) in `weight_pct` so the UI shows `--%`; gauge pct unclamped (>100 means over budget
+  is meaningful); `approximate` keys purely off `calibration is None` (staleness is the
+  UI layer's concern in Task 6, not this module's).
+- Pure core-logic task, no UI/runtime change → NO qa-tester run (per loop rules); the
+  code-blind tests + gate are the verification.
+- Docs: added `tokens.py` to the AGENTS.md core/ architecture map.
+- Verification: `bash scripts/check.sh` green (ruff + mypy + 347 passed; +25 new + the
+  litellm import path is exercised by the real `gpt-4` model in tests).
+- Gotcha for next iter: Task 2 (`ui.weight_basis` config flag) is next — pure config,
+  extend `tests/test_config.py` + `tests/specs/config.md`. Tasks 1+2 are the deps for
+  Task 3 (first Pilot test). `tokens.weight_pct` deliberately takes no calibration arg
+  — calibration only ever touches `gauge`'s absolutes (Task 5/6).
+
+## 2026-06-30 — Task 2: `ui.weight_basis` config flag
+- Added `"weight_basis": "context"` under the `"ui"` section of `_DEFAULTS` in
+  `ctx/core/config.py` (legal values `"context"`/`"window"`), plus a module-level
+  `_WEIGHT_BASES` tuple. In `get_config()`, after the existing depth-2 `ui` merge,
+  coerce an out-of-domain value back to the default:
+  `if merged["ui"].get(...) not in _WEIGHT_BASES: -> "context"`. Placed AFTER the
+  `ui` merge (covers both the valid-`ui`-dict branch and the fallback branch) and
+  before `return`. `["context"]` (list) works with `in` on a tuple — `==` compare,
+  no hashing — so a list value coerces cleanly, no TypeError.
+- Code-blind flow (PROMPT.md step 4): the signature `get_config() -> dict` is
+  unchanged, so the natural RED is the missing key (KeyError) rather than a stub.
+  Spawned `test-spec-author` with ONLY the intent + the `get_config` docstring +
+  the existing fixture conventions (`config_file`, `_baseline`); it produced C21
+  (default "context"), C22 ("window" preserved), C23 (parametrized over
+  "banana"/42/None/["context"] → coerced to "context", no raise, sibling
+  `truncation_lines` untouched). Merged its tests into `tests/test_config.py` and
+  its contract items into `tests/specs/config.md` (deleted the temp addendum +
+  temp test file). Verified RED first (C21 KeyError, C23 fails on uncoerced value;
+  C22 already green since the merge preserves a legal value), then GREEN.
+- Pure core-config task, no UI/runtime change → NO qa-tester (per loop rules).
+- Verification: `bash scripts/check.sh` green (ruff + mypy + 353 passed; +6 new).
+- Gotcha for next iter: Task 3 (UI per-node weight %) is next and is the FIRST
+  Pilot test (`App.run_test()`) in the repo — no Pilot infra exists yet. It reads
+  `get_config()["ui"]["weight_basis"]` (now available) and needs a `read_file`
+  accessor on `ConversationCore` (the same loader injected into `build_context`)
+  exposed without breaking core's framework-free rule. Mandatory floor is the
+  Pilot test asserting numeric `weight_pct` in `describe_state()`; qa-tester is
+  confirmation and may lag one iteration (in-process cache).
+
+## 2026-06-30 — Task 3: UI per-node weight %
+- Wired the already-contract-tested `tokens.weight_pct` into the UI. Three edits:
+  (1) `ctx/core/conversation.py`: added a `read_file` property returning
+  `self._workspace.read_file` — the exact loader injected into `build_context` —
+  so the UI renders nodes for counting the same way the model sees them without
+  reaching past the core (keeps core framework-free). (2) `ctx/ui/app.py`: imported
+  `from ctx.core import tokens`; added `_node_weights()` (single computation:
+  `tokens.weight_pct(nodes, model, core.read_file, get_config()["ui"]["weight_basis"],
+  tokens.model_window(model))`) read by BOTH `describe_state` (replaces the
+  hardcoded `weight_pct: None` with `weights[i]`) and a new `_refresh_weights()`
+  that pushes `set_weight_pct(...)` onto mounted `MessageWidget`s. (3) Invoked
+  `_refresh_weights()` after every node-list/content change: `submit`,
+  stream-complete (`on_worker_state_changed` SUCCESS/CANCELLED/ERROR),
+  `/include`, `/resume`, `/new`.
+- Design note: PRD listed only submit/include/resume/new for the refresh, assigning
+  stream-complete to Task 6's gauge. But the assistant node is EMPTY at submit and
+  only gets content when the stream finishes — so its weight (and the context-basis
+  redistribution across siblings) only becomes real at stream-complete. Added the
+  refresh there too; it's squarely Task 3's per-node-weight concern, not Task 6
+  scaffolding. `describe_state` recomputes live regardless, so snapshots are always
+  correct; the widget refresh is purely for the rendered `--%` slots.
+- Tests: NO test-spec-author. The only core change is a pass-through getter
+  (`read_file`), explicitly excluded from new tests per PROMPT step 3; `tokens` is
+  already contract-tested (Task 1). The new observable behavior is UI wiring, whose
+  mandatory floor is a deterministic Pilot test. Wrote `tests/test_app_weights.py`
+  (the FIRST `App.run_test()` test in the repo, 2 tests): (a) drives a user turn +
+  canned assistant reply, asserts user & assistant nodes have `int` weight_pct and
+  context-basis %s sum to ~100 (±2 for integer rounding); (b) raises a system
+  breadcrumb via bare `/model` and asserts its weight_pct is `None`.
+- Pilot-driving gotcha for future iters: drive turns by calling the real handler
+  `await app.on_input_bar_submitted(InputBar.Submitted("..."))` directly, then
+  `await app.workers.wait_for_complete()` to let the `@work stream_response` worker
+  finish — deterministic, no keypress/message-pump timing. Do NOT press keys to
+  type a command: bare `/model` via Enter appends a space for args
+  (`COMMANDS_WITH_ARGS`) instead of submitting; posting/calling the Submitted handler
+  bypasses that quirk. Also: import `TestProvider as CannedProvider` in test modules
+  or pytest emits a `PytestCollectionWarning` (it tries to collect the `Test*` class).
+- Verification: `bash scripts/check.sh` green (ruff + mypy + 355 passed; +2 new). NO
+  qa-tester this iteration — the harness runs `ctx.*` in-process/cached so it can't
+  see this iteration's edits (it'd test the stale hardcoded `None`); per PROMPT step 7
+  limit (a) + the PRD's explicit allowance, the Pilot test is the floor and qa-tester
+  confirmation lags. A later iteration (Task 7 e2e, or any fresh `claude -p`) should
+  confirm numeric per-node %s in `ctx_snapshot` and redistribution after `/include`.
+- Docs: updated AGENTS.md core map (conversation.py `read_file` accessor; app.py
+  per-node weight wiring via `_node_weights`/`_refresh_weights`).
+- Gotcha for next iter: Task 4 (Provider `on_usage` seam + `stream_options` +
+  TestProvider usage) is next — introduces a real architectural decision (the
+  `usage`-off-the-stream seam shape), so it MUST add an ADR in `docs/decisions/`.
+  Keep the `test_provider` fixture green: TestProvider's new `usage` arg defaults to
+  `None`.
+
+## 2026-06-30 — Task 4: Provider `on_usage` seam + `stream_options` + TestProvider usage
+- Added an out-of-band usage seam to `ctx/core/provider.py`: a frozen `Usage`
+  dataclass (`prompt_tokens`, `completion_tokens`, `total_tokens`) and an optional
+  `on_usage: Callable[[Usage], None] | None = None` on the `Provider` protocol and
+  both impls. `stream` keeps yielding plain `str`; usage rides the callback.
+  - `LiteLLMProvider`: now passes `stream_options={"include_usage": True}`, GUARDS the
+    chunk loop with `if chunk.choices:` (the include_usage final chunk has empty
+    `choices` — the old `chunk.choices[0]` `IndexError`'d on it, a real latent crash),
+    and fires `on_usage(Usage(...))` once when `getattr(chunk, "usage", None)` is set.
+  - `TestProvider.__init__(tokens, usage=None)`: stores the canned usage and, after
+    yielding its tokens, calls `on_usage(self._usage)` only when both usage and the
+    callback are non-None. Default `None` keeps the `test_provider` conftest fixture
+    (and every existing `stream(messages, model)` caller) green — backward compatible.
+- ADR: recorded `docs/decisions/0015-usage-off-the-stream.md` (Accepted) — callback
+  chosen over a `str | StreamChunk` union (a union would tax every consumer on every
+  chunk for an at-most-once value); provider-agnostic; documents the empty-choices
+  latent-crash fix. Indexed in `docs/decisions/README.md`.
+- Tests (code-blind, per PRD): spawned `test-spec-author` with ONLY the interface
+  (signatures + docstrings) + prose intent + the documented litellm chunk seam. It
+  authored contract items C10–C17 and the pytest tests; I merged them into
+  `tests/test_provider.py` (+8 tests) and `tests/specs/provider.md`. Verified RED
+  first against the stubs (4 failed: the on_usage-fires cases + the empty-choices
+  crash; the "never fires"/"tokens still stream" cases passed even on stubs — exactly
+  the right red/green split), then implemented to green. Authored tests treated as
+  fixed — not edited to pass.
+- Gotchas for future iters:
+  - Blind author wrote a `_drain` helper that duplicates the existing `_collect`;
+    kept it as-authored (harmless, don't rewrite blind tests). Its scratch deliverables
+    `tests/_task4_*.{py,md}` were merged then deleted.
+  - In test_provider.py import `TestProvider as CannedProvider` (pytest would try to
+    collect a bare `Test*` class otherwise) — ruff `--fix` split the import into two lines.
+- Verification: `bash scripts/check.sh` green (ruff + mypy + 363 passed; +8 new). Pure
+  core-logic seam (no UI/runtime change) → NO qa-tester per PROMPT step 7 (the contract
+  tests + gate are the verification).
+- Next: Task 5 (`conversation.py` calibration) wires this seam — `ConversationCore.stream`
+  computes the local sum (`tokens.count_messages`) and passes an `on_usage` that
+  sanity-checks usage and stores `last_usage` + `calibration = prompt_tokens / local_sum`.
+  The extended `test_provider` fixture path: construct `TestProvider(tokens, usage=...)`
+  directly (the conftest factory still builds usage-less providers).
+
+## 2026-06-30 — Task 5: `conversation.py` calibration (wires the on_usage seam)
+- `ConversationCore.stream` now anchors the header gauge: it measures the local
+  token sum of the exact context it sends (`tokens.count_messages(messages, model)`)
+  and hands the provider an `on_usage` callback. A reported `Usage` is adopted only
+  if SANE — `prompt_tokens > 0`, `local_sum > 0`, and the ratio within
+  `CALIBRATION_TOLERANCE` (= 10.0) either way. Sane → set `last_usage` +
+  `calibration = prompt_tokens / local_sum`; bogus/usage-less → leave both unchanged
+  (so a trusted anchor survives a later bad turn). Logic lives in a private
+  `_calibrate(local_sum, usage)` helper. Added read-only `last_usage` (`Usage | None`)
+  and `calibration` (`float | None`) properties, both `None` until a sane turn.
+  `stream` still yields plain `str` — the app is untouched (Task 6 reads the accessors).
+- Code-blind flow (changed core behavior): wrote interface stubs (the two properties
+  returning None-backed attrs, `stream` left unwired) → spawned `test-spec-author` with
+  ONLY the interface + prose intent (PRD + ADR 0015) → it authored contract C58–C65 and
+  the pytest tests. Verified RED first: 4/8 failed (the calibration-must-be-SET cases:
+  C58 sane, C59 ratio invariant, C64 survives-no-usage, C65 survives-bogus), 4/8 passed
+  on the stub (C60 no-usage, C61 zero, C62 out-of-range, C63 fresh — all expect None,
+  which the stub gives) — the correct red/green split, clean collection. Then
+  implemented to green. Authored tests treated as fixed.
+- The ratio-invariant test (C59) pins the formula `prompt_tokens / local_sum` WITHOUT
+  hardcoding a tokenizer count: two identically-built cores measure the same context,
+  so `local_sum` cancels and `calib_a / calib_b == pa / pb`. Clever and robust.
+- New conftest fixtures (the blind author needed them; legitimate reusable test infra):
+  `repo_factory`/`workspace_factory` (independent DB/workspace per call — C59 needs two
+  unrelated cores) and `varying_provider` (a `_VaryingProvider` whose per-turn tokens +
+  usage vary by call count — C64/C65 drive sane-then-bad on ONE core). Also extended the
+  `test_provider` factory to accept optional `usage` (backward-compatible default `None`).
+- GOTCHA (bit me, will bite future iters): `ConversationCore.stream` now calls
+  `provider.stream(messages, model, on_usage)` with THREE args. Every in-file provider
+  DOUBLE in the test suite had `stream(self, messages, model)` and `TypeError`'d. Fixed
+  all of them to `stream(self, messages, model, on_usage=None)`: 5 doubles in
+  `test_conversation.py` + `_FailingProvider` in `test_provider_errors.py`. If you add a
+  new provider double anywhere, give it the `on_usage=None` param.
+- Verification: `bash scripts/check.sh` green (ruff + mypy + 371 passed; +8 new). Pure
+  core-logic seam (no UI/runtime change) → NO qa-tester per PROMPT step 7.
+- Docs: updated AGENTS.md core map (conversation.py calibration/last_usage accessors).
+- Next: Task 6 (UI header gauge + `~` marker) reads `self.core.calibration` and feeds
+  `tokens.gauge(local_total, model_window, calibration)`; `~` rides the absolute gauge
+  only (no calibration yet OR node set changed since last usage = stale). Per-node % never
+  shows `~`. Needs `AppHeader.set_context_pct`/`_gauge` extended to take `approximate: bool`.
+
+## 2026-06-30 — Task 6: UI header gauge + `~` marker (reads core calibration)
+- `ctx/ui/widgets/app_header.py`: `set_context_pct`/`_gauge` now take
+  `approximate: bool = False` (backward-compatible) and render a leading `~` on a
+  numeric pct when true. Deliberate call: `~` rides only a real number — `--%`
+  (unknown window) stays bare since there is no figure to qualify. `compose()`'s
+  `self._gauge(None)` placeholder still works via the default.
+- `ctx/ui/app.py`:
+  - `describe_state()` emits a `context_gauge` `{pct, approximate}` from new
+    `_gauge_state()` = `tokens.gauge(count_messages(build_context(full nodes)),
+    model_window, core.calibration)`. Uses `count_messages` of the FULL context
+    (not summed `per_node_tokens`) so `local_total` shares the core's calibration
+    basis (`count_messages` of the sent context) → `local_total × calibration`
+    tracks the provider's count right after a turn.
+  - Staleness (decision #5): `_node_signature()` = `tuple((id, len(content)) …)`;
+    `_gauge_anchor` is captured in `_stream_response` ONLY when that turn produced a
+    fresh `usage` (`core.last_usage is not usage_before`) — i.e. a turn with no
+    provider usage does NOT re-bless the gauge. `_gauge_state` ORs `approximate`
+    (calibration is None) with `signature != anchor`, so the gauge wears `~` before
+    any anchor AND again once the node set drifts (a `/include` before the next turn).
+  - Renamed `_refresh_weights` → `_refresh_token_ui` (only app.py referenced it) and
+    folded the gauge push into it — the per-node %s and the header gauge always
+    refresh together after a node-list/content change, so one method, one call site
+    set (submit/new/resume/include/stream-complete).
+- Tests (UI/integration, NOT code-blind — PRD designates the Pilot test as Task 6's
+  floor, not a core contract): new `tests/test_app_gauge.py` (+3):
+  (1) unit test on `AppHeader._gauge` pinning the `~`-only-when-numeric marker;
+  (2) Pilot test: `approximate` True before any usage → False after a streamed turn
+  with sane canned `usage` → True again (stale) after `core.include_files`;
+  (3) Pilot test: an unknown model degrades to `pct=None`/approximate, no crash.
+  Canned `Usage(prompt_tokens=12,…)` is within ~10× of a short message's local sum so
+  the core's sanity check accepts it (calibration set).
+- Verification: `bash scripts/check.sh` green (ruff + mypy + 374 passed; +3 new).
+  Per PROMPT step 7 (a) + PRD note: NO qa-tester this iteration — the in-process
+  harness caches `ctx.*` and can't see this edit; the Pilot test is the floor.
+  Task 7 is the dedicated qa-tester e2e pass (it will read the gauge via
+  `textual_query` on `#hdr-context`, which holds `~12% [== …]`).
+- Docs: updated AGENTS.md (AppHeader gauge no longer a placeholder; app.py gauge
+  wiring + `_refresh_token_ui` rename + `context_gauge` field).
+- Pre-existing uncommitted `scripts/ralph/loop.sh` (sentinel-on-own-line + all-checked
+  guard) was NOT mine — left unstaged, not part of this commit.
+- Next: Task 7 — end-to-end qa-tester verify-feature against `HarnessApp` (needs the
+  harness's TestProvider wired with a canned `usage` so calibration is exercised;
+  confirm gauge moves on `/include`, `~` clears after a turn and reappears stale).
+  Task 7 makes no code changes — if it finds a defect, file a new `- [ ]` and stop.
+
+## 2026-06-30 — Task 7: End-to-end qa-tester verify-feature (token accounting)
+- Wired the QA harness's `TestProvider` with a canned `usage` so the gauge
+  calibration path is exercised headlessly: `tools/agent/harness.py` now imports
+  `Usage` and constructs `TestProvider(CANNED_RESPONSE, usage=CANNED_USAGE)` where
+  `CANNED_USAGE = Usage(prompt_tokens=20, completion_tokens=6, total_tokens=26)`.
+  `prompt_tokens=20` stays within the core's `CALIBRATION_TOLERANCE` (10×) of any
+  short typed message's local estimate, so the first turn calibrates and the gauge
+  sheds its `~`. This is QA-tooling setup (non-shipping, ADR 0012), not product code
+  — the only edit this iteration; `scripts/check.sh` green (374 passed, unchanged).
+- qa-tester (verify-feature, `tools.agent.harness:HarnessApp`) result: all observable
+  PRODUCT logic PASS — numeric per-node `weight_pct` for model-bound nodes,
+  `"context"`-basis %s ≈ 100 (50/50 → after `/include` 25/25/50, correct
+  redistribution), system breadcrumb `weight_pct` null/0, `context_gauge.approximate`
+  flips True→False after the calibrated turn and back to True (stale) after `/include`,
+  `/new` returns to empty, no crashes, `textual_check_errors` clean throughout.
+- Two qa-tester findings, BOTH analyzed against the code as harness artifacts, NOT
+  product defects:
+  * Finding A: the harness default model `openrouter/google/gemma-4-26b-a4b-it` has no
+    `max_input_tokens` in litellm → `tokens.model_window` returns `None` → the header
+    renders `--%` (no number to qualify, so no `~`). This is the DOCUMENTED, CORRECT
+    unknown-window degradation; CP1 explicitly allows `--%`. The numeric-pct + `~`
+    lifecycle is pinned by the deterministic Pilot test (`tests/test_app_gauge.py`, the
+    PRD-designated floor) and spot-confirmed by qa-tester via `/model gpt-4o` → `~0%`.
+    NOTE: "gauge moves up" on `/include` is sub-1% for a toy conversation against any
+    real model window (rounds to 0%), so it is only checkable as the numeric
+    `context_gauge.pct` field rising, never as a visibly filling bar — the Pilot test
+    rightly asserts only the `approximate` flag, not pct movement.
+  * Finding B (filed as new Task 8): `_stream_response` (`ctx/ui/app.py:684`) detects
+    "fresh usage this turn" via `Usage` OBJECT IDENTITY (`is not usage_before`). Correct
+    for `LiteLLMProvider` (fresh `Usage` per turn) but an undocumented `Provider`-seam
+    invariant: the harness's module-level singleton `CANNED_USAGE` is reused every turn,
+    so only turn 1 passes the identity check and `_gauge_anchor` never updates again →
+    the `~` sticks permanently for turns 2+. Production unaffected; it's a fragile
+    coupling + makes the harness unfaithful for MULTI-turn gauge QA. Does NOT affect the
+    Task 7 checkpoint sequence (one turn before the `/include`), which is why CP2/CP3
+    still verified correctly.
+- Per PROMPT step + Task 7 mandate ("if it finds a defect, file a new `- [ ]` and stop;
+  do not patch under a green-required commit"): filed Finding B as **Task 8** (harden
+  the staleness anchor off object identity onto a turn-scoped core signal). Did NOT
+  patch it under this commit.
+- Decision: marked Task 7 done. Its verification intent is met — the feature is
+  confirmed correct (observable logic PASS + deterministic Pilot floor + gpt-4o
+  spot-check). The CP2/CP3 "PARTIAL" marks were the realistic-default-model `--%`
+  (correct behavior), not failures.
+- GOTCHA for the Task 8 iteration: do NOT switch to value-equality (`!=`) for the
+  anchor — two consecutive turns with identical token counts would then falsely read
+  as "no fresh usage." Use a monotonic usage-generation counter or a per-turn flag set
+  in `_calibrate`, kept framework-free on `ConversationCore`. Also: the in-process MCP
+  harness caches `ctx.*`, but it DID pick up this iteration's `harness.py` edit (the
+  qa-tester saw calibration fire), so a fresh `textual_launch` reloads the harness
+  module — the staleness caveat is about `ctx.*`, not a same-session edit to harness.py
+  before first launch.
+
+## 2026-06-30 — Task 8: Gauge staleness anchor off Usage object identity
+- Root cause (Task 7 Finding B): `_stream_response` (`ctx/ui/app.py`) detected
+  "fresh provider anchor this turn" via `self.core.last_usage is not usage_before`
+  — `Usage` OBJECT IDENTITY. Correct for `LiteLLMProvider` (new `Usage` per chunk)
+  but an undocumented `Provider`-seam invariant. A provider reusing one `Usage`
+  object (harness `CANNED_USAGE` singleton) → only turn 1 trips the check, anchor
+  never updates, `~` sticks for turns 2+.
+- Fix: `ConversationCore` now owns a private monotonic `_usage_generation` (int),
+  bumped inside `_calibrate` ONLY when a usage is adopted (after the sanity check
+  passes — so no-usage and bogus-usage turns do NOT bump). Exposed read-only as
+  `usage_generation`. `_stream_response` samples `usage_generation` before/after the
+  turn (`gen_before`) and updates `_gauge_anchor` when it changed. Core stays
+  framework-free; no new seam. Identity- AND value-independent — per the prior
+  iteration's GOTCHA, value-equality (`!=`) was the wrong fix (two consecutive turns
+  with identical token counts would falsely read as "no fresh usage").
+- ADR: recorded as Amendment #2 in `docs/decisions/0015-usage-off-the-stream.md`.
+  Updated AGENTS.md (conversation.py + app.py `_gauge_anchor` notes).
+- Tests added (2):
+  * `tests/test_app_gauge.py::test_gauge_clears_tilde_on_second_turn_with_reused_usage_object`
+    — the PRD acceptance FLOOR. Pilot test: `CannedProvider(usage=_SANE_USAGE)` reuses
+    one `Usage` object; two consecutive turns → `context_gauge.approximate` is `False`
+    after the SECOND turn. Fails under the old identity check (stayed `True`), passes now.
+  * `tests/test_conversation.py::C66 test_usage_generation_bumps_only_on_adoption`
+    — pins increment semantics the Pilot test can't (it only drives sane turns):
+    fresh core = 0; sane turn → 1; no-usage turn stays 1; bogus-usage turn stays 1;
+    a 4th turn feeding the SAME `fed` object as turn 1 → 2 (identity must not matter).
+    Catches the mutation "bump unconditionally / on every turn".
+- `scripts/check.sh` green (376 passed, was 374; +2). ruff + mypy clean.
+- qa-tester NOT run this iteration: the in-process MCP harness caches `ctx.*` at
+  session start, so it cannot see this iteration's `ctx/core/conversation.py` +
+  `ctx/ui/app.py` edits — it would test STALE code and falsely reproduce the bug.
+  The deterministic Pilot test is the PRD-designated floor and directly encodes the
+  acceptance, so the fix IS verified. For belt-and-suspenders confirmation in a future
+  fresh session (fresh server), run qa-tester verify-feature against
+  `tools.agent.harness:HarnessApp` with `/model gpt-4o` (known window so a numeric % +
+  `~` are visible): `~` before usage → cleared after EACH of two turns (the multi-turn
+  lifecycle that was broken) → reappears stale after a following `/include`; no
+  `textual_check_errors`. Harness already wires `CANNED_USAGE` (reused singleton), so
+  it now faithfully exercises the multi-turn gauge.
+- Pre-existing uncommitted `scripts/ralph/loop.sh` (not mine) left unstaged again.
+- ALL PRD TASKS NOW CHECKED — Sprint 1 (token accounting & context budget) complete.

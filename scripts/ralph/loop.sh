@@ -67,8 +67,12 @@ for ((i = 1; i <= MAX_ITERS; i++)); do
     exit 1
   fi
 
-  if grep -q "$SENTINEL" /tmp/ralph-last-iter.log; then
-    echo "==> Agent signalled $SENTINEL. Done."
+  # Honor the sentinel only when it's on its own line (PROMPT.md: "print the exact
+  # line RALPH_COMPLETE on its own line") AND the PRD truly has no unchecked tasks —
+  # otherwise an agent merely *mentioning* the sentinel in prose ends the loop early.
+  if grep -qE "^[[:space:]]*${SENTINEL}[[:space:]]*$" /tmp/ralph-last-iter.log \
+     && [ "$(unchecked)" -eq 0 ]; then
+    echo "==> Agent signalled $SENTINEL and all PRD tasks are checked. Done."
     exit 0
   fi
   echo
