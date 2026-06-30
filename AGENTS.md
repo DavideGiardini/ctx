@@ -36,7 +36,10 @@ reach end users (ADR 0012). See `docs/decisions/` for *why* it's shaped this way
 **core/** (no `textual` imports)
 - `conversation.py` — `ConversationCore`: owns conversation state (nodes, model,
   id/title) plus the command + streaming lifecycle. Takes a `Provider`, a
-  `StoragePort`, and a `Workspace` by injection (ADR 0001).
+  `StoragePort`, and a `Workspace` by injection (ADR 0001). Exposes a `read_file`
+  property — the very loader it hands `build_context` — so the UI's token
+  accounting renders nodes exactly as the model sees them without reaching past
+  the core into the workspace.
 - `provider.py` — `Provider` protocol (`stream()`, `check_connectivity()`) with
   adapters `LiteLLMProvider` (real) and `TestProvider` (canned, no network) (ADR 0002).
   `LiteLLMProvider.stream` passes a finite `STREAM_TIMEOUT` to the backend and maps
@@ -78,7 +81,12 @@ a left `DetailInspector` and a right `#conversation` pane (the `MessageList` +
   dependencies; owns widgets, focus, Insert/Edit mode-switching (`_set_mode`),
   keybindings, selection→inspector wiring, and the `@work` streaming worker (which
   feeds both the truncated right-pane node and, when locked, the full left-pane
-  stream). `describe_state()` exposes observable state for snapshots.
+  stream). `describe_state()` exposes observable state for snapshots. Per-node
+  weight %s come from `tokens.weight_pct` (basis from `ui.weight_basis`, window
+  from `tokens.model_window`) via `_node_weights()`, which both `describe_state`
+  and `_refresh_weights` read; `_refresh_weights` pushes them onto the mounted
+  `MessageWidget`s after every node-list/content change (submit, stream-complete,
+  `/include`, `/resume`, `/new`).
 - `widgets/` — `MessageList`/`MessageWidget` (truncated nodes via per-role
   `max-height`, right-docked weight slot, conversation-pass margins),
   `DetailInspector` (reactive `show(NodeView)`; standard Markdown view vs. 3-split

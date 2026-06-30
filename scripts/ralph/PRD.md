@@ -76,7 +76,7 @@ Dependencies are noted; every prerequisite sits above its dependent.
       a valid `"window"` user override is preserved; an invalid value falls back to
       `"context"`. `scripts/check.sh` green.
 
-- [ ] **3. UI: per-node weight %** _(deps: 1, 2)_ — in `describe_state()`
+- [x] **3. UI: per-node weight %** _(deps: 1, 2)_ — in `describe_state()`
       (`ctx/ui/app.py`) replace the hardcoded `weight_pct: None` with values from
       `tokens.weight_pct(nodes, self.core.model, read_file, basis, max_input_tokens)`,
       where `basis = get_config()["ui"]["weight_basis"]`, `max_input_tokens =

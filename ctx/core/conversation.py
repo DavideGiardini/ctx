@@ -1,5 +1,5 @@
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from uuid import uuid4
 
 from ctx.core.config import get_config
@@ -51,6 +51,16 @@ class ConversationCore:
         self.conversation_id: str = ""
         self.conversation_title: str = ""
         self.model: str = self._default_model
+
+    @property
+    def read_file(self) -> Callable[[str], str]:
+        """The file loader used to resolve ``context`` nodes.
+
+        Exactly the loader handed to ``build_context`` at stream time, exposed so
+        the UI's token-accounting can render nodes the same way the model sees
+        them without reaching past the core into the workspace.
+        """
+        return self._workspace.read_file
 
     def setup(self) -> None:
         self._workspace.ensure()

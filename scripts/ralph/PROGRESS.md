@@ -401,3 +401,54 @@ Git history is the source of truth for *what changed*; this file captures the
   exposed without breaking core's framework-free rule. Mandatory floor is the
   Pilot test asserting numeric `weight_pct` in `describe_state()`; qa-tester is
   confirmation and may lag one iteration (in-process cache).
+
+## 2026-06-30 — Task 3: UI per-node weight %
+- Wired the already-contract-tested `tokens.weight_pct` into the UI. Three edits:
+  (1) `ctx/core/conversation.py`: added a `read_file` property returning
+  `self._workspace.read_file` — the exact loader injected into `build_context` —
+  so the UI renders nodes for counting the same way the model sees them without
+  reaching past the core (keeps core framework-free). (2) `ctx/ui/app.py`: imported
+  `from ctx.core import tokens`; added `_node_weights()` (single computation:
+  `tokens.weight_pct(nodes, model, core.read_file, get_config()["ui"]["weight_basis"],
+  tokens.model_window(model))`) read by BOTH `describe_state` (replaces the
+  hardcoded `weight_pct: None` with `weights[i]`) and a new `_refresh_weights()`
+  that pushes `set_weight_pct(...)` onto mounted `MessageWidget`s. (3) Invoked
+  `_refresh_weights()` after every node-list/content change: `submit`,
+  stream-complete (`on_worker_state_changed` SUCCESS/CANCELLED/ERROR),
+  `/include`, `/resume`, `/new`.
+- Design note: PRD listed only submit/include/resume/new for the refresh, assigning
+  stream-complete to Task 6's gauge. But the assistant node is EMPTY at submit and
+  only gets content when the stream finishes — so its weight (and the context-basis
+  redistribution across siblings) only becomes real at stream-complete. Added the
+  refresh there too; it's squarely Task 3's per-node-weight concern, not Task 6
+  scaffolding. `describe_state` recomputes live regardless, so snapshots are always
+  correct; the widget refresh is purely for the rendered `--%` slots.
+- Tests: NO test-spec-author. The only core change is a pass-through getter
+  (`read_file`), explicitly excluded from new tests per PROMPT step 3; `tokens` is
+  already contract-tested (Task 1). The new observable behavior is UI wiring, whose
+  mandatory floor is a deterministic Pilot test. Wrote `tests/test_app_weights.py`
+  (the FIRST `App.run_test()` test in the repo, 2 tests): (a) drives a user turn +
+  canned assistant reply, asserts user & assistant nodes have `int` weight_pct and
+  context-basis %s sum to ~100 (±2 for integer rounding); (b) raises a system
+  breadcrumb via bare `/model` and asserts its weight_pct is `None`.
+- Pilot-driving gotcha for future iters: drive turns by calling the real handler
+  `await app.on_input_bar_submitted(InputBar.Submitted("..."))` directly, then
+  `await app.workers.wait_for_complete()` to let the `@work stream_response` worker
+  finish — deterministic, no keypress/message-pump timing. Do NOT press keys to
+  type a command: bare `/model` via Enter appends a space for args
+  (`COMMANDS_WITH_ARGS`) instead of submitting; posting/calling the Submitted handler
+  bypasses that quirk. Also: import `TestProvider as CannedProvider` in test modules
+  or pytest emits a `PytestCollectionWarning` (it tries to collect the `Test*` class).
+- Verification: `bash scripts/check.sh` green (ruff + mypy + 355 passed; +2 new). NO
+  qa-tester this iteration — the harness runs `ctx.*` in-process/cached so it can't
+  see this iteration's edits (it'd test the stale hardcoded `None`); per PROMPT step 7
+  limit (a) + the PRD's explicit allowance, the Pilot test is the floor and qa-tester
+  confirmation lags. A later iteration (Task 7 e2e, or any fresh `claude -p`) should
+  confirm numeric per-node %s in `ctx_snapshot` and redistribution after `/include`.
+- Docs: updated AGENTS.md core map (conversation.py `read_file` accessor; app.py
+  per-node weight wiring via `_node_weights`/`_refresh_weights`).
+- Gotcha for next iter: Task 4 (Provider `on_usage` seam + `stream_options` +
+  TestProvider usage) is next — introduces a real architectural decision (the
+  `usage`-off-the-stream seam shape), so it MUST add an ADR in `docs/decisions/`.
+  Keep the `test_provider` fixture green: TestProvider's new `usage` arg defaults to
+  `None`.

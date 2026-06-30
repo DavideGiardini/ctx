@@ -9,6 +9,7 @@ from textual.containers import Container, Horizontal, Vertical
 from textual.widgets import Input, Static
 from textual.worker import Worker, WorkerState
 
+from ctx.core import tokens
 from ctx.core.config import get_config
 from ctx.core.conversation import ConversationCore
 from ctx.core.log import logger
@@ -345,6 +346,38 @@ class ChatApp(App):
             return "messages"
         return "other"
 
+    # --- token weights --------------------------------------------------
+
+    def _node_weights(self) -> list[int | None]:
+        """Per-node weight percentages parallel to ``self.core.nodes``.
+
+        The single computation both ``describe_state`` and ``_refresh_weights``
+        read, so the snapshot and the rendered ``--%`` slots cannot drift. Basis
+        comes from config; the window denominator (only used by ``"window"``
+        basis) from the active model, ``None`` when unknown.
+        """
+        return tokens.weight_pct(
+            self.core.nodes,
+            self.core.model,
+            self.core.read_file,
+            get_config()["ui"]["weight_basis"],
+            tokens.model_window(self.core.model),
+        )
+
+    def _refresh_weights(self) -> None:
+        """Push current per-node weights onto the mounted message widgets.
+
+        Called after any change to the node list or to node content (a new turn,
+        a finished stream, ``/include``, ``/resume``, ``/new``) so each node's
+        ``--%`` slot reflects its current share of the conversation."""
+        message_list = self.query_one(MessageList)
+        for node, pct in zip(self.core.nodes, self._node_weights(), strict=True):
+            try:
+                widget = message_list.query_one(f"#msg-{node.id}", MessageWidget)
+            except Exception:
+                continue
+            widget.set_weight_pct(pct)
+
     # --- state snapshot -------------------------------------------------
 
     def describe_state(self) -> dict:
@@ -359,6 +392,7 @@ class ChatApp(App):
         """
         nodes = self.core.nodes
         truncation = get_config()["ui"]["truncation_lines"]
+        weights = self._node_weights()
         selected_index: int | None = None
         selected_role: str | None = None
         node_states: list[dict] = []
@@ -373,7 +407,7 @@ class ChatApp(App):
                 "node_type": node.node_type,
                 "content": node.content,
                 "selected": is_selected,
-                "weight_pct": None,
+                "weight_pct": weights[i],
                 "truncated": self._is_truncated(node, truncation),
             }
             source_path = node.meta.get("source_path")
@@ -502,6 +536,7 @@ class ChatApp(App):
         await message_list.add_node(user_node)
         await message_list.add_node(assistant_node)
         self.query_one(AppHeader).set_title(self.core.conversation_title)
+        self._refresh_weights()
         if self.mode == "insert":
             self._lock_inspector_to_last()
         self._stream_worker = self._stream_response(assistant_node)
@@ -543,6 +578,7 @@ class ChatApp(App):
         await message_list.add_node(node)
         self.query_one(AppHeader).set_title(self.core.conversation_title)
         self._update_model_label()
+        self._refresh_weights()
         if self.mode == "insert":
             self._lock_inspector_to_last()
 
@@ -567,6 +603,7 @@ class ChatApp(App):
             await message_list.add_node(node)
         self.query_one(AppHeader).set_title(self.core.conversation_title)
         self._update_model_label()
+        self._refresh_weights()
         if self.mode == "insert":
             self._lock_inspector_to_last()
         logger.info("loaded conversation | id=%s | nodes=%d", result, len(nodes))
@@ -588,6 +625,7 @@ class ChatApp(App):
         for node in nodes:
             await message_list.add_node(node)
             logger.info("context included | path=%s", node.meta.get("source_path", ""))
+        self._refresh_weights()
         if self.mode == "insert":
             self._lock_inspector_to_last()
 
@@ -631,3 +669,6 @@ class ChatApp(App):
             WorkerState.ERROR,
         ):
             self._stream_worker = None
+            # The assistant node now carries its full text — its weight (and the
+            # context-basis share of every other node) only just became real.
+            self._refresh_weights()
