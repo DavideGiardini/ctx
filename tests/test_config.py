@@ -275,3 +275,53 @@ def test_c20_auto_truncation_value_passed_through(config_file):
         if k == "assistant":
             continue
         assert result["ui"]["truncation_lines"][k] == defaults["ui"]["truncation_lines"][k]
+
+
+# C21
+def test_c21_default_weight_basis_is_context(config_file):
+    # Intent: with no config file, the effective config carries the documented
+    # default ui.weight_basis == "context".
+    config_file.absent()
+
+    result = get_config()
+
+    assert result["ui"]["weight_basis"] == "context"
+
+
+# C22
+def test_c22_valid_window_override_preserved(config_file):
+    # Intent: "window" is one of the two legal values and a user-set legal value
+    # must survive the per-section ui merge.
+    config_file.write_json({"ui": {"weight_basis": "window"}})
+
+    result = get_config()
+
+    assert result["ui"]["weight_basis"] == "window"
+
+
+# C23
+@pytest.mark.parametrize(
+    "illegal_value",
+    [
+        "banana",  # wrong string
+        42,  # wrong type (int)
+        None,  # null
+        ["context"],  # list
+    ],
+)
+def test_c23_illegal_weight_basis_coerced_to_context(config_file, illegal_value):
+    # Intent: any value not exactly "context"/"window" is coerced to "context"
+    # WITHOUT raising. Capture the baseline truncation_lines first (file absent),
+    # then write the illegal config and assert coercion + sibling untouched.
+    config_file.absent()
+    baseline_truncation = _baseline(config_file)["ui"]["truncation_lines"]
+
+    config_file.write_json({"ui": {"weight_basis": illegal_value}})
+
+    # Must not raise on an invalid value.
+    result = get_config()
+
+    # Illegal value coerced back to the default.
+    assert result["ui"]["weight_basis"] == "context"
+    # Coercing weight_basis must not disturb the sibling ui default.
+    assert result["ui"]["truncation_lines"] == baseline_truncation

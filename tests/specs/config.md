@@ -127,6 +127,23 @@ config, not a type error.)* File = `{"ui": {"truncation_lines": {"assistant": "a
 does not raise; `result["ui"]["truncation_lines"]["assistant"] == "auto"`, and every other
 truncation key keeps its default value `D["ui"]["truncation_lines"][k]` (per C11's merge).
 
+**C21. Default weight_basis is "context".** No config file on disk (baseline `D`
+applies) → `get_config()["ui"]["weight_basis"] == "context"`. This is the documented
+default and the value every other case is measured against.
+
+**C22. A valid override of "window" is preserved.** File =
+`{"ui": {"weight_basis": "window"}}` → `result["ui"]["weight_basis"] == "window"` and
+the call does not raise. `"window"` is one of exactly two legal values (`"context"`,
+`"window"`); the per-section `ui` merge must keep the user's legal choice.
+
+**C23. Any illegal weight_basis is coerced to "context" without raising; sibling `ui`
+defaults are untouched.** File whose `ui.weight_basis` is NOT exactly one of the two
+legal strings — covering a wrong string (`"banana"`) and wrong types (`42`, `null`, a
+list) — supplied independently → for every illegal value `get_config()` does not raise
+and `result["ui"]["weight_basis"] == "context"` (coerced to the default). In every such
+case `result["ui"]["truncation_lines"]` still deep-equals `D["ui"]["truncation_lines"]`,
+proving the coercion of one `ui` key does not disturb sibling `ui` keys.
+
 ## Contract violations found
 
 Where the code violates this (correct, intended) contract, the test is kept as the

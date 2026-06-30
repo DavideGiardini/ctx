@@ -29,8 +29,15 @@ _DEFAULTS: dict = {
             "context": 2,
             "system": 1,
         },
+        # Basis for the per-node weight % shown in the UI. "context" expresses
+        # each node as a share of the current conversation's total tokens;
+        # "window" expresses it as a share of the model's input window. Any
+        # other value is coerced back to "context" in get_config().
+        "weight_basis": "context",
     },
 }
+
+_WEIGHT_BASES = ("context", "window")
 
 
 def get_config() -> dict:
@@ -69,5 +76,10 @@ def get_config() -> dict:
             )
     else:
         merged["ui"] = copy.deepcopy(_DEFAULTS["ui"])
+
+    # Coerce an out-of-domain weight_basis (wrong string or wrong type) back to
+    # the default. The merge above may have carried a user value verbatim.
+    if merged["ui"].get("weight_basis") not in _WEIGHT_BASES:
+        merged["ui"]["weight_basis"] = _DEFAULTS["ui"]["weight_basis"]
 
     return merged
