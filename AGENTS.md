@@ -47,6 +47,16 @@ reach end users (ADR 0012). See `docs/decisions/` for *why* it's shaped this way
   encapsulating all SQLite (WAL) schema/serialization (ADR 0003).
 - `context.py` — pure `build_context(nodes, load_file)` → litellm message list;
   expands `context` nodes via the injected loader, no I/O of its own (ADR 0004).
+- `tokens.py` — pure, stateless token accounting for the context-budget UI (no
+  Protocol seam — single impl). `count_messages` (the sole home of litellm's
+  `token_counter`/tiktoken fallback), `per_node_tokens` (per-node local estimate,
+  each node rendered in isolation via `build_context` so a context node counts its
+  resolved file body; `0` when not `goes_to_model()`), `weight_pct` (per-node
+  `"context"`/`"window"`-basis %, a *local provider-agnostic ratio* — no calibration
+  arg; `0`-token nodes → `None`), `gauge(local_total, max_input_tokens, calibration)`
+  → `(pct, approximate)` (absolute used÷window, scaled by an optional provider
+  calibration; `approximate=True` whenever `calibration is None`; pct unclamped),
+  `model_window` (wraps `get_model_info`, unknown model → `None`, never raises).
 - `workspace.py` — `Workspace(root_path)`: `.ctx/` discovery, `ensure()`,
   `list_files()`, `read_file()`; the sole `Path.cwd()` lives at its call site (ADR 0005).
   `list_files` classifies a file as text by a **bounded ~8 KB sniff** (`SNIFF_BYTES`):

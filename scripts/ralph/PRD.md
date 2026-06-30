@@ -46,7 +46,7 @@ rationale: the approved plan at `/home/giardo/.claude/plans/jaunty-enchanting-gi
 Top-to-bottom by priority; the loop always takes the topmost unchecked task.
 Dependencies are noted; every prerequisite sits above its dependent.
 
-- [ ] **1. `core/tokens.py` deep module + code-blind contract tests** — new
+- [x] **1. `core/tokens.py` deep module + code-blind contract tests** — new
       framework-free module `ctx/core/tokens.py` (no Protocol seam). Public surface
       (refine docstrings, then author tests blind): `count_messages(messages, model)
       -> int` (wraps `litellm.token_counter`; the ONLY place the tiktoken fallback

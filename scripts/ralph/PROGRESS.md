@@ -338,3 +338,37 @@ Git history is the source of truth for *what changed*; this file captures the
 - Verification: `bash scripts/check.sh` green (ruff + mypy + 316 passed, unchanged).
 - This was the **last unchecked task** in `scripts/ralph/PRD.md` (round-2 cleanups).
   All three tasks now `- [x]`. PRD complete.
+
+## 2026-06-30 — Task 1: core/tokens.py deep module + code-blind contract tests (Sprint 1)
+- Seeded the new Sprint 1 PRD (token accounting & context budget) in a separate
+  `docs:` commit first (the working tree carried the uncommitted replacement), then
+  did Task 1.
+- New framework-free module `ctx/core/tokens.py` (zero textual, no Protocol seam —
+  single impl). Public surface: `count_messages` (sole home of litellm
+  `token_counter`/tiktoken fallback; empty list → 0), `per_node_tokens` (renders each
+  node in isolation via `build_context([node], read_file)` then counts — so a context
+  node counts its resolved file body, a non-goes_to_model node → 0), `weight_pct`
+  (`"context"`/`"window"` basis; provider-agnostic ratio, **no calibration arg**;
+  0-token nodes → `None`; empty/0 denominator → all `None`, no ZeroDivision),
+  `gauge(local_total, max_input_tokens, calibration)` → `(pct, approximate)`
+  (`approximate = calibration is None`; pct **unclamped**, can exceed 100; unknown
+  window → `(None, ...)`), `model_window` (wraps `get_model_info`, unknown model →
+  `None` via broad `except Exception`, never raises).
+- Code-blind flow per PROMPT.md step 4: wrote signatures+docstrings+`NotImplementedError`
+  stubs, confirmed clean collection, spawned `test-spec-author` with ONLY the interface
+  + prose intent. It produced `tests/specs/tokens.md` (C1–C25) + `tests/test_tokens.py`
+  (25 tests). Verified RED (25 fail on NotImplementedError, collect clean), implemented
+  to GREEN. Did NOT touch the authored tests.
+- Decisions baked into the docstrings the blind author saw: 0-token node → `None` (not
+  0) in `weight_pct` so the UI shows `--%`; gauge pct unclamped (>100 means over budget
+  is meaningful); `approximate` keys purely off `calibration is None` (staleness is the
+  UI layer's concern in Task 6, not this module's).
+- Pure core-logic task, no UI/runtime change → NO qa-tester run (per loop rules); the
+  code-blind tests + gate are the verification.
+- Docs: added `tokens.py` to the AGENTS.md core/ architecture map.
+- Verification: `bash scripts/check.sh` green (ruff + mypy + 347 passed; +25 new + the
+  litellm import path is exercised by the real `gpt-4` model in tests).
+- Gotcha for next iter: Task 2 (`ui.weight_basis` config flag) is next — pure config,
+  extend `tests/test_config.py` + `tests/specs/config.md`. Tasks 1+2 are the deps for
+  Task 3 (first Pilot test). `tokens.weight_pct` deliberately takes no calibration arg
+  — calibration only ever touches `gauge`'s absolutes (Task 5/6).
