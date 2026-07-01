@@ -188,6 +188,118 @@ Given a conversation saved with `title==""` and ≥1 persistable node → `list(
 conversation with `title==""` (the empty string, not a substitute), and re-saving it later
 with a non-empty title overwrites it to that value.
 
+## Append-only conversation graph (ADR-0016)
+
+New persistence behaviors for the append-only node graph: `save()` now stores the FULL node
+set (every line + compression children, not just the active view) including each node's
+`prev_id`/`compressed_into` edges, plus the conversation's `active_leaf_id` tip; `get_active_leaf`
+reads that tip back; and `init()` migrates a pre-graph flat DB in place (chaining nodes into the
+degenerate single path by insertion/rowid order). All Expect clauses are observable through
+`load()` (asserting on returned Nodes' `prev_id`/`compressed_into`), `get_active_leaf()`, `list()`,
+`get_last()` — never storage format.
+
+**C28. save persists `prev_id` verbatim and round-trips.**
+Given a conversation with two nodes `n1` (`prev_id=None`) and `n2` (`prev_id=n1.id`) saved together
+→ `load(cid)` returns two Nodes; the one with `id==n1.id` has `prev_id is None`, the one with
+`id==n2.id` has `prev_id == n1.id`; each loaded Node equals its saved Node (dataclass `==`, including
+`prev_id` and `id`). The graph topology (the `prev_id` edges) survives save/load.
+
+**C29. save persists `compressed_into` verbatim and round-trips.**
+Given a summary node `s` and a folded child `c` with `c.compressed_into = s.id` saved together →
+`load(cid)` returns both; the node `id==c.id` has `compressed_into == s.id`, the node `id==s.id` has
+`compressed_into is None`; loaded Nodes equal saved Nodes (dataclass `==` including `compressed_into`).
+
+**C30. save persists the FULL node set — abandoned tails survive.**
+Given a node set with a branch that is NOT the active tip — `n1` (root), `n2` (`prev_id=n1.id`), and
+`n3` (`prev_id=n1.id`, an abandoned sibling) — saved with `active_leaf_id=n2.id` → `load(cid)` returns
+all three nodes (by id); the abandoned `n3` is still retrievable with `prev_id == n1.id`. No node is
+dropped merely because it is off the active line (non-destructive graph).
+
+**C31. `active_leaf_id` is stored and retrieved via `get_active_leaf`.**
+Given `save(cid, title, nodes, active_leaf_id=X)` where `X` is one of the saved node ids →
+`get_active_leaf(cid) == X`.
+
+**C32. `active_leaf_id` need not be the last node (rewind case).**
+Given nodes `n1,n2,n3` saved in that insertion order but with `active_leaf_id=n2.id` (a middle node —
+the tip after a rewind) → `get_active_leaf(cid) == n2.id` (NOT `n3.id`), and `load(cid)` still returns
+all three in insertion order `[n1, n2, n3]`. The stored tip is exactly the id the caller passed,
+independent of which node was created last.
+
+**C33. `active_leaf_id` defaults to `None` when the kwarg is omitted.**
+Given `save(cid, title, nodes)` with nodes present but WITHOUT the `active_leaf_id` kwarg →
+`get_active_leaf(cid) is None` (the tip is recorded only when explicitly provided).
+
+**C34. `get_active_leaf` returns `None` for an unknown conversation.**
+Given no conversation ever saved under `"does-not-exist"` → `get_active_leaf("does-not-exist") is None`
+(symmetric with `get_model`).
+
+**C35. `get_active_leaf` reflects the most recent save (overwrite).**
+Given `save(cid, ..., active_leaf_id=n2.id)` then a later `save(cid, ..., active_leaf_id=n3.id)` for
+the same id → `get_active_leaf(cid) == n3.id`.
+
+**C36. Re-save with `active_leaf_id=None` clears the previously stored tip.** *(adjudicated ambiguity 1:
+"reflects the most recent save" applies to `None` too — a deliberately-unset tip overwrites a prior one.)*
+Given `save(cid, ..., active_leaf_id=n2.id)` then a later `save(cid, ..., active_leaf_id=None)` (nodes
+still present) → `get_active_leaf(cid) is None` after the second save.
+
+### Migration of a pre-graph flat DB on init()
+A "pre-graph" legacy DB is built directly via `sqlite3` (as the existing `_PRE_MODEL_SCHEMA` tests do):
+`conversations` has a `model` column but NO `active_leaf_id`; `nodes` has NO `prev_id`/`compressed_into`.
+Rows are inserted in a known order, a `ConversationRepository` is pointed at that file, and `init()` is
+called (which must migrate in place).
+
+**C37. Migration chains a multi-node conversation into a single `prev_id` line by insertion order.**
+Given a legacy conversation with three nodes inserted in order `a, b, c` → after `init()`, `load(cid)`
+returns `[a, b, c]` in insertion order with `a.prev_id is None` (root), `b.prev_id == a.id`,
+`c.prev_id == b.id`. Content preserved.
+
+**C38. Migration sets `active_leaf_id` to the last node (by insertion order).**
+Given the migrated multi-node conversation from C37 → `get_active_leaf(cid) == c.id` (the last-inserted
+node is the tip of the degenerate linear conversation).
+
+**C39. Migration preserves existing content/order, loses no rows, and leaves `compressed_into` NULL.**
+Given a legacy conversation of several nodes with distinct id/role/content/node_type/meta → after
+`init()`, `load(cid)` returns the same count in the same insertion order with those fields unchanged;
+only `prev_id`/`compressed_into` are newly populated, and every migrated node has `compressed_into is None`
+(a pre-graph DB had no folds).
+
+**C40. Migration edge case — single-node conversation.**
+Given a legacy conversation containing exactly one node `x` → after `init()`, `load(cid)` returns `[x]`
+with `x.prev_id is None` (its own root) and `get_active_leaf(cid) == x.id` (its own tip).
+
+**C41. Migration edge case — zero-node conversation.**
+Given a legacy conversation ROW with no node rows → `init()` completes without error; `load(cid)` returns
+`[]`; `get_active_leaf(cid) is None` (no last node to point at); the conversation still appears in `list()`
+(the row is not lost).
+
+**C42. Migration is idempotent across repeated `init()`.**
+Given a legacy multi-node conversation, `init()` once (state captured via `load` + `get_active_leaf`), then
+`init()` a second and third time → after each extra call, `load(cid)` and `get_active_leaf(cid)` are
+identical to the post-first-init state (same nodes, order, `prev_id` chain, tip); no error, no duplicate
+columns.
+
+**C43. The rowid-chaining backfill runs EXACTLY ONCE — a post-migration NULL-tip conversation is not
+re-chained.** *(adjudicated ambiguity 2: the "already migrated" discriminator is schema-level — once the
+graph columns exist the backfill never re-runs; the probe is a sibling topology a wrongful re-run would
+rewrite. This item must start from a GENUINELY migrated legacy DB so it proves the backfill already ran
+once and will not run again — not merely that a fresh-schema DB never migrates.)*
+Given a legacy DB migrated by a first `init()`, then a NEW conversation saved normally with a
+non-linear topology and `active_leaf_id=None` while nodes are present — `n1` (root), `n2` (`prev_id=n1.id`),
+`n3` (`prev_id=n1.id`, a sibling, NOT chained after `n2`) — then `init()` is called again → after the extra
+`init()`, `load(cid)` still shows `n3.prev_id == n1.id` (the sibling edge is unchanged, NOT rewritten to
+`n2.id` as a rowid re-chain would produce) and `get_active_leaf(cid) is None` (not backfilled to the last
+node). A conversation saved after migration with a NULL tip is never re-chained by a later `init()`.
+
+**C44. After a one-time migration the repo is a normal graph store (migrated + fresh edges coexist).**
+*(adjudicated: `save()` persists the FULL node set it is given and replaces the prior set (C6/C25) — it
+does NOT append. So "extend a migrated conversation" means the caller loads the migrated nodes, adds the
+new one, and re-saves the whole list. A save of only the new node would correctly delete the migrated ones.)*
+Given a DB migrated from a pre-graph legacy DB (nodes `a→b→c` chained by migration): `load(cid)` the migrated
+nodes, append a NEW node whose `prev_id` is the migrated tip (`c.id`), and `save(cid, title, [a, b, c, new],
+active_leaf_id=new.id)` (the full set) → `load(cid)` returns all four nodes with the migration's `prev_id`
+chain intact (`a.prev_id is None`, `b.prev_id == a.id`, `c.prev_id == b.id`) plus the new node with
+`prev_id == c.id`, and `get_active_leaf(cid) == new.id`. Migrated and freshly-saved edges coexist.
+
 ## Adjudication notes
 - **A3 (empty/duplicate title):** `title` is a `str`; empty string is valid and stored
   verbatim; duplicate titles across conversations are allowed. Not separately asserted —
@@ -204,6 +316,23 @@ with a non-empty title overwrites it to that value.
   bug; test left failing). Distinct-save ordering (C5/C16/C17/C20/C21) uses naturally
   distinct timestamps — real back-to-back saves are milliseconds apart, far above the
   microsecond timestamp resolution, so those tests are not flaky.
+- **A8 (graph ambiguity 1 — clear-on-None):** `save(active_leaf_id=None)` on an existing
+  conversation overwrites (clears) a previously stored tip → C36. Literal "most recent
+  save" reading; the deliberately-unset tip wins.
+- **A9 (graph ambiguity 2 — "runs exactly once" discriminator):** the migration/backfill is
+  gated on a schema-level marker (the graph columns being absent), so once they exist the
+  rowid-chaining backfill never re-runs — regardless of any conversation's tip being NULL or
+  its topology being a branch. C43 probes this with a sibling edge (`n3.prev_id==n1.id`) that a
+  wrongful re-run would rewrite to `n2.id`, and requires a genuinely migrated legacy DB so the
+  "already ran once" precondition is real. Save preserves any caller-supplied `prev_id`
+  (including a branch) verbatim (consistent with C30).
+- **A10 (graph ambiguity 3 — node-less row listable):** a migrated node-less conversation row
+  survives and appears in `list()` (C41); "no rows lost".
+- **A11 (graph ambiguity 4 — migrated `compressed_into`):** all migrated nodes get
+  `compressed_into is None` (a pre-graph DB had no folds) → C39.
+- **A12 (graph ambiguity 5 — insertion==rowid order):** post-migration setups (C43/C44) rely on
+  the existing guarantee (C12) that nodes saved in list order load back in that order, so the
+  "sibling vs chain" observable in C43 is unconfounded.
 
 ## Contract violations found (quarantined `xfail(strict=True)`, logged in FOUND-BUGS.md)
 - **BUG-1 (C18):** `save()` creates/keeps a conversation row even when it has zero
@@ -216,24 +345,25 @@ forcing removal of the marker.
 
 ## Mutation testing (mutmut)
 Focused run: `bash scripts/mutate.sh run 'ctx.core.storage.*'`.
-**115 mutants, 90 killed, 25 survivors — all 25 equivalent.** Every behavior-changing
-mutant is killed (spot-verified: `now=None`, `conn=None`, and SQL-string→`None` all
-killed). The 25 survivors fall into two documented-equivalent classes:
+**After the ADR-0016 graph additions (C28–C44): 230 mutants, ~176 killed, 53 survived + 1
+"no tests" — every survivor documented-equivalent, none behavioral.** The module grew (the
+`_migrate`/`_backfill_graph` migration, `get_active_leaf`, and the `prev_id`/`compressed_into`/
+`active_leaf_id` columns in `save`/`load`), so there are more mutants than the pre-graph baseline
+(115), but the survivor *classes* are unchanged:
 
-- **24 SQL keyword/identifier case-flips** (e.g. `SELECT`→`select`, `PRAGMA journal_mode=WAL`
-  →`pragma journal_mode=wal`, uppercased table/column identifiers in every statement of
-  `_connect`/`save`/`load`/`list`/`get_last`). SQLite treats both SQL keywords and
-  identifiers case-insensitively, so these mutations cannot change behavior — no assertion
-  can distinguish them. Genuinely equivalent.
-- **1 timezone mutant** — `save_2`: `datetime.now(UTC)` → `datetime.now(None)`, which makes
-  the stored `updated_at` local-naive instead of UTC-aware. The contract pins only *relative*
-  update-recency ordering (C5/C16/C17/C20/C21), which is preserved under either clock, and
-  deliberately does **not** assert the timestamp's zone or string format (asserting that would
-  couple the tests to an implementation detail — same stance as `context.py`'s logger-arg
-  survivors). Equivalent *with respect to this contract*. Re-triage only if `updated_at`'s
-  zone/format ever becomes contractual (e.g. surfaced to the user or compared across
-  processes).
+- **SQL keyword/identifier case-flips (the bulk)** — e.g. `SELECT`→`select`, `PRAGMA
+  table_info(...)`→`pragma table_info(...)`, `ALTER TABLE … ADD COLUMN`→lowercase, `UPDATE
+  nodes SET prev_id`→lowercase, uppercased identifiers — across `_connect`/`_migrate`/
+  `_backfill_graph`/`save`/`load`/`get_model`/`get_active_leaf`/`list`/`get_last`. SQLite treats
+  both keywords and identifiers case-insensitively, so no assertion can distinguish them.
+  Genuinely equivalent.
+- **1 timezone mutant** — `save`: `datetime.now(UTC)`→`datetime.now(None)` (local-naive vs
+  UTC-aware). The contract pins only *relative* recency ordering (preserved under either clock)
+  and deliberately does not assert the timestamp's zone/format. Equivalent w.r.t. this contract.
+- **1 "no tests"** — `StoragePort.save`: the `Protocol` method body is `...` (an abstract stub),
+  not executable code; expected non-target.
 
-No survivor stems from the C18/C24 quarantined-bug lines: those lines are also exercised by
-passing tests (C3, C16, C20…), so their behavior-changing mutants are killed; only the
-case-flip mutants on them survive as equivalent.
+Spot-verified that behavior-changing mutants in the NEW graph code are KILLED: the
+`prev_id`/`compressed_into`/`active_leaf_id` SQL *value bindings* and the migration's rowid-chaining
+logic have no surviving behavioral mutant (only case-flips survive on those lines) — C28–C44 pin them.
+No survivor stems from a weak test or a real bug.

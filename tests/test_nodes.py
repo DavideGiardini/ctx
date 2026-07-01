@@ -107,3 +107,154 @@ def test_context_meta_independent_per_call():
     assert a.meta is not b.meta
     assert a.meta == {"source_path": "alpha.md"}
     assert b.meta == {"source_path": "beta.md"}
+
+
+# --------------------------------------------------------------------------
+# Append-only graph edges: prev_id / compressed_into (ADR-0016). See nodes.md
+# N11-N22. Factories leave both edges None; the fields round-trip and take part
+# in dataclass equality.
+# --------------------------------------------------------------------------
+
+
+# N11
+def test_n11_user_factory_leaves_edges_none():
+    node = Node.user(content="What is the capital of France?", conversation_id="conv-42")
+    assert node.prev_id is None
+    assert node.compressed_into is None
+
+
+# N12
+def test_n12_assistant_factory_leaves_edges_none():
+    node = Node.assistant(conversation_id="conv-42", content="The capital of France is Paris.")
+    assert node.prev_id is None
+    assert node.compressed_into is None
+
+
+# N13
+def test_n13_system_factory_leaves_edges_none():
+    node = Node.system(content="You are a helpful assistant.", conversation_id="conv-42")
+    assert node.prev_id is None
+    assert node.compressed_into is None
+
+
+# N14
+def test_n14_context_factory_leaves_edges_none():
+    node = Node.context(
+        source_path="/home/giardo/projects/ctx/README.md", conversation_id="conv-42"
+    )
+    assert node.prev_id is None
+    assert node.compressed_into is None
+
+
+# N15
+def test_n15_bare_node_leaves_edges_none():
+    node = Node()
+    assert node.prev_id is None
+    assert node.compressed_into is None
+
+
+# N16
+def test_n16_prev_id_only_reads_back():
+    node = Node(prev_id="node-abc123")
+    assert node.prev_id == "node-abc123"
+    assert node.compressed_into is None
+
+
+# N17
+def test_n17_compressed_into_only_reads_back():
+    node = Node(compressed_into="compression-node-xyz789")
+    assert node.compressed_into == "compression-node-xyz789"
+    assert node.prev_id is None
+
+
+# N18
+def test_n18_both_edges_read_back():
+    node = Node(prev_id="node-parent-001", compressed_into="node-compress-002")
+    assert node.prev_id == "node-parent-001"
+    assert node.compressed_into == "node-compress-002"
+
+
+# N19
+def test_n19_edges_are_mutable_attributes(make_node):
+    node = make_node()
+    assert node.prev_id is None
+    assert node.compressed_into is None
+    node.prev_id = "node-parent-777"
+    node.compressed_into = "node-compress-888"
+    assert node.prev_id == "node-parent-777"
+    assert node.compressed_into == "node-compress-888"
+
+
+# N20
+def test_n20_differing_prev_id_makes_unequal():
+    a = Node(
+        id="shared-node-id-1",
+        conversation_id="conv-99",
+        role="user",
+        content="Explain graph edges.",
+        node_type="message",
+        meta={"tokens": 12},
+        prev_id="node-A",
+        compressed_into="node-same",
+    )
+    b = Node(
+        id="shared-node-id-1",
+        conversation_id="conv-99",
+        role="user",
+        content="Explain graph edges.",
+        node_type="message",
+        meta={"tokens": 12},
+        prev_id="node-B",
+        compressed_into="node-same",
+    )
+    assert a != b
+
+
+# N21
+def test_n21_differing_compressed_into_makes_unequal():
+    a = Node(
+        id="shared-node-id-2",
+        conversation_id="conv-99",
+        role="assistant",
+        content="Compression happened here.",
+        node_type="message",
+        meta={"tokens": 34},
+        prev_id="node-same",
+        compressed_into="node-C",
+    )
+    b = Node(
+        id="shared-node-id-2",
+        conversation_id="conv-99",
+        role="assistant",
+        content="Compression happened here.",
+        node_type="message",
+        meta={"tokens": 34},
+        prev_id="node-same",
+        compressed_into="node-D",
+    )
+    assert a != b
+
+
+# N22
+def test_n22_identical_edges_and_fields_are_equal():
+    a = Node(
+        id="shared-node-id-3",
+        conversation_id="conv-100",
+        role="user",
+        content="Are these two nodes equal?",
+        node_type="message",
+        meta={"tokens": 7, "source": "cli"},
+        prev_id="node-P",
+        compressed_into="node-Q",
+    )
+    b = Node(
+        id="shared-node-id-3",
+        conversation_id="conv-100",
+        role="user",
+        content="Are these two nodes equal?",
+        node_type="message",
+        meta={"tokens": 7, "source": "cli"},
+        prev_id="node-P",
+        compressed_into="node-Q",
+    )
+    assert a == b

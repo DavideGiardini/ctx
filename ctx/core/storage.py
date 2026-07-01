@@ -11,10 +11,17 @@ class StoragePort(Protocol):
 
     def init(self) -> None: ...
     def save(
-        self, conversation_id: str, title: str, nodes: list[Node], *, model: str = ""
+        self,
+        conversation_id: str,
+        title: str,
+        nodes: list[Node],
+        *,
+        model: str = "",
+        active_leaf_id: str | None = None,
     ) -> None: ...
     def load(self, conversation_id: str) -> list[Node]: ...
     def get_model(self, conversation_id: str) -> str | None: ...
+    def get_active_leaf(self, conversation_id: str) -> str | None: ...
     def list(self) -> list[dict]: ...
     def get_last(self) -> str | None: ...
 
@@ -23,6 +30,7 @@ CREATE TABLE IF NOT EXISTS conversations (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL DEFAULT '',
     model TEXT NOT NULL DEFAULT '',
+    active_leaf_id TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -33,7 +41,9 @@ CREATE TABLE IF NOT EXISTS nodes (
     role TEXT NOT NULL,
     content TEXT NOT NULL DEFAULT '',
     node_type TEXT NOT NULL DEFAULT 'message',
-    meta TEXT NOT NULL DEFAULT '{}'
+    meta TEXT NOT NULL DEFAULT '{}',
+    prev_id TEXT,
+    compressed_into TEXT
 );
 """
 
@@ -64,18 +74,76 @@ class ConversationRepository:
             conn.close()
 
     def _migrate(self, conn: sqlite3.Connection) -> None:
-        # SQLite has no ADD COLUMN IF NOT EXISTS; add the model column to DBs whose
-        # conversations table predates it. New DBs already have it from _SCHEMA.
-        columns = {row[1] for row in conn.execute("PRAGMA table_info(conversations)")}
-        if "model" not in columns:
+        # SQLite has no ADD COLUMN IF NOT EXISTS; add columns that DBs predating a
+        # given feature lack. New DBs already have them from _SCHEMA. Runs inside
+        # init()'s single transaction, so schema change + data backfill commit
+        # atomically.
+        conv_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(conversations)")
+        }
+        if "model" not in conv_columns:
             conn.execute(
                 "ALTER TABLE conversations ADD COLUMN model TEXT NOT NULL DEFAULT ''"
             )
 
+        # Append-only node graph edge columns (ADR-0016).
+        node_columns = {row[1] for row in conn.execute("PRAGMA table_info(nodes)")}
+        if "prev_id" not in node_columns:
+            conn.execute("ALTER TABLE nodes ADD COLUMN prev_id TEXT")
+        if "compressed_into" not in node_columns:
+            conn.execute("ALTER TABLE nodes ADD COLUMN compressed_into TEXT")
+        # AIDEV-NOTE: gate the one-time backfill on the COLUMN being absent (the
+        # marker of a pre-graph DB), NOT on a per-conversation NULL leaf — a
+        # conversation legitimately saved with active_leaf_id=None must not have
+        # its prev_id chain rewritten on later inits. ALTER + backfill share
+        # init()'s transaction, so a crash rolls back both (no idempotency guard).
+        if "active_leaf_id" not in conv_columns:
+            conn.execute("ALTER TABLE conversations ADD COLUMN active_leaf_id TEXT")
+            self._backfill_graph(conn)
+
+    def _backfill_graph(self, conn: sqlite3.Connection) -> None:
+        # Chain each pre-graph conversation's nodes into a prev_id line by rowid
+        # and point active_leaf_id at the last node — the degenerate single-path
+        # case of the graph (ADR-0016).
+        conv_ids = [
+            row[0]
+            for row in conn.execute(
+                "SELECT id FROM conversations WHERE active_leaf_id IS NULL"
+            )
+        ]
+        for conv_id in conv_ids:
+            node_ids = [
+                row[0]
+                for row in conn.execute(
+                    "SELECT id FROM nodes WHERE conversation_id = ? ORDER BY rowid",
+                    (conv_id,),
+                )
+            ]
+            prev: str | None = None
+            for node_id in node_ids:
+                conn.execute(
+                    "UPDATE nodes SET prev_id = ? WHERE id = ?", (prev, node_id)
+                )
+                prev = node_id
+            if node_ids:
+                conn.execute(
+                    "UPDATE conversations SET active_leaf_id = ? WHERE id = ?",
+                    (node_ids[-1], conv_id),
+                )
+
     def save(
-        self, conversation_id: str, title: str, nodes: list[Node], *, model: str = ""
+        self,
+        conversation_id: str,
+        title: str,
+        nodes: list[Node],
+        *,
+        model: str = "",
+        active_leaf_id: str | None = None,
     ) -> None:
-        # Only nodes carrying a conversation_id persist (id-less breadcrumbs skipped).
+        # AIDEV-NOTE: persist the FULL node set (every line + folded children),
+        # not just the active view — else abandoned tails don't survive and rewind
+        # turns destructive (ADR-0016). active_leaf_id is the tip, which after a
+        # rewind is not the last-created node. Id-less breadcrumbs are skipped.
         now = datetime.now(UTC).isoformat()
         persistable = [node for node in nodes if node.conversation_id]
         conn = self._connect()
@@ -85,15 +153,16 @@ class ConversationRepository:
             ).fetchone()
             if existing:
                 conn.execute(
-                    "UPDATE conversations SET title = ?, model = ?, updated_at = ? "
-                    "WHERE id = ?",
-                    (title, model, now, conversation_id),
+                    "UPDATE conversations SET title = ?, model = ?, "
+                    "active_leaf_id = ?, updated_at = ? WHERE id = ?",
+                    (title, model, active_leaf_id, now, conversation_id),
                 )
             elif persistable:
                 conn.execute(
-                    "INSERT INTO conversations (id, title, model, created_at, updated_at)"
-                    " VALUES (?, ?, ?, ?, ?)",
-                    (conversation_id, title, model, now, now),
+                    "INSERT INTO conversations "
+                    "(id, title, model, active_leaf_id, created_at, updated_at)"
+                    " VALUES (?, ?, ?, ?, ?, ?)",
+                    (conversation_id, title, model, active_leaf_id, now, now),
                 )
             else:
                 # A brand-new conversation with nothing to persist must not create a
@@ -105,8 +174,10 @@ class ConversationRepository:
             )
             for node in persistable:
                 conn.execute(
-                    "INSERT INTO nodes (id, conversation_id, role, content, node_type, meta) "
-                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO nodes "
+                    "(id, conversation_id, role, content, node_type, meta, "
+                    "prev_id, compressed_into) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         node.id,
                         node.conversation_id,
@@ -114,6 +185,8 @@ class ConversationRepository:
                         node.content,
                         node.node_type,
                         json.dumps(node.meta),
+                        node.prev_id,
+                        node.compressed_into,
                     ),
                 )
             conn.commit()
@@ -124,7 +197,8 @@ class ConversationRepository:
         conn = self._connect()
         try:
             rows = conn.execute(
-                "SELECT id, conversation_id, role, content, node_type, meta "
+                "SELECT id, conversation_id, role, content, node_type, meta, "
+                "prev_id, compressed_into "
                 "FROM nodes WHERE conversation_id = ? ORDER BY rowid",
                 (conversation_id,),
             ).fetchall()
@@ -140,6 +214,8 @@ class ConversationRepository:
                 content=row[3],
                 node_type=row[4],
                 meta=json.loads(row[5]),
+                prev_id=row[6],
+                compressed_into=row[7],
             )
             nodes.append(node)
         return nodes
@@ -149,6 +225,24 @@ class ConversationRepository:
         try:
             row = conn.execute(
                 "SELECT model FROM conversations WHERE id = ?", (conversation_id,)
+            ).fetchone()
+        finally:
+            conn.close()
+        return row[0] if row else None
+
+    def get_active_leaf(self, conversation_id: str) -> str | None:
+        """The stored active tip for a conversation (its ``active_leaf_id``).
+
+        ``None`` for an unknown conversation or one whose tip was never recorded
+        (a pre-migration edge the backfill left NULL, e.g. a node-less row); the
+        caller (``ConversationCore.resume_conversation``) falls back to the last
+        node by load order in that case. Symmetric with ``get_model``.
+        """
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT active_leaf_id FROM conversations WHERE id = ?",
+                (conversation_id,),
             ).fetchone()
         finally:
             conn.close()

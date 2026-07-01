@@ -12,37 +12,29 @@ class Node:
     content: str = ""
     node_type: str = "message"
     meta: dict = field(default_factory=dict)
+    # Append-only graph edges (ADR-0016): prev_id = predecessor (None = root;
+    # shared prev_id = branch siblings). compressed_into wired up in S3.
+    prev_id: str | None = None
+    compressed_into: str | None = None
 
     @classmethod
     def user(cls, content: str, conversation_id: str) -> Node:
-        """Build a user chat turn.
-
-        ``role="user"``, default ``node_type`` ("message"), the given content,
-        and the owning ``conversation_id`` so it persists. ``meta`` is empty.
-        """
+        """Build a user chat turn."""
         return cls(role="user", content=content, conversation_id=conversation_id)
 
     @classmethod
     def assistant(cls, conversation_id: str, content: str = "") -> Node:
-        """Build an assistant chat turn (content is filled in as it streams).
-
-        ``role="assistant"``, default ``node_type`` ("message"), the given
-        content (empty by default, before any tokens arrive), and the owning
-        ``conversation_id`` so it persists. ``meta`` is empty.
-        """
+        """Build an assistant chat turn (content is filled in as it streams)."""
         return cls(role="assistant", content=content, conversation_id=conversation_id)
 
     @classmethod
     def system(cls, content: str, conversation_id: str = "") -> Node:
         """Build a system breadcrumb (e.g. "Model set to: …").
 
-        ``role="system"`` and ``node_type="system"`` with the given content and
-        ``meta`` empty. The optional ``conversation_id`` decides durability: a
-        breadcrumb raised *within* an active conversation carries that id and so
-        persists with it (model-change and connectivity notices reappear on
-        resume); one raised with no active conversation defaults to an empty
-        ``conversation_id`` and stays a session-local notice, because the storage
-        layer skips nodes without a ``conversation_id``.
+        The optional ``conversation_id`` decides durability: passed inside an
+        active conversation the breadcrumb persists (model-change/connectivity
+        notices reappear on resume); left empty it stays session-local, because
+        storage skips id-less nodes (ADR 0006 #6).
         """
         return cls(
             role="system",
@@ -54,11 +46,9 @@ class Node:
     def goes_to_model(self) -> bool:
         """Whether this node's content is sent to the LLM when building context.
 
-        The single source of truth for "which nodes reach the model": user and
-        assistant chat turns (``role in {"user", "assistant"}``) and context
-        imports (``node_type == "context"``) do; everything else — notably
-        ``system`` breadcrumbs — does not. ``build_context`` routes its inclusion
-        decision through this predicate so the rule has exactly one definition.
+        The single source of truth for "which nodes reach the model" —
+        ``build_context`` routes its inclusion decision through this predicate
+        rather than re-deriving role rules (ADR 0014 #1).
         """
         return self.role in {"user", "assistant"} or self.node_type == "context"
 
@@ -66,10 +56,8 @@ class Node:
     def context(cls, source_path: str, conversation_id: str) -> Node:
         """Build a context-import reference to a workspace file.
 
-        ``role="context"`` and ``node_type="context"``, a human-readable
-        ``content`` of ``"Included: <source_path>"``, the owning
-        ``conversation_id`` so it persists, and ``meta={"source_path": source_path}``
-        — the path ``build_context`` later loads and wraps in ``<context_import>``.
+        ``meta["source_path"]`` is the path ``build_context`` later loads and
+        wraps in ``<context_import>``.
         """
         return cls(
             role="context",

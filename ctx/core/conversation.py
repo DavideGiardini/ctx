@@ -54,17 +54,18 @@ class ConversationCore:
         # Default model is read once from config at construction (no per-call
         # file I/O); used for the initial model and on /new reset (ADR 0006 #3).
         self._default_model: str = get_config()["model"]
-        self.nodes: list[Node] = []
+        # Append-only conversation graph (ADR-0016): _graph holds ALL nodes keyed
+        # by id (active line + abandoned tails + S3 compression children),
+        # _active_leaf_id is the current tip. See current_view().
+        self._graph: dict[str, Node] = {}
+        self._active_leaf_id: str | None = None
         self.conversation_id: str = ""
         self.conversation_title: str = ""
         self.model: str = self._default_model
-        # Provider-anchored token accounting for the header gauge. Both stay
-        # None until a streamed turn reports usage that passes the sanity check.
+        # Provider-anchored token accounting for the header gauge (ADR 0015 #2);
+        # see the last_usage/calibration/usage_generation properties.
         self._last_usage: Usage | None = None
         self._calibration: float | None = None
-        # Monotonically bumped each time _calibrate adopts a usage. Lets the UI
-        # detect "a fresh anchor landed this turn" without depending on the
-        # provider minting a new Usage object per turn (ADR 0015 #2).
         self._usage_generation: int = 0
 
     @property
@@ -115,6 +116,59 @@ class ConversationCore:
         """
         return self._workspace.read_file
 
+    def current_view(self) -> list[Node]:
+        """Project the active line as the linear ``list[Node]`` the UI consumes.
+
+        Walks ``prev_id`` from the active tip back to the root and reverses, so
+        the result is root-first. O(active-line length) and deterministic; the
+        walk defensively stops on an id missing from the graph or already seen,
+        so a malformed chain can never hang the UI. Empty conversation → ``[]``;
+        after a ``rewind`` the view is correspondingly shorter (the dropped tail
+        stays in ``_graph``). Compression folding (S3) resolves here later.
+        """
+        view: list[Node] = []
+        seen: set[str] = set()
+        cur = self._active_leaf_id
+        while cur is not None and cur in self._graph and cur not in seen:
+            seen.add(cur)
+            node = self._graph[cur]
+            view.append(node)
+            cur = node.prev_id
+        view.reverse()
+        return view
+
+    @property
+    def nodes(self) -> list[Node]:
+        """The active conversation line (today's flat node list).
+
+        A read-only projection over the graph (``current_view()``), recomputed on
+        each access, so every existing reader — the UI, token accounting,
+        ``describe_state`` — sees exactly today's shape with no changes. Mutations
+        go through the command methods (which route to ``_append_to_line``), never
+        by assigning or appending to this list.
+        """
+        return self.current_view()
+
+    def _all_nodes(self) -> list[Node]:
+        """Every node in the graph, in insertion (≈ creation/rowid) order.
+
+        Handed to ``storage.save`` so the full non-destructive graph round-trips —
+        persisting only ``current_view()`` would delete abandoned tails and make
+        rewind destructive.
+        """
+        return list(self._graph.values())
+
+    def _append_to_line(self, node: Node) -> None:
+        """Append a node onto the active line and advance the tip.
+
+        Sets ``prev_id`` to the current tip and makes the node the new tip — the
+        single graph-mutation primitive behind every command that used to do
+        ``self.nodes.append(...)``.
+        """
+        node.prev_id = self._active_leaf_id
+        self._graph[node.id] = node
+        self._active_leaf_id = node.id
+
     def setup(self) -> None:
         self._workspace.ensure()
         self._storage.init()
@@ -128,28 +182,33 @@ class ConversationCore:
     def persist(self) -> None:
         if not self.conversation_id:
             return
+        # AIDEV-NOTE: persist the FULL graph (_all_nodes), not the active view —
+        # else a rewind's abandoned tail is deleted and rewind turns destructive.
         self._storage.save(
             self.conversation_id,
             self.conversation_title,
-            self.nodes,
+            self._all_nodes(),
             model=self.model,
+            active_leaf_id=self._active_leaf_id,
         )
 
     def submit(self, text: str) -> tuple[Node, Node]:
         """Handle a user message. Returns (user_node, assistant_node)."""
         self._ensure_conversation(text)
         user_node = Node.user(text, self.conversation_id)
-        self.nodes.append(user_node)
+        self._append_to_line(user_node)
+        # AIDEV-NOTE: persist with the tip at the user node, before the assistant
+        # node exists, so a crash mid-stream resumes cleanly on the user turn.
         self.persist()
 
         assistant_node = Node.assistant(self.conversation_id)
-        self.nodes.append(assistant_node)
+        self._append_to_line(assistant_node)
         return user_node, assistant_node
 
     def set_model(self, model: str) -> Node:
         self.model = model
         node = Node.system(f"Model set to: {model}", self.conversation_id)
-        self.nodes.append(node)
+        self._append_to_line(node)
         self.persist()
         return node
 
@@ -163,13 +222,14 @@ class ConversationCore:
                 f"the model may still work. Error: {msg}",
                 self.conversation_id,
             )
-        self.nodes.append(node)
+        self._append_to_line(node)
         self.persist()
         return node
 
     def new_conversation(self) -> Node:
         self.persist()
-        self.nodes = []
+        self._graph = {}
+        self._active_leaf_id = None
         self.conversation_id = ""
         self.conversation_title = ""
         self.model = self._default_model
@@ -180,7 +240,13 @@ class ConversationCore:
         if not loaded:
             # Unknown id: leave the in-progress conversation intact.
             return []
-        self.nodes = loaded
+        # Rebuild the whole graph from the stored edges; tip = stored active_leaf,
+        # falling back to the last node by load order if it's absent/dangling
+        # (a pre-migration row the backfill left NULL).
+        self._graph = {node.id: node for node in loaded}
+        self._active_leaf_id = self._storage.get_active_leaf(conv_id)
+        if self._active_leaf_id is None or self._active_leaf_id not in self._graph:
+            self._active_leaf_id = loaded[-1].id
         self.conversation_id = conv_id
         stored_model = self._storage.get_model(conv_id)
         if stored_model:
@@ -197,16 +263,32 @@ class ConversationCore:
         nodes: list[Node] = []
         for path in paths:
             node = Node.context(path, self.conversation_id)
-            self.nodes.append(node)
+            self._append_to_line(node)
             nodes.append(node)
         self.persist()
         return nodes
 
     def add_system_message(self, content: str) -> Node:
         node = Node.system(content, self.conversation_id)
-        self.nodes.append(node)
+        self._append_to_line(node)
         self.persist()
         return node
+
+    def rewind(self, target_id: str) -> list[Node]:
+        """Move the active tip back to an earlier node on the current line.
+
+        ``target_id`` must be a node on the current active line (reachable by
+        walking ``prev_id`` from the tip); it becomes the new tip *inclusive*, so
+        ``current_view()`` then ends at it. The nodes after it are **not** deleted
+        — they stay in the graph and the DB as an abandoned tail (append-only),
+        recoverable by rewinding forward or, later, surfaced as a branch (S4).
+        Raises ``ValueError`` if ``target_id`` is not on the active line.
+        """
+        if not any(node.id == target_id for node in self.current_view()):
+            raise ValueError(f"rewind target not on active line: {target_id}")
+        self._active_leaf_id = target_id
+        self.persist()
+        return self.nodes
 
     def _calibrate(self, local_sum: int, usage: Usage) -> None:
         """Adopt a provider ``Usage`` as the gauge calibration anchor, if sane.

@@ -391,25 +391,41 @@ in `LiteLLMProvider` with status **"no tests"**: the network adapter is out of s
 unit tests by design (it does real I/O), exactly like `ctx/ui/*`. These are expected,
 documented non-targets — not weak tests.
 
-**conversation.py** — 166 mutants killed; the authoritative `mutmut results` lists exactly
-6 non-killed, all documented-equivalent below (no surviving weak tests, no timeouts). The
-C47–C56 strengthening also converted six previously timing-out `stream` mutants
-(`build_context(None,…)`, dropped args, `content -= token`) into clean assertion-kills: the
-new file-loading (C54) and multi-turn (C55) stream tests exercise those lines without the
-cancellation tests' readiness-wait, so the mutation surfaces as a fast assertion failure
-instead of a hang. The remaining non-killed mutants are:
-- **Documented-equivalent survivors (no observable behavior change):**
-  - `submit` (assistant `content=""` dropped): `""` is the `Node.content` default, so the
-    node is identical.
-  - `check_connectivity` (provider called with `None` instead of `model`): the notice text
-    is built from the method parameter `model`, and the provider double's result is
-    independent of its argument, so there is no observable difference.
-  - `new_conversation` content case/wrapper variants (`"started…"`, `"STARTED…"`,
-    `"XX…XX"`): pure wording changes — notice wording is explicitly **not** part of the
-    oracle (adjudication E); C48 pins only that the content is non-empty.
-  - `include_files` (context node `content="Included: {path}"` dropped): the context node's
-    `content` is vestigial — `build_context` replaces it via `meta["source_path"]`, so it is
-    not behaviorally observable through the core's contract.
+**conversation.py** — after the ADR-0016 graph additions (C67–C80): **184 mutants, ~165
+killed, 19 non-killed — all documented-equivalent or pre-existing**, no surviving weak tests.
+The graph code (`current_view`/`nodes`/`_append_to_line`/`_all_nodes`/`rewind`/`submit`/
+`persist`/`resume_conversation`) is fully pinned; the initial triage surfaced two killable
+weak tests in new code that were then killed by adding contract items:
+- `__init__` seeding `_active_leaf_id=""` instead of `None` (would make a `submit`-created
+  ROOT node's `prev_id` `""`) → **killed by C79** (root `prev_id is None`, survives reload).
+- `resume_conversation` turning the `None`-or-not-in-graph fallback `or` into `and` (would
+  leave a dangling stored tip in place and project an empty view) → **killed by C80**
+  (dangling tip falls back to the last stored node).
+
+Remaining non-killed mutants (all equivalent or pre-existing, none behavioral):
+- **New graph code — documented-equivalent (2):**
+  - `current_view` (`seen.add(cur)`→`seen.add(None)`): the `seen` set is a defensive
+    cycle-guard. For any acyclic chain — every state reachable through the public API or a
+    well-formed storage round-trip — it is never consulted meaningfully, so behavior is
+    identical. It is distinguishable ONLY by a *cyclic* `prev_id` graph, which no code path or
+    well-formed load can produce and which the mutant would only reveal by hanging (not cleanly
+    assertable). Equivalent w.r.t. every terminating, API-reachable state.
+  - `rewind` (`ValueError(f"…{target_id}")`→`ValueError(None)`): only the error *message* text
+    changes; the contract pins "raises `ValueError`", and message wording is explicitly not the
+    oracle (adjudication E). C73/C74 assert the raise, not the text. Equivalent.
+- **Pre-existing (S1 calibration + wording), not introduced by this session:**
+  - `_calibrate` boundary mutants (`<=`↔`<`, `<=0`→`<=1`, `or`→`and`, tolerance `1/TOL`→`2/TOL`,
+    `<`/`<=` at the tolerance edges): the calibration tests deliberately use clearly-inside /
+    clearly-outside values only and do NOT probe the exact tolerance/zero boundary (calibration
+    ambiguity A1), so boundary flips are not distinguished. The clearly-behavioral `_calibrate`
+    mutants (adopt-vs-reject a sane/zero/out-of-range usage) ARE killed by C58/C61/C62.
+  - `stream` (`count_messages(messages, None)`): the local token estimate for the gauge; with a
+    default tokenizer the sum stays positive and the ratio invariant (C59) cancels `local_sum`,
+    so calibration is unchanged. Equivalent w.r.t. the calibration contract.
+  - `check_connectivity` (provider called with `None` instead of `model`): notice text is built
+    from the method parameter and the provider double ignores its argument — no observable diff.
+  - `new_conversation` content case/wrapper variants: pure wording — not part of the oracle
+    (adjudication E); C48 pins only non-empty content.
 
 ## Calibration
 
@@ -522,3 +538,101 @@ C65. A trusted calibration SURVIVES a later bogus-usage turn (left unchanged, no
   and that two identically-constructed cores given the same submitted text build
   identical contexts. If construction injects any nondeterministic/per-instance context
   (e.g. timestamps in the prompt), the ratio invariant could drift; assumed not the case.
+
+## Append-only conversation graph (ADR-0016)
+
+`ConversationCore`'s in-memory state is now the whole append-only node graph, not a flat list.
+`current_view()` projects the active line (walk `prev_id` from the tip to the root, reversed →
+root-first), and the read-only `nodes` property returns it. `rewind(target_id)` moves the tip back
+to an earlier on-line node (inclusive) without deleting the abandoned tail; `submit` after a rewind
+diverges (a new sibling off the rewind point). All Expect clauses observe `current_view()`/`nodes`
+by id/role/content/order, `rewind`'s return / raised `ValueError`, and what `repo.load(cid)` returns
+after a reload — never the private graph structure. Tests compare projected nodes by `.id` (+ role/
+content) to avoid coupling to object identity.
+
+**C67. `current_view()` is empty for a fresh conversation.**
+Given a fresh core (`setup()` called, nothing submitted) → `current_view() == []` and `nodes == []`.
+
+**C68. `current_view()` is root-first and matches append order on a linear conversation.**
+Given a fresh core; submit turn 1 `(u1,a1)`, then submit turn 2 `(u2,a2)` → `current_view()` is
+exactly `[u1, a1, u2, a2]` by id/role/content/order — first element is the root `u1`, last is the tip
+`a2`.
+
+**C69. `nodes` equals `current_view()` and is recomputed on each access.**
+Given a fresh core; submit turn 1 `(u1,a1)` → `nodes == current_view()`. After a further submit turn 2
+`(u2,a2)`, a fresh read of `nodes` equals the new longer `current_view()` (`[u1,a1,u2,a2]`) — the
+earlier read did not freeze a stale list.
+
+**C70. `rewind` shortens the view to the prefix ending inclusively at the target.**
+Given three submitted turns `(u1,a1),(u2,a2),(u3,a3)`, then `rewind(a1.id)` → `current_view() == [u1, a1]`
+(by id/role/content/order); its last element is the target `a1`; `u2,a2,u3,a3` no longer appear.
+
+**C71. `rewind` returns the shortened active line.**
+Given three turns then `r = rewind(a1.id)` → `r` equals `current_view()` taken immediately after (same
+ids/roles/content/order == `[u1, a1]`).
+
+**C72. `rewind` to the current tip leaves the view unchanged.**
+Given two turns `(u1,a1),(u2,a2)` (tip `a2`); capture `view_before = current_view()`; then `rewind(a2.id)`
+→ `current_view() == view_before` (`[u1,a1,u2,a2]`, same ids/order); nothing dropped.
+
+**C73. `rewind` raises `ValueError` for an id that exists nowhere; state unchanged.**
+Given two turns; capture `view_before` → `rewind("nonexistent-node-id")` raises `ValueError`, and
+afterward `current_view() == view_before` (unchanged).
+
+**C74. `rewind` raises `ValueError` for an id on an abandoned tail; state unchanged.**
+Given three turns; `rewind(a1.id)` (so `u2,a2,u3,a3` become an abandoned tail); submit a divergent turn
+`(u4,a4)`; capture `view_before` → `rewind(u3.id)` raises `ValueError` (`u3` is on the abandoned tail,
+not reachable from the current tip), and afterward `current_view() == view_before` (unchanged).
+
+**C75. `rewind` survives save/reload — the stored tip is the rewind target.**
+Given three turns then `rewind(a1.id)` (which persists), `cid = core.conversation_id`; then a NEW core
+`resume_conversation(cid)` → the fresh core's `current_view()` equals `[u1, a1]` by id/role/content/order
+— the reloaded tip is the rewind target `a1`, NOT the last-created node `a3`.
+
+**C76. Append-only: the abandoned tail survives in full storage after divergence + reload.**
+Given three turns; `rewind(a1.id)`; submit a divergent turn `(u4,a4)`; `cid = core.conversation_id`; then a
+NEW core `resume_conversation(cid)` → `repo.load(cid)` (the FULL node set) still contains nodes with ids
+`u2.id, a2.id, u3.id, a3.id` (the abandoned tail) with matching content — preserved, not deleted — and
+their `prev_id` edges are intact (e.g. `u2.prev_id == a1.id` chains the tail back to the rewind point).
+The fresh core's `current_view()` contains none of `u2,a2,u3,a3` (it followed the divergence to `…u4,a4`).
+This pins the destructive-rewind failure mode.
+
+**C77. Append-only: `current_view()` after divergence is the new branch only.**
+Given the same sequence as C76 (three turns, `rewind(a1.id)`, divergent turn `(u4,a4)`), same core (no
+reload) → `current_view() == [u1, a1, u4, a4]` by id/role/content/order — root `u1`, then `a1` (the rewind
+point), then the new divergent turn; none of `u2,a2,u3,a3` present.
+
+**C78. Migrated-linear equivalence: the projection matches storage's rowid order end-to-end.** *(adjudicated:
+strengthened to exercise a GENUINELY migrated pre-graph DB, per the stated intent — not merely a normally
+created linear conversation.)* Given a pre-graph flat DB (built directly via `sqlite3`: a linear conversation
+of several nodes, `conversations` without `active_leaf_id`, `nodes` without `prev_id`/`compressed_into`),
+pointed at by a core whose `setup()` runs `init()` (migrating it); then `resume_conversation(cid)` →
+`[n.id for n in core.current_view()] == [n.id for n in repo.load(cid)]` (same ids in the same order). For a
+degenerate single-path (migrated) conversation, walking `prev_id` from tip to root then reversing reproduces
+storage's insertion (rowid) order exactly — no reordering, no dropped nodes.
+
+**C79. The root node's predecessor edge is `None` ("NULL = root").** *(added after the mutation gate:
+pins the root-is-None invariant for a `submit`-created node — kills the `__init__` mutant that seeds
+the initial tip as `""` instead of `None`.)* Given a fresh core; `u1, a1 = submit("first turn")` →
+`u1.prev_id is None` (the first node on the line has no predecessor), and after persistence
+`repo.load(conversation_id)[0].prev_id is None` (the root edge survives the round-trip as NULL, not an
+empty string).
+
+**C80. Resume with a stale/dangling stored tip falls back to the last stored node.** *(added after the
+mutation gate: pins the documented "falling back to the last loaded node if absent/dangling" behavior —
+kills the `resume_conversation` mutant that turns the `None`-or-not-in-graph fallback condition into
+`and`.)* Given nodes `n1→n2→n3` saved directly with `active_leaf_id` set to an id that is NOT among the
+stored nodes (a dangling tip) → after `resume_conversation(cid)` into a fresh core, `current_view()` ids
+== `[n1.id, n2.id, n3.id]` — the projection falls back to the last stored node as the tip and yields the
+full stored line, NOT an empty view.
+
+## Adjudication notes (ADR-0016 graph)
+- **Node identity in `current_view()`:** tests compare projected nodes by `.id` (+ role/content), so they
+  hold whether the projection returns the same `Node` objects or equal copies.
+- **`submit` after `rewind` diverges with fresh ids:** the post-rewind submit appends onto the rewound tip
+  (a genuine sibling off the rewind point) with new uuid ids distinct from the abandoned tail — so C76's
+  tail-id survival check is unambiguous.
+- **`get_active_leaf` authority (C75):** the persisted rewind target is authoritative on reload; the
+  "last loaded node" fallback fires only when the stored tip is absent/dangling.
+- **C79 (proposed) dropped:** unknown-id resume returning `[]` with current state intact is already
+  covered by C26/C27; not re-derived here.

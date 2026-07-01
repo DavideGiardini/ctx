@@ -132,6 +132,14 @@ session that has the context to triage them: `scripts/mutate.sh run 'ctx.<dotted
 (e.g. `ctx.core.storage.*`, `tools.agent.snapshot.*`). The glob scopes which mutants
 *execute* without editing config — the survivors that come back are only your module's.
 
+**Each `run` regenerates the whole `mutants/` tree AND re-runs the full baseline suite —
+that cost is per-*invocation*, not per-glob.** So if ONE session owns several modules (not the
+parallel case), do **one** combined sweep, not N focused runs:
+`scripts/mutate.sh run 'ctx.core.storage.*' 'ctx.core.conversation.*'` (mutate.sh forwards all
+globs to mutmut). Running them separately pays the regen + full-baseline tax N times for no
+benefit. Order modules leaves-first *within* the one sweep; triage all survivors from the
+single `mutmut results`.
+
 The single constraint is **concurrency**: mutmut uses one repo-global `mutants/` working
 dir + cache and is CPU-heavy, so only **one mutmut process may run at a time**. Runs are
 short — parallel sessions just take turns on the gate; never fire two at once.
@@ -143,11 +151,31 @@ adding your module the cache is stale (the glob would match nothing — "0 files
 `scripts/mutate.sh` deletes and regenerates the tree each `run` to avoid this; if you call
 mutmut directly, `rm -rf mutants` first.
 
+**Zero-mutant modules — do NOT add them to `only_mutate`.** Some modules generate *no*
+mutants under this mutmut (notably a pure `@dataclass` whose only logic is `@classmethod`
+factories, e.g. `ctx/models/nodes.py` — mutmut wraps nothing, so `grep -c mutmut
+mutants/<path>` shows only the import line). Adding such a module to `only_mutate` makes its
+focused glob abort with `AssertionError: Filtered for specific mutants, but nothing matches`.
+Leave it out; its guarantee is the contract + 100% branch coverage, and its behavior is
+exercised transitively by the modules that DO get gated (e.g. `nodes` round-trips under
+`storage`, its graph edges under `conversation`). Note this in the module spec's
+Mutation-testing section instead of forcing a gate that can't run.
+
 Reading results: `mutmut results` lists only the mutants needing attention (survived /
 suspicious / timeout) — it does **not** list killed mutants, so a long list is not "0
 killed." The authoritative kill/survive tally is the emoji summary line printed at the
 end of `run` (`🎉` killed, `🙁` survived); re-run (it's cached/instant) to see it, or use
-`mutmut browse`.
+`mutmut browse`. **Don't pipe `run` straight to `tail`** — the emoji summary prints *before*
+the long `results` dump, so `tail` drops exactly the line you want; capture full output to a
+file or read `mutmut results` separately.
+
+**A spec's documented survivor count can be stale.** The "N mutants, M survivors" line in a
+module's spec reflects the state at the *last* gate run; later-added test sections (e.g. a
+calibration block appended in a subsequent sprint) may not have re-run the gate. So if you see
+more survivors than the spec claims, first confirm whether they are *pre-existing* (in code you
+didn't touch, and equivalent) before treating them as a regression — mutant *numbers* also
+shift when the module grows. Only survivors in the code/tests THIS session changed are yours to
+kill; refresh the spec's tally when you finish.
 
 Triage every survivor:
 - **weak test** → a real output difference no test pins; route it to the blind agent as
@@ -159,6 +187,16 @@ Re-run until only documented-equivalent mutants survive. Note: lines whose behav
 currently buggy (covered only by an `xfail` test) won't have their mutants killed — that
 is expected; mutation coverage of those lines returns once the bug is fixed and the
 `xfail` removed.
+
+**Scope the re-verify to the survivor ids — don't re-run the whole module.** After the blind
+agent strengthens a test to kill specific survivors, confirm the kills by running mutmut against
+just those mutant ids, not the full glob:
+`scripts/mutate.sh run 'ctx.core.conversation.xǁConversationCoreǁresume_conversation__mutmut_7' 'ctx.core.conversation.xǁConversationCoreǁ__init____mutmut_8'`
+(copy the ids verbatim from `mutmut results`). This still regenerates the tree + runs the
+baseline once, but then executes only those 2 mutants instead of the module's 200+ — seconds vs
+minutes. Re-run the full-module glob only for the final clean sweep. (Method-mutant ids use the
+`xǁClassǁmethod__mutmut_N` form with the `ǁ` separator; module-level functions use
+`x_func__mutmut_N`.)
 
 ### 7. Gate green
 `bash scripts/check.sh` must pass (ruff, mypy, and the new tests collected & green).

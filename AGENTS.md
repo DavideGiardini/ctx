@@ -34,8 +34,16 @@ package — deliberately **outside** the shippable `ctx` package so it can never
 reach end users (ADR 0012). See `docs/decisions/` for *why* it's shaped this way.
 
 **core/** (no `textual` imports)
-- `conversation.py` — `ConversationCore`: owns conversation state (nodes, model,
-  id/title) plus the command + streaming lifecycle. Takes a `Provider`, a
+- `conversation.py` — `ConversationCore`: owns conversation state (an append-only
+  node graph, model, id/title) plus the command + streaming lifecycle. State is a
+  `_graph: dict[str, Node]` of *all* nodes (active line + abandoned tails + future
+  compression children) keyed by id, plus an `_active_leaf_id` tip; `current_view()`
+  walks `prev_id` from the tip to project the linear list, and the read-only `nodes`
+  property returns that projection so the UI/token-accounting see today's shape
+  unchanged (ADR 0016). Commands append via `_append_to_line` (never by mutating
+  `nodes`); `persist()` saves the *full* graph (`_all_nodes()`) + tip so a rewind's
+  tail survives (append-only). `rewind(target_id)` moves the tip back to a node on
+  the active line (non-destructive; core-only proof op). Takes a `Provider`, a
   `StoragePort`, and a `Workspace` by injection (ADR 0001). Exposes a `read_file`
   property — the very loader it hands `build_context` — so the UI's token
   accounting renders nodes exactly as the model sees them without reaching past
@@ -61,7 +69,12 @@ reach end users (ADR 0012). See `docs/decisions/` for *why* it's shaped this way
   empty-`choices` usage chunk can't `IndexError`; `TestProvider(tokens, usage=None)` fires
   the canned `usage` after its tokens (default `None` keeps the `test_provider` fixture green).
 - `storage.py` — `StoragePort` protocol + `ConversationRepository(db_path)`
-  encapsulating all SQLite (WAL) schema/serialization (ADR 0003).
+  encapsulating all SQLite (WAL) schema/serialization (ADR 0003). Persists the
+  append-only graph (ADR 0016): `nodes.prev_id`/`nodes.compressed_into` edge columns
+  + `conversations.active_leaf_id`; `save(..., active_leaf_id=)` writes the full node
+  set and the tip; `get_active_leaf(cid)` reads it back (symmetric with `get_model`).
+  `_migrate` chains pre-graph flat DBs into the degenerate single-path case by rowid,
+  once, when the `active_leaf_id` column is first added.
 - `context.py` — pure `build_context(nodes, load_file)` → litellm message list;
   expands `context` nodes via the injected loader, no I/O of its own (ADR 0004).
 - `tokens.py` — pure, stateless token accounting for the context-budget UI (no
@@ -121,7 +134,10 @@ a left `DetailInspector` and a right `#conversation` pane (the `MessageList` +
   widget `DEFAULT_CSS`.
 
 **models/** — `nodes.py`: the `Node` dataclass (one chat turn or context reference),
-plus factory classmethods (`Node.user`/`.assistant`/`.system`/`.context`) that are the
+carrying append-only graph edges `prev_id` (predecessor on the line; `None` = root;
+shared `prev_id` = branch siblings) and `compressed_into` (the compression node that
+folds it; `None` until S3) — both default `None`, so the factories are unchanged
+(ADR 0016). Factory classmethods (`Node.user`/`.assistant`/`.system`/`.context`) are the
 single source of truth for each kind's `role`/`node_type`/`content`/`meta`/
 `conversation_id` combination — call sites construct via these, not the bare dataclass
 (ADR 0014 #1). `Node.system(content, conversation_id="")` takes an optional
@@ -142,7 +158,8 @@ import *from* `tools`.
 - `/include` stores a `Node(node_type="context")` with `meta["source_path"]`;
   `build_context` wraps file contents in `<context_import>` XML merged into the
   next user message at stream time.
-- `ConversationRepository.save` replaces *all* nodes for a conversation id.
+- `ConversationRepository.save` replaces *all* nodes for a conversation id (with the
+  full graph — every line + folded child — not just the active view).
 - `check_connectivity` fires a single-token probe to confirm a model is reachable.
 
 ## Designing new modules
@@ -164,6 +181,26 @@ ADRs that established it). Hold new code to the same bar:
 - **Apply the deletion test before adding an abstraction.** Would deleting it
   concentrate complexity (good — it's pulling its weight) or just scatter it
   (don't add it)?
+
+### Comments: sparse anchors, not narration
+Comments rot, and a repo full of long comments trains the next agent to write
+more of them. Keep them sparse and short; let the code, types, and docstrings
+carry the obvious, and let ADRs carry the *why*.
+
+- **Don't restate the code, type, or docstring.** If a reader learns nothing the
+  signature/body already shows, delete the comment.
+- **Don't re-argue a settled decision inline.** The rationale lives in an ADR
+  (`docs/decisions/`) or in this file — reference it (`(ADR 0016)`) instead of
+  duplicating the argument, which just creates a second copy to keep in sync.
+- **Comment only the genuinely tricky or bug-prone.** The spots that are
+  confusing, subtly ordered, or easy to break "wrong" earn a line — e.g. *persist
+  the full graph, not the view, else rewind turns destructive*; *gate the backfill
+  on the column, not a per-conversation NULL leaf*.
+- **Anchor those with `AIDEV-NOTE:` / `AIDEV-TODO:` / `AIDEV-QUESTION:`** (≤120
+  chars). They're greppable, and the prefix signals to future agents: this note
+  guards something subtle — don't delete it without cause.
+- **Durable rationale goes in ADRs / this file, not inlined.** Code points *to*
+  the reasoning; it doesn't re-type it.
 
 **Keep this file current.** Whenever you change the architecture — add/remove/rename
 a module, move a responsibility across the core/ui seam, change a module's

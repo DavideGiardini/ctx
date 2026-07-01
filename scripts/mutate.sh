@@ -21,18 +21,30 @@
 # Usage:
 #   scripts/mutate.sh                       # mutate+run the whole only_mutate union, then results
 #   scripts/mutate.sh run 'ctx.core.config.*'   # focused: only run mutants matching the glob
+#   scripts/mutate.sh run 'ctx.core.a.*' 'ctx.core.b.*'  # ONE sweep over several modules
+#                                             # (one session owning >1 module — cheaper than N runs)
+#   scripts/mutate.sh verify '<mutant-id>' ['<id>' ...]  # scoped re-check: run ONLY these mutant
+#                                             # ids (seconds vs minutes) to confirm a strengthening
+#                                             # killed them — copy ids verbatim from results
 #   scripts/mutate.sh results               # re-show the last run's results
 #   scripts/mutate.sh browse                # interactive TUI over results
 #   scripts/mutate.sh show <id>             # show the diff for one mutant
+#
+# NOTE: every `run`/`verify` regenerates the whole mutants/ tree AND re-runs the full baseline
+# suite once — that cost is per-invocation, not per-glob. Combine globs into ONE sweep; scope a
+# re-check with `verify`. Piping `run` to `tail` drops the 🎉/🙁 summary (it prints before the
+# results dump) — capture full output or read `results` separately.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 case "${1:-run}" in
-  run)
+  run|verify)
     shift || true
     # Optional trailing args are mutant-name globs (fnmatch) to scope which mutants
-    # are executed this run, e.g. 'ctx.core.storage.*'. With no glob, the whole
-    # only_mutate union runs.
+    # are executed this run, e.g. 'ctx.core.storage.*' or an exact mutant id like
+    # 'ctx.core.storage.xǁConversationRepositoryǁsave__mutmut_3'. With no glob, the
+    # whole only_mutate union runs. `verify` is an alias for `run` — a naming cue that
+    # you are re-checking specific mutant ids after a strengthening, not doing a full sweep.
     #
     # Regenerate from scratch first: mutmut caches the mutants/ tree and does NOT
     # invalidate it when [tool.mutmut].only_mutate changes — so a module added to the

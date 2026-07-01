@@ -16,12 +16,14 @@ completes deterministically before we assert. No use of athrow.
 """
 
 import asyncio
+import sqlite3
 
 import pytest
 
 from ctx.core.config import DEFAULT_MODEL
 from ctx.core.conversation import MAX_TITLE_LENGTH, ConversationCore
 from ctx.core.provider import Usage
+from ctx.core.storage import ConversationRepository
 from ctx.models.nodes import Node
 
 
@@ -73,15 +75,20 @@ class SaveCountingStorage:
     def init(self):
         return self._inner.init()
 
-    def save(self, cid, title, nodes, *, model=""):
+    def save(self, cid, title, nodes, *, model="", active_leaf_id=None):
         self.save_count += 1
-        return self._inner.save(cid, title, nodes, model=model)
+        return self._inner.save(
+            cid, title, nodes, model=model, active_leaf_id=active_leaf_id
+        )
 
     def load(self, cid):
         return self._inner.load(cid)
 
     def get_model(self, cid):
         return self._inner.get_model(cid)
+
+    def get_active_leaf(self, cid):
+        return self._inner.get_active_leaf(cid)
 
     def list(self):
         return self._inner.list()
@@ -603,7 +610,9 @@ async def test_stream_excludes_streamed_node_by_identity(repo, workspace):
     _, assistant_node = core.submit("What gets sent?")
     # Give the streamed node detectable content and displace it from the tail.
     assistant_node.content = "SENTINEL_PARTIAL_DRAFT"
-    core.nodes.append(Node.user("A later user turn", core.conversation_id))
+    # Append onto the active line via the real graph mutator (the flat list is now
+    # a read-only projection over the append-only graph, ADR-0016).
+    core._append_to_line(Node.user("A later user turn", core.conversation_id))
     await _collect(core.stream(assistant_node))
     messages = provider.captured_messages
     assert messages is not None
@@ -1140,3 +1149,270 @@ async def test_sane_calibration_survives_later_bogus_usage_turn(
 
     assert core.calibration == sane_calibration
     assert core.last_usage == fed
+
+
+# --------------------------------------------------------------------------
+# Append-only conversation graph (ADR-0016). See conversation.md C67-C78:
+# current_view()/nodes project the active line (root-first walk of prev_id from
+# the tip); rewind moves the tip inclusively without deleting the abandoned tail;
+# submit after a rewind diverges; migrated linear DBs project to rowid order.
+# --------------------------------------------------------------------------
+
+# A pre-graph flat DB (has the `model` column but no graph columns), for the
+# migrated-linear-equivalence test C78. init() must add + backfill the graph.
+_PRE_GRAPH_SCHEMA = """
+CREATE TABLE conversations (
+    id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE nodes (
+    id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES conversations(id),
+    role TEXT NOT NULL, content TEXT NOT NULL DEFAULT '', node_type TEXT NOT NULL DEFAULT 'message',
+    meta TEXT NOT NULL DEFAULT '{}'
+);
+"""
+
+
+def _make_pre_graph_db(db_path, cid, rows):
+    """Build a pre-graph (flat/linear) conversation DB via raw sqlite3.
+
+    rows: list of (node_id, role, content) inserted in order; sqlite assigns
+    rowid in insertion order, which defines the linear ordering the migration
+    must preserve.
+    """
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.executescript(_PRE_GRAPH_SCHEMA)
+        conn.execute(
+            "INSERT INTO conversations (id, title, model, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (cid, "Migrated chat", "test-model", "2026-01-01T00:00:00", "2026-01-01T00:00:00"),
+        )
+        for node_id, role, content in rows:
+            conn.execute(
+                "INSERT INTO nodes (id, conversation_id, role, content) VALUES (?, ?, ?, ?)",
+                (node_id, cid, role, content),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# C67
+def test_c67_fresh_core_empty_view(repo, test_provider, workspace):
+    core = ConversationCore(repo, test_provider(["hi"]), workspace)
+    core.setup()
+    assert core.current_view() == []
+    assert core.nodes == []
+
+
+# C68
+def test_c68_two_turns_root_first_order(repo, test_provider, workspace):
+    core = ConversationCore(repo, test_provider(["hi"]), workspace)
+    core.setup()
+    u1, a1 = core.submit("What is the capital of France?")
+    u2, a2 = core.submit("And its population?")
+    view = core.current_view()
+    assert [n.id for n in view] == [u1.id, a1.id, u2.id, a2.id]
+    assert view[0].id == u1.id
+    assert view[0].role == u1.role
+    assert view[0].content == u1.content
+    assert view[-1].id == a2.id
+    assert view[-1].role == a2.role
+    assert view[-1].content == a2.content
+
+
+# C69
+def test_c69_nodes_property_recomputed(repo, test_provider, workspace):
+    core = ConversationCore(repo, test_provider(["hi"]), workspace)
+    core.setup()
+    u1, a1 = core.submit("Explain recursion briefly.")
+    assert [n.id for n in core.nodes] == [n.id for n in core.current_view()]
+    assert [n.id for n in core.nodes] == [u1.id, a1.id]
+    u2, a2 = core.submit("Now give an example.")
+    # A fresh read of the property reflects the new state, not a frozen snapshot.
+    assert [n.id for n in core.nodes] == [u1.id, a1.id, u2.id, a2.id]
+
+
+# C70
+def test_c70_rewind_shortens_view(repo, test_provider, workspace):
+    core = ConversationCore(repo, test_provider(["hi"]), workspace)
+    core.setup()
+    u1, a1 = core.submit("First question about databases.")
+    u2, a2 = core.submit("Second follow-up question.")
+    u3, a3 = core.submit("Third follow-up question.")
+    core.rewind(a1.id)
+    view = core.current_view()
+    assert [n.id for n in view] == [u1.id, a1.id]
+    assert view[-1].id == a1.id
+    view_ids = {n.id for n in view}
+    for dropped in (u2.id, a2.id, u3.id, a3.id):
+        assert dropped not in view_ids
+
+
+# C71
+def test_c71_rewind_returns_current_view(repo, test_provider, workspace):
+    core = ConversationCore(repo, test_provider(["hi"]), workspace)
+    core.setup()
+    u1, a1 = core.submit("Question one.")
+    u2, a2 = core.submit("Question two.")
+    u3, a3 = core.submit("Question three.")
+    r = core.rewind(a1.id)
+    after = core.current_view()
+    assert [n.id for n in r] == [n.id for n in after]
+    assert [n.id for n in r] == [u1.id, a1.id]
+
+
+# C72
+def test_c72_rewind_to_tip_is_noop(repo, test_provider, workspace):
+    core = ConversationCore(repo, test_provider(["hi"]), workspace)
+    core.setup()
+    u1, a1 = core.submit("Tell me about oceans.")
+    u2, a2 = core.submit("Tell me about mountains.")
+    view_before = [n.id for n in core.current_view()]
+    assert view_before == [u1.id, a1.id, u2.id, a2.id]
+    core.rewind(a2.id)
+    assert [n.id for n in core.current_view()] == view_before
+
+
+# C73
+def test_c73_rewind_unknown_id_raises(repo, test_provider, workspace):
+    core = ConversationCore(repo, test_provider(["hi"]), workspace)
+    core.setup()
+    core.submit("Some initial question.")
+    core.submit("A second question.")
+    view_before = [n.id for n in core.current_view()]
+    with pytest.raises(ValueError):
+        core.rewind("nonexistent-node-id")
+    assert [n.id for n in core.current_view()] == view_before
+
+
+# C74
+def test_c74_rewind_to_abandoned_tail_raises(repo, test_provider, workspace):
+    core = ConversationCore(repo, test_provider(["hi"]), workspace)
+    core.setup()
+    u1, a1 = core.submit("Original question one.")
+    u2, a2 = core.submit("Original question two.")
+    u3, a3 = core.submit("Original question three.")
+    core.rewind(a1.id)
+    core.submit("A divergent branch question.")  # u4, a4
+    view_before = [n.id for n in core.current_view()]
+    with pytest.raises(ValueError):
+        core.rewind(u3.id)  # u3 is on the abandoned tail, off the active line
+    assert [n.id for n in core.current_view()] == view_before
+
+
+# C75
+def test_c75_resume_after_rewind_uses_rewind_tip(repo, test_provider, workspace):
+    core = ConversationCore(repo, test_provider(["hi"]), workspace)
+    core.setup()
+    u1, a1 = core.submit("Persisted question one.")
+    u2, a2 = core.submit("Persisted question two.")
+    u3, a3 = core.submit("Persisted question three.")
+    cid = core.conversation_id
+    core.rewind(a1.id)
+
+    reloaded = ConversationCore(repo, test_provider(["hi"]), workspace)
+    reloaded.resume_conversation(cid)
+    view = reloaded.current_view()
+    assert [n.id for n in view] == [u1.id, a1.id]
+    assert view[-1].id == a1.id
+    assert view[0].role == u1.role
+    assert view[0].content == u1.content
+    assert view[-1].role == a1.role
+    assert view[-1].content == a1.content
+
+
+# C76
+def test_c76_abandoned_tail_preserved_after_reload(repo, test_provider, workspace):
+    core = ConversationCore(repo, test_provider(["hi"]), workspace)
+    core.setup()
+    u1, a1 = core.submit("Branching question one.")
+    u2, a2 = core.submit("Branching question two.")
+    u3, a3 = core.submit("Branching question three.")
+    core.rewind(a1.id)
+    core.submit("Divergent branch question.")  # u4, a4
+    cid = core.conversation_id
+
+    reloaded = ConversationCore(repo, test_provider(["hi"]), workspace)
+    reloaded.resume_conversation(cid)
+
+    full = repo.load(cid)
+    by_id = {n.id: n for n in full}
+    for original in (u2, a2, u3, a3):
+        assert original.id in by_id, f"abandoned node {original.id} was deleted"
+        assert by_id[original.id].content == original.content
+    # Abandoned tail chains back to the rewind point.
+    assert by_id[u2.id].prev_id == a1.id
+    # Active view excludes the abandoned tail.
+    view_ids = {n.id for n in reloaded.current_view()}
+    for abandoned in (u2.id, a2.id, u3.id, a3.id):
+        assert abandoned not in view_ids
+
+
+# C77
+def test_c77_divergent_branch_same_core(repo, test_provider, workspace):
+    core = ConversationCore(repo, test_provider(["hi"]), workspace)
+    core.setup()
+    u1, a1 = core.submit("Same-core question one.")
+    u2, a2 = core.submit("Same-core question two.")
+    u3, a3 = core.submit("Same-core question three.")
+    core.rewind(a1.id)
+    u4, a4 = core.submit("Same-core divergent question.")
+    view = core.current_view()
+    assert [n.id for n in view] == [u1.id, a1.id, u4.id, a4.id]
+    view_ids = {n.id for n in view}
+    for abandoned in (u2.id, a2.id, u3.id, a3.id):
+        assert abandoned not in view_ids
+
+
+# C78
+def test_c78_migrated_linear_equivalence(tmp_path, test_provider, workspace):
+    db_path = tmp_path / "pre_graph.db"
+    cid = "migrated-conversation-001"
+    rows = [
+        ("node-1", "user", "Hello, can you help me plan a trip?"),
+        ("node-2", "assistant", "Of course, where would you like to go?"),
+        ("node-3", "user", "I'm thinking of visiting Japan in spring."),
+        ("node-4", "assistant", "Spring is a great time for cherry blossoms."),
+    ]
+    _make_pre_graph_db(db_path, cid, rows)
+
+    repo2 = ConversationRepository(str(db_path))
+    core = ConversationCore(repo2, test_provider(["hi"]), workspace)
+    core.setup()  # runs repo.init() -> migrates the flat DB into the graph schema
+    core.resume_conversation(cid)
+
+    assert [n.id for n in core.current_view()] == [n.id for n in repo2.load(cid)]
+
+
+# C79
+def test_c79_root_node_prev_id_is_none(repo, test_provider, workspace):
+    core = ConversationCore(repo, test_provider(["hi"]), workspace)
+    core.setup()
+    u1, a1 = core.submit("First turn establishes the root.")
+    # The root of the line has no predecessor (null/None marks the root).
+    assert u1.prev_id is None
+    # The invariant survives persistence: first loaded node (insertion order) is root.
+    loaded = repo.load(core.conversation_id)
+    assert loaded[0].prev_id is None
+
+
+# C80
+def test_c80_resume_dangling_active_leaf_falls_back_to_last(
+    repo, test_provider, workspace, make_node
+):
+    cid = "conv-dangling"
+    n1 = make_node(role="user", content="root turn", conversation_id=cid)
+    n2 = make_node(role="assistant", content="second turn", conversation_id=cid)
+    n2.prev_id = n1.id
+    n3 = make_node(role="user", content="third turn", conversation_id=cid)
+    n3.prev_id = n2.id
+    # Store the linear chain with a BOGUS active tip pointer (stale/dangling edge).
+    repo.save(cid, "Dangling tip", [n1, n2, n3], active_leaf_id="nonexistent-node-id")
+
+    core = ConversationCore(repo, test_provider(["hi"]), workspace)
+    core.setup()
+    core.resume_conversation(cid)
+    # Fall back to the last stored node (n3) as the tip: full stored line, not empty.
+    assert [n.id for n in core.current_view()] == [n1.id, n2.id, n3.id]

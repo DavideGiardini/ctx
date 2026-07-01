@@ -42,3 +42,4 @@ don't rewrite.
 | [0013](0013-storage-observations.md) | storage.py observations | Notes |
 | [0014](0014-wiring-observations.md) | System-level / wiring observations | Notes |
 | [0015](0015-usage-off-the-stream.md) | Report provider token usage via an `on_usage` callback | Accepted |
+| [0016](0016-append-only-conversation-graph.md) | Conversation state is an append-only node graph (no op log, no soft-delete) | Accepted |
