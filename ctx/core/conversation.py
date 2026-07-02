@@ -67,6 +67,20 @@ class ConversationCore:
         self._last_usage: Usage | None = None
         self._calibration: float | None = None
         self._usage_generation: int = 0
+        # True only while a turn is actively streaming (see stream()); the
+        # compression commands (H2) refuse to mutate the graph while it is set.
+        self._streaming: bool = False
+
+    @property
+    def streaming(self) -> bool:
+        """Whether a turn is currently streaming through ``stream()``.
+
+        ``True`` from the moment the stream begins yielding until the stream
+        completes, errors, or is cancelled (cleared in a ``finally``). The
+        compression commands read it to enforce the H2 invariant: no
+        commit/expand/draft may mutate the graph mid-turn.
+        """
+        return self._streaming
 
     @property
     def last_usage(self) -> Usage | None:
@@ -315,6 +329,74 @@ class ConversationCore:
         self.persist()
         return self.nodes
 
+    def _validate_compress_range(self, start_id: str, end_id: str) -> list[Node]:
+        """Validate a compression range and return the slice it delimits.
+
+        ``start_id`` and ``end_id`` must delimit a contiguous slice of
+        ``current_view()`` (``start_id`` at or before ``end_id``, both present).
+        The shared precondition check for ``commit_compression`` and (task 5)
+        ``draft_compression``. Raises ``ValueError`` unless all hold:
+
+        - not ``self.streaming`` (H2 — no compression mid-turn);
+        - both ids are in ``current_view()`` and ``start_id`` is at or before
+          ``end_id`` (a real, forward, contiguous slice);
+        - **no node in the slice is ``node_type == "compression"``** (Q7 flat
+          guard — nested compression is out of scope);
+        - **the slice's last node is the active leaf** (the 3a tip guard; a
+          distinct, deletable check removed in task 22).
+
+        Returns the slice as a ``list[Node]`` in view (root-first) order.
+        """
+        if self.streaming:
+            raise ValueError("cannot compress while a turn is streaming")
+        view = self.current_view()
+        ids = [n.id for n in view]
+        try:
+            start = ids.index(start_id)
+            end = ids.index(end_id)
+        except ValueError as exc:
+            raise ValueError(
+                f"compression range endpoints not in view: {start_id}, {end_id}"
+            ) from exc
+        if start > end:
+            raise ValueError(
+                f"compression range start is after end: {start_id}, {end_id}"
+            )
+        slice_nodes = view[start : end + 1]
+        if any(n.node_type == "compression" for n in slice_nodes):
+            raise ValueError("cannot compress a range containing a compression node")
+        # 3a tip guard (distinct + deletable — removed in task 22): the range must
+        # end at the active leaf, so only a suffix ending at the tip is foldable.
+        if slice_nodes[-1].id != self._active_leaf_id:
+            raise ValueError("compression range must end at the active leaf (tip)")
+        return slice_nodes
+
+    def commit_compression(
+        self, start_id: str, end_id: str, summary: str, prompt: str = ""
+    ) -> Node:
+        """Fold a contiguous range into a compression node ``K`` (pure, no AI).
+
+        Validates the range via ``_validate_compress_range`` (raising
+        ``ValueError`` on any failure), then non-destructively records the
+        compression: a ``Node.compression`` ``K`` (``meta["range"]`` = the slice
+        ids in order, ``meta["prompt"] = prompt``) is added straight to the
+        graph, each slice node gets ``compressed_into = K.id``, and the state is
+        persisted. The children are preserved (never deleted); ``current_view()``
+        then shows ``K`` in their place. Returns the new ``K``.
+        """
+        slice_nodes = self._validate_compress_range(start_id, end_id)
+        k = Node.compression(
+            summary,
+            self.conversation_id,
+            [n.id for n in slice_nodes],
+            prompt=prompt,
+        )
+        self._graph[k.id] = k
+        for node in slice_nodes:
+            node.compressed_into = k.id
+        self.persist()
+        return k
+
     def _calibrate(self, local_sum: int, usage: Usage) -> None:
         """Adopt a provider ``Usage`` as the gauge calibration anchor, if sane.
 
@@ -350,6 +432,7 @@ class ConversationCore:
         def on_usage(usage: Usage) -> None:
             self._calibrate(local_sum, usage)
 
+        self._streaming = True
         try:
             async for token in self._provider.stream(messages, self.model, on_usage):
                 assistant_node.content += token
@@ -362,3 +445,5 @@ class ConversationCore:
             raise
         else:
             self.persist()
+        finally:
+            self._streaming = False
