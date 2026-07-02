@@ -92,7 +92,7 @@ Dependencies noted; every prerequisite sits above its dependent.
       today; append-after-folded-tip chains from the real leaf and the view shows
       `[..., K, new]`. `scripts/check.sh` green.
 
-- [ ] **3. Core: `commit_compression` + the `streaming` flag (H2)** _(deps: 1, 2)_ —
+- [x] **3. Core: `commit_compression` + the `streaming` flag (H2)** _(deps: 1, 2)_ —
       `ConversationCore.commit_compression(start_id, end_id, summary, prompt="") ->
       Node`: validate via a private `_validate_compress_range(start_id, end_id)`
       shared with task 5 — the ids delimit a contiguous slice of `current_view()`;

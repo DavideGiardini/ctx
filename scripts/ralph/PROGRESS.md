@@ -739,3 +739,35 @@ Git history is the source of truth for *what changed*; this file captures the
   straight to `_graph` (never `_append_to_line`); the view then resolves automatically.
   Task 15 later swaps the resolution mechanism (event-enumeration) behind this same
   `current_view()` signature — don't bake pointer-following assumptions into callers.
+
+## 2026-07-03 — Task 3 (Sprint 3): commit_compression + streaming flag (H2)
+- `ctx/core/conversation.py`:
+  - `streaming` read-only property backed by `_streaming: bool` (init False), set True at
+    `stream()` body entry, cleared in a new `finally:` (kept the existing except/else
+    persist branches untouched → C40/C42 cancel tests still pass).
+  - `_validate_compress_range(start_id, end_id) -> list[Node]` (private, SHARED with task 5):
+    order of ValueError guards — (1) streaming (H2), (2) both ids in `current_view()`,
+    (3) start ≤ end, (4) Q7 flat guard (no `node_type=="compression"` in slice), (5) 3a
+    tip guard `slice[-1].id == _active_leaf_id` kept a DISTINCT deletable line (task 22
+    removes only that line). Returns the root-first view slice.
+  - `commit_compression(start_id, end_id, summary, prompt="") -> Node`: validate → build K
+    via `Node.compression(summary, conv_id, [n.id for n in slice], prompt=prompt)` (range =
+    ordered slice ids, H1) → add K straight to `_graph` → set `compressed_into=K.id` on each
+    slice node → `persist()` → return K. Pure, non-destructive (children preserved); the
+    task-2 `current_view()` fold resolves K into place automatically.
+- Tests: code-blind flow. Stubbed the three members (NotImplementedError) with docstrings →
+  spawned test-spec-author with interface + prose → 12 red (clean collect) → green. New:
+  `tests/specs/commit_compression.md` (C91–C103) + `tests/test_commit_compression.py` (12
+  tests: tip fold, K fields, default prompt, single-node fold, prefix unchanged, save/reload
+  round-trip, tip-guard/flat-guard/streaming-guard/unknown-id/reversed-order rejections, each
+  rejection also asserts view-unchanged + no-K). Spec author guessed import
+  `from ctx.core import ConversationCore` (wrong) → fixed to `ctx.core.conversation` (test
+  infra, not the contract). ruff auto-sorted the test imports.
+- Verification: pure core logic, no UI/runtime surface (K rendering/commit UI is task 8), so
+  tests + `scripts/check.sh` (454 passed, was 442; +12; ruff+mypy clean) are the verification;
+  qa-tester not applicable this iteration.
+- GOTCHA for task 5 (`draft_compression`): reuse `_validate_compress_range` verbatim (it
+  already includes the streaming + tip + flat guards). Task 22 later deletes ONLY the tip-guard
+  line from it — keep that line self-contained. `_streaming` is set inside the async-generator
+  body, so `streaming` is False until the consumer calls the first `__anext__()`; the streaming
+  guard test drives one token through before asserting.
