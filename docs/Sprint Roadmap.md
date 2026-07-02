@@ -270,6 +270,15 @@ live file. A staleness check compares current file hash to the stored one and se
 **Depends on:** S2 (graph), S4 (re-import forks a branch). **Size:** M. **Done:** edit a
 source file post-import → `~` appears, model still sees the snapshot, `gD` shows live,
 re-import forks a branch with the new content; qa-tester + `check.sh` green.
+**Open decision surfaced in the S3 grill (2026-07-01):** whether a **refresh/re-import**
+surfaces inside **S3b's full-screen diff view** as a color-marked "same block, content
+changed" region (with left/right drill-down) — which would require the diff to compare
+**across branches** (old line vs refreshed line), since re-import forks — **or** stays purely
+in S5's own `gd`(snapshot)/`gD`(live) channel and never enters the conversation diff. The S3b
+diff frame is deliberately built so the former is an *additive* extension (same navigation,
+same drill-down, new marker type). Decide here. Also: pre-S5, S3b's diff renders import blocks
+with the **current** file on both sides (no import-history); S5 snapshots are what make import
+history honest in that view.
 
 ### Sprint 6 — KB expansion + access & permission modes (§3, §3.1)  *(was S7)*
 **Goal:** The **launch directory's files are the KB** (not just `.ctx/context/`), with
@@ -293,6 +302,13 @@ Reuses the compression-prompt hooks from S3.
 **Depends on:** S3 (compression prompts), pairs with S8 (tools). **Size:** M. **Done:**
 define an assistant, switch it, confirm system prompt reaches the model and switching
 doesn't mutate prior nodes; qa-tester + `check.sh` green.
+**Folded in from S3 (2026-07-01):** a **ctx protocol preamble** explaining ctx's own
+wire tags to the model (`<context_import>`, `<conversation_summary>`, later tool tags)
+belongs here as part of the default assistant's system prompt — stated **once**, not
+repeated per node. S3 deliberately ships `<conversation_summary>` with **no** framing
+(the tag name + a well-drafted summary is self-describing, exactly as `<context_import>`
+already ships unexplained today). Revisit only if qa-tester shows models mishandling a
+bare summary tag.
 
 ### Sprint 8 — Tools / MCP (§6.2)  *(was S9)*
 **Goal:** Two-tier tool system: global registry (`~/.config/ctx/`) → project activation
@@ -414,4 +430,227 @@ a node selects it in the main view.
   Coherence is mitigated (default prompt) + reversible (expand/rewind), not guaranteed.
 - **S4 — open:** whether an abandoned tail after a rewind is a **visible branch** or
   **discarded** (S4 behavior, does not affect the S2 schema).
+- **S3 — settled (grill 2026-07-01, in progress):** logical design of the compression
+  sprint. Decisions locked so far:
+  - **[Q1] Compression node `K` lives off the `prev_id` line.** It has no `prev_id`;
+    discoverable only via its children's `compressed_into = K` back-pointers.
+    `current_view()` walks `prev_id` as today (folded children stay on the line, chain
+    never mutated) then replaces each **maximal contiguous run** sharing
+    `compressed_into = K` with `K`, in place. Resolution lives entirely in
+    `current_view()`.
+  - **[Q2] `K` reaches the model as wrapped `user`-role content.** New
+    `node_type="compression"` (own `role="compression"` for a distinct border color),
+    `goes_to_model()` true. `build_context` renders it as
+    `<conversation_summary>\n{K.content}\n</conversation_summary>` with `node_role="user"`,
+    so it **coalesces** with adjacent user content exactly like `<context_import>`.
+    Chosen user-role over assistant (alternation-safe at any position; honest; reuses the
+    context path).
+  - **[Q2b] Tags alone for S3 — no framing.** `<conversation_summary>` ships unexplained,
+    exactly as `<context_import>` already does. A ctx **protocol preamble** explaining all
+    wire tags is deferred to **S7**'s default assistant (say-once, not per-node). Reversible
+    if qa-tester shows models mishandling a bare summary tag.
+  - **[Q3] Two core methods.** `draft_compression(start_id, end_id, prompt=None) ->
+    AsyncIterator[str]` — renders the folded range (reusing `build_context` on just that
+    range), wraps it in the compression instruction, **streams** a draft via the existing
+    `Provider.stream` on the **active model**; cancellable. `commit_compression(start_id,
+    end_id, summary_text) -> Node` — **pure graph mutation** (creates `K`, sets
+    `compressed_into` on the range); no AI call, unit-testable code-blind. Failed/cancelled
+    draft commits nothing. **One** default compression prompt, phrased **preserve-info**,
+    introduced in 3a (3b only adds the config opt-out + reconstruction/diff). All three
+    modes (default / ad-hoc / manual) guaranteed in 3a.
+  - **[Q4] Draft editor = left-pane 2-split; committed inspector = 3-split.** *Draft editor:*
+    Top = editable prompt (prefilled with the default), Bottom = editable output; **no Center**
+    (the originals are on the *right* pane during draft, as the highlighted selection).
+    **No auto-stream** — entering shows the default prompt + empty output; the stream starts
+    only on an explicit **Draft** action. Then edit Top → re-draft, or edit Bottom directly,
+    then Commit. Manual = never Draft, type in Bottom. Re-draft overwrites Bottom. **Commit
+    is the only graph mutation**; **Esc cancels for free** (no `K`, no `compressed_into`).
+    `K.meta` stores the prompt used (empty for manual). *Committed `K` inspector* (§7.4.2
+    3-split): Top = prompt (read-only, hidden if manual/empty per the empty-state rule),
+    **Center = the folded children/originals** (read-only, scrollable — the Center *reappears*
+    here because after commit the originals are folded away on the right), Bottom = summary.
+    Correction to an earlier phrasing: the draft editor does **not** simply "double as" the
+    committed inspector — they share Top+Bottom, but the committed inspector **adds Center**.
+  - **[Q5] Range selection = vim-style anchor+extend.** In Edit mode, `v` anchors at the
+    current node; Up/Down extends the contiguous selection (highlighted on the right pane);
+    the compress trigger acts on it; Esc cancels. Single-node = range of one. The general
+    two-ended mechanism is built **now** (it's the 3b end state — no UI rework). **3a guard:**
+    the compress trigger rejects any range whose **last node isn't the active leaf** (the
+    "suffix ending at the tip" rule). This guard is the correctness boundary that makes 3a
+    honest *without* per-turn reconstruction — a middle range in 3a would silently
+    misrepresent what later turns saw. 3b **replaces** the guard with the reconstruction path,
+    not merely deletes it.
+  - **[Q6] `:expand` splits by sub-sprint (distinct from view-only `zo`/`zc` folding —
+    `:expand` returns children to the model's context; folding is a peek that leaves them
+    out of context).** *3a:* un-fold in place, non-destructively — clear `compressed_into`
+    on the folded children (back onto the effective line); `K` becomes an off-line orphan
+    (no children → invisible, **not** row-deleted). Safe because 3a is tip-only (no turn
+    saw `K`). *3b:* a **creation-ordered deactivation** — `K` and its edges are **preserved**
+    (3b reconstruction needs them), expand records that `K` no longer applies to *future*
+    turns; past turns still reconstruct with `K`. Same creation-order tool as per-turn
+    reconstruction. User-facing behavior uniform; §4.3's word "destroy" reinterpreted as
+    "un-fold + stop applying," superseded by ADR-0016 (append-only).
+  - **[Q7] No nesting in 3a *or* 3b — deferred to an unscheduled post-3b follow-on.** Both
+    sub-sprints ship **flat** compression (one level; `gd` reaches a compression's sources,
+    not compressions-within-compressions). 3a rejects a selection containing a
+    `node_type=="compression"` node (one-line guard; folded children aren't selectable
+    anyway, so a `K` only enters a selection by being selected itself). Allowing nesting is
+    *more* work than the guard, not less: recursive fixpoint resolution in `current_view()`
+    (fold `K1` into `K2` via `K1.compressed_into = K2`), level-aware `commit`, ordered
+    nested `:expand`, multi-level breadcrumbs. **Nothing is painted into a corner:** the
+    schema already permits it and the deep-dive breadcrumb is built as a **general stack in
+    3a**, so depth > 1 is a clean additive change. Pick it up post-3b only if
+    compressing-a-compression proves needed in real use.
+  - **[Q8] Deep-dive kept; inline folding DROPPED.** *Deep-dive (`gd`/`Ctrl+o`):* cursor on
+    a `K` in Edit mode → **full-view replacement** of the right-pane message list with `K`'s
+    folded children + a **breadcrumb stack** (`Chat > K`; built stack-ready so future nesting
+    reaches depth > 1 with no rework, though 3a goes one level). `Ctrl+o` pops up. **Scoped to
+    compression nodes** in 3a (context-node `gd`/`gD` is S5); **read-only** — inspect/navigate
+    origins, don't act on them from inside (act = expand first). Needs a small core accessor
+    `folded_children(k_id) -> list[Node]` (children aren't in `current_view()`).
+    **Exiting deep-dive:** `Ctrl+o` goes back *one level* (stays in inspection); pressing
+    `i`/`Esc`-to-Insert **exits deep-dive entirely** — pops the whole breadcrumb, restores the
+    live conversation on the right, locks the left pane to the tip (§7.5.1), focuses the input
+    bar; a new message appends to the **active tip** (deep-dive never moved it). Chatting *from*
+    a deep-dive location (branch-off-a-folded-child) is incoherent in 3a (S4 territory, and
+    never from folded-away children). Deep-dive state is **ephemeral UI** — nothing persists.
+    *Inline
+    folding (`zo/zc/zR/zM`): **dropped from the sprint.*** Redundant — a committed `K`'s
+    children are already viewable in the left-pane **Center split** (Q4); injecting them into
+    the *right* pane too both duplicates that and muddies the "right pane = what the model
+    sees" semantics (§4 rightmost column = ground truth). **Diverges from Product Concept
+    §4.2** (reasoned): the code-folding metaphor predates the two-pane inspector. If a
+    no-navigation glance is ever missed, the Center split already covers it.
+  - **[Q9] created_seq deferred to 3b; token weight falls out of S1 for free.** *created_seq:*
+    3a needs **no** creation order (now-view resolution is positional). 3b adds an **explicit
+    monotonic `created_seq`** column (assigned at node creation, persisted, never reassigned),
+    because **rowid is unreliable** for per-turn reconstruction — the full-replace `save()`
+    (`storage.py:172`, DELETE-all-then-INSERT) reassigns rowids every save. Migration backfills
+    by rowid (safe: pre-3b compressions are tip-only, never reconstructed). *Token weight:* S1
+    counts generically over `current_view()`/`goes_to_model()`; folded children aren't in the
+    resolved view → contribute **0 automatically**; `K` is counted like any node. Only UI
+    nicety: children shown *inside deep-dive* read **"not in context"**, not `0%`.
+  - **[Q10] 3a loose ends + the draft-input invariant.** *(a)* A folded range may contain
+    **any contiguous run** on the active line (user/assistant/context/system); a folded context
+    import just leaves the view (file no longer loaded). *(b)* The **draft stream must not touch
+    the header gauge** — it's a meta-operation, so `draft_compression` passes a no-op `on_usage`
+    (no `_calibrate`/`last_usage`/`usage_generation` update). *(c) Invariant:* **the draft's
+    input is exactly what the main model sees for those nodes** — `draft_compression` renders
+    the range via `build_context`, so each node contributes its model-facing form (raw import →
+    full file; **summarized import → its summary**; never the "Included: x" label). The future
+    **import-with-prompt** feature (Future Sprints) falls out of this invariant, and
+    double-summary (compressing a range containing a summarized import) is automatically
+    consistent (summarize the summary, never re-expand the file).
+  - **3a: ALIGNED (2026-07-01).** Q1–Q10 settled. Ready to decompose to a Ralph PRD when we
+    choose to build it.
+  - **[Q11] Per-turn reconstruction is on-demand, read-only, and feeds ONLY the diff view —
+    generation is unchanged.** Generation always uses the now-view (all compressions), via the
+    *same* `build_context`/`current_view()` 3a built. The only new consumer of "what did turn T
+    see" is the git-diff view, so reconstruction is a **separate pure function**
+    `context_at_generation(T)` computed lazily (never on the hot path): walk T's ancestors, fold
+    only compressions with `created_seq < T.created_seq` (and, with deactivation, not deactivated
+    before T). **3b is linear** (branching = S4), so this is a straight `created_seq` comparison
+    along one line; the full branch rule (ancestry + creation order) is S4. Net 3b surface:
+    (1) delete the 3a tip-guard → any contiguous range; (2) add `created_seq`; (3) add
+    `context_at_generation`; (4) the diff view UI; (5) `:expand` → creation-ordered deactivation;
+    (6) prompt opt-out config. **No live-pipeline rewrite.**
+  - **[Q12] Git-diff context view = a full-screen, navigable, block-alignment diff.** Opened
+    from an AI node carrying the drift indicator; left = `context_at_generation(T)`, right =
+    now-view over T's ancestor prefix; scoped to T's own prefix. **Full-screen, not an inspector
+    split** — it reuses **deep-dive's full-view-replacement + breadcrumb** paradigm, so the diff
+    view and deep-dive are one family of full-screen inspections sharing a navigation stack:
+    `Esc`/`Ctrl+o` pop **one level** (drill-down → diff overview → conversation), `i` exits all
+    the way to Insert/the live tip. **Drill-down:** from the overview, a changed region can be
+    opened **full, left vs right** (the verbatim run vs the summary `K`) — useful even in the
+    structural-only case, and the same mechanism a future content-diff extends.
+    *Block-alignment, not text diff:* a block present on **both** sides is **byte-identical**
+    (node content is immutable; imports render live-identically on both sides pre-S5,
+    snapshot-identically post-S5), so **every difference is structural** — a contiguous run of
+    verbatim blocks ⟷ a single `K` summary block, either direction (post-T compression folds a
+    run T saw verbatim; or a `K` active at T was `:expand`-ed after T), possibly several regions.
+    **No intra-block char/word diffing ever needed.** *3b limitation:* pre-S5, import blocks
+    render the **current** file on both sides (import history awaits S5 snapshots). *Boundary /
+    deferred:* source-file drift ("same block, different content") is **NOT** built in 3b — under
+    append-only + **re-import-forks-a-branch** a node's content never changes in place, so it
+    can't arise within T's prefix. Whether a future *refresh* surfaces here (as a color-marked
+    "content changed" block + drill-down) or stays in S5's `gd`/`gD` channel is an **S5 design
+    decision** (see S5 note). Build the full-screen frame so that marker + drill-down is an
+    **additive** extension. Indicator: subtle per-AI-node marker gated by `ui.show_context_drift`
+    (default `true`).
+  - **[Q13] The preserve-info "opt-out" collapses into one overridable config key.**
+    **`compression.default_prompt`** (string; ships with the preserve-info text) is read by 3b
+    (like `ui.weight_basis` today) and **prefills the editor's Top split**. Override
+    per-compression = edit Top (the ad-hoc mode); override the *default* globally = change the
+    config value. No separate `preserve_info` boolean — "opt-out" is just setting your own text
+    (incl. minimal), and nothing is injected beyond what's shown in Top (consistent with Q2b /
+    power-over-protection). *In 3b the only way to edit the config default is hand-editing JSON*
+    — an in-app config editor is deferred (see Future Sprints); the prompt's long-term home is
+    S7 assistant config (§6.1).
+  - **[Q14] 3b compression is an *event-node* model; discovery is by enumeration, not pointers.**
+    Two off-line event-node types, both carrying `created_seq` (the 3b field on every node):
+    **compression `K`** (`prev_id=None`, `K.meta` stores its **own folded range** = ordered
+    child ids) and **expand `E`** (`node_type="expand"`, `prev_id=None`, `E.meta={"target": K.id}`,
+    doesn't go to model). `:expand K` = append an `E` — *that* node is what carries the
+    deactivation's `created_seq`. **Resolution (now-view AND per-turn reconstruction) enumerates
+    the event nodes** — it does **not** follow child pointers. Rule: a compression `K` applies to
+    turn `T` iff `created_seq(K) < created_seq(T)` **and** no expand `E` with `E.meta.target==K.id`
+    has `created_seq(E) < created_seq(T)`. Now-view = "T is the present": `K` applies iff no `E`
+    targets it at all. `context_at_generation(T)`: walk `prev_id` for the raw sequence `L`, then
+    apply every qualifying `K` (range ⊆ `L`) by replacing its run with `K`. **`K` is never lost**
+    because it's a persisted graph node found by *enumeration*; re-compression into a `K'`
+    overwrites a child's `compressed_into` but is irrelevant to discovery. **Re-compression after
+    expand is allowed** (new `K'` owns its own range); the old `K` persists as history. **Active
+    compressions never overlap** (Q7 forbids compressing already-folded nodes), so the applied set
+    at any time-slice partitions cleanly. `compressed_into` on children survives **only** as a
+    fast now-view/UI convenience — the **source of truth is the event nodes + `created_seq`**.
+    *Corrects Q1/Q11 slightly:* 3b generalizes 3a's pointer-based run-resolution to this
+    event-enumeration model — an internal change behind the stable `current_view()` interface
+    (same result/signature, not a pipeline rewrite), but more than "just delete the guard."
+  - **3b: ALIGNED (2026-07-01).** Q11–Q14 settled. Together with 3a (Q1–Q10), **Sprint 3 is fully
+    designed.** Unifying statement: *everything that affects context resolution is a node carrying
+    `created_seq` — on-line turns (user/assistant/context/system) plus two off-line event nodes,
+    compression `K` (owns its range) and expand `E` (owns its target). Resolution walks `prev_id`
+    for the raw sequence, then enumerates the event nodes and applies them by the Q14 rule.*
 - _(Add per-sprint refinement notes below as we go through each one.)_
+
+---
+
+## Future Sprints (deferred, unscheduled)
+
+Capabilities we've deliberately decided to defer — *not* out of scope for the product,
+just not scheduled into a numbered sprint yet. Distinct from **Out of scope** above (which
+is deferred for the whole roadmap). Revisit the trigger noted on each.
+
+- **Nested compression / compression *depth*** *(decided S3 grill, 2026-07-01)* — compressing
+  a range that already contains a compression node, so `gd` deep-dive goes multiple levels
+  (`Chat > K2 > K1 > sources`). S3a/S3b ship **flat** (one level). The schema already permits
+  it (`compressed_into` on every node incl. `K`s) and S3a's deep-dive breadcrumb is built as a
+  **general stack**, so it's a clean additive change. **Cost if built:** recursive fixpoint
+  resolution in `current_view()`, level-aware `commit`, ordered nested `:expand`, multi-level
+  breadcrumbs. **Revisit:** post-S3b, only if compressing-a-compression proves needed in real
+  use.
+- **In-app (TUI) config editor** *(decided S3 grill, 2026-07-01)* — edit
+  `~/.config/ctx/config.json` from inside ctx instead of hand-editing JSON. **Cross-cutting**,
+  not a compression feature: covers all settings (`ui.truncation_lines`, `ui.weight_basis`,
+  `ui.show_context_drift`, model defaults, `compression.default_prompt`, …). Deferred so it
+  doesn't balloon feature sprints. **Note the overlap with S7:** compression prompts (and other
+  behavior) become **Assistant**-level config in S7 (§6.1), edited via the assistant editor — a
+  generic config editor and the assistant editor may converge; avoid building two. **Revisit:**
+  standalone, or fold into S7/S9 (multi-project config) if it fits.
+- **Import-with-prompt (summarized import)** *(decided S3 grill, 2026-07-01)* — import a
+  *specific, known* file/conversation **summarized by a custom prompt**, rather than the raw
+  whole file: the import node stores the *summary* (its Output), and that summary — not the
+  original file — is what the model (and any later compression draft) sees. It's the same
+  "summarize input X with prompt P" operation as compression, with a file/conversation as the
+  input instead of a node range, so it **reuses S3's draft-with-prompt machinery** and **S5's
+  content-on-node storage**. Already in the product vision (§3.2 "specialized compression, not
+  the raw file"; §7.4.2 context-node 3-split's Top = the import prompt). **Distinct from RAG**
+  (which is deferred entirely — no retrieval/embeddings, just one known file). Summary is a
+  **snapshot** (S5-style, immutable); re-import with a new prompt forks a branch. **Revisit:**
+  after S5 (which gives content-on-node), reusing the S3 draft path.
+- **Header gauge for models with no window metadata** *(decided S1, 2026-06-30)* — the gauge
+  renders `--%` when litellm has no `max_input_tokens` for a model (incl. the default
+  `openrouter/google/gemma-…`). Per-node **%** is unaffected. **Candidate fixes:** a
+  config-settable `model_windows` map consulted by `model_window()`, or render absolute
+  used-tokens (`1.2k ~`) instead of `--%`. **Revisit:** fast-follow when convenient (full
+  detail in the S1 parking-lot note above).

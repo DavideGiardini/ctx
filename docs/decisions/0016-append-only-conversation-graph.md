@@ -183,3 +183,65 @@ Still `prev_id` + `compressed_into` + `active_leaf_id`; the only addition is rel
 **creation order** (rowid, or an explicit `created_seq`/timestamp). The earlier splice
 description and the "expand forks if the conversation continued past the node" clause are
 retracted — `expand` is a pure, non-destructive toggle at any position.
+
+## Amendment #2 — compression is an *event-node* model; discovery is by enumeration, not pointers
+
+Amendment #1 named `compressed_into`-on-children as *the* mechanism ("children carry
+`compressed_into = K`") and said the schema was unchanged bar "reliance on creation order."
+Working through Sprint 3b during the S3 grill (2026-07-01) — per-turn reconstruction, `:expand`,
+re-compression, and the diff view — showed that a **pointer-following** model cannot carry those
+features. This amendment is the model of record for how compressions are stored and resolved.
+(Sprint 3a, which never reconstructs history or re-compresses, may keep the simpler pointer-run
+resolution; it is the degenerate case of what follows.)
+
+### The problem with pointer-following
+`compressed_into` on a child answers only "what does this node fold into *now*." It cannot answer
+two questions 3b needs:
+1. **History** — "what did turn `T` see," when a compression was created *after* `T` (so `T` saw
+   the range verbatim) or a `K` active at `T` was later expanded.
+2. **Re-compression** — after `:expand K`, compressing an overlapping range into a new `K'`
+   **overwrites** the children's single `compressed_into` pointer, orphaning `K` from the line.
+   Following pointers would then either lose `K` entirely or attribute its children to `K'`.
+
+### The model: two off-line event-node types, resolved by enumeration
+Every node carries an explicit **`created_seq`** (monotonic, assigned at creation, **never
+reassigned** — unlike rowid, which the full-replace `save()` re-assigns). Two node types record
+*events* rather than conversation content, both **off the `prev_id` line** (`prev_id = None`):
+
+- **Compression `K`** — `K.meta` stores its **own** folded range (the ordered child ids). `K`
+  goes to the model (wrapped user-role summary); its children do not.
+- **Expand `E`** — `node_type = "expand"`, `E.meta = {"target": K.id}`, does **not** go to the
+  model. `:expand K` **appends an `E`**; that node is what carries the deactivation's `created_seq`.
+
+**Resolution — both the now-view and per-turn reconstruction — enumerates these event nodes; it
+never follows child pointers.** For a turn `T`:
+
+> Walk `prev_id` from `T` for the raw ancestor sequence `L`. Then, for every compression node `K`
+> in the graph, apply it (replace its stored range within `L` with `K`) iff
+> `created_seq(K) < created_seq(T)` **and** no expand `E` with `E.meta.target == K.id` has
+> `created_seq(E) < created_seq(T)`.
+
+The **now-view** is the "`T` = present" case: apply `K` iff no `E` targets it at all. **Generation
+always uses the now-view; reconstruction is on-demand, read-only, and feeds only the diff view** —
+the live context pipeline is unchanged.
+
+### Consequences
+- **`K` is never lost.** It is a persisted graph node found by *enumeration*; re-compression
+  overwriting a child's `compressed_into` is irrelevant to discovery.
+- **Re-compression after expand is allowed** — `K'` owns its own range; the old `K` persists as
+  history. **Active compressions never overlap** (you cannot compress already-folded nodes), so
+  the qualifying set at any time-slice partitions the line cleanly.
+- **`compressed_into` on children is demoted** to a fast now-view / UI convenience. The **source
+  of truth is the event nodes + `created_seq`.**
+- **Diff view** ("concern b", A#1): because every shared node is byte-identical (immutable
+  content; imports render identically on both sides), the context-drift diff is a **structural,
+  block-alignment** diff (a verbatim run ⟷ a summary `K`), never an intra-block text diff.
+  Source-*file* drift is a separate concern (staleness `~` / `gd`/`gD`, S5), not this view.
+
+### Schema (columns still unchanged; two additions ride existing fields)
+Columns remain `prev_id` + `compressed_into` + `active_leaf_id`. The additions are: an explicit
+**`created_seq`** column (added in 3b; A#1's "rowid or created_seq" is resolved to the explicit
+column, because full-replace `save()` reassigns rowid); the **`"expand"` `node_type`**; and `K`'s
+range stored in **`K.meta`**. This **revises** Amendment #1's "children carry `compressed_into = K`
+[as the mechanism]" and its "schema unchanged bar reliance on creation order." The append-only
+invariant and the per-turn reconstruction rule are preserved and sharpened, not changed.
