@@ -77,6 +77,9 @@ reach end users (ADR 0012). See `docs/decisions/` for *why* it's shaped this way
   once, when the `active_leaf_id` column is first added.
 - `context.py` — pure `build_context(nodes, load_file)` → litellm message list;
   expands `context` nodes via the injected loader, no I/O of its own (ADR 0004).
+  Renders a `compression` node as a user-role `<conversation_summary>` wrapper (no
+  preamble, ADR-0016 H6/Q2) that coalesces with adjacent user content like an import;
+  a dropped node (system) is a coalescing boundary (user runs on either side don't merge).
 - `tokens.py` — pure, stateless token accounting for the context-budget UI (no
   Protocol seam — single impl). `count_messages` (the sole home of litellm's
   `token_counter`/tiktoken fallback), `per_node_tokens` (per-node local estimate,
@@ -137,16 +140,19 @@ a left `DetailInspector` and a right `#conversation` pane (the `MessageList` +
 carrying append-only graph edges `prev_id` (predecessor on the line; `None` = root;
 shared `prev_id` = branch siblings) and `compressed_into` (the compression node that
 folds it; `None` until S3) — both default `None`, so the factories are unchanged
-(ADR 0016). Factory classmethods (`Node.user`/`.assistant`/`.system`/`.context`) are the
-single source of truth for each kind's `role`/`node_type`/`content`/`meta`/
+(ADR 0016). Factory classmethods (`Node.user`/`.assistant`/`.system`/`.context`/`.compression`)
+are the single source of truth for each kind's `role`/`node_type`/`content`/`meta`/
 `conversation_id` combination — call sites construct via these, not the bare dataclass
-(ADR 0014 #1). `Node.system(content, conversation_id="")` takes an optional
+(ADR 0014 #1). `Node.compression(summary, conversation_id, range_ids, prompt="")` builds
+an off-line K node (`role`/`node_type` both `"compression"`, `content=summary`,
+`meta={"prompt", "range": [child ids]}` — canonical H1 keys, ADR-0016 A#2). `Node.system(content, conversation_id="")` takes an optional
 `conversation_id`: a breadcrumb raised inside an active conversation carries it and so
 persists (model-change/connectivity notices reappear on resume — uniform-persistence
 policy, ADR 0006 #6); one raised with no active conversation defaults to `""` and stays
 session-local, because storage skips id-less nodes. The
 `Node.goes_to_model()` predicate is the single definition of "which nodes reach the
-LLM" (user/assistant turns or `node_type == "context"`); `build_context` routes its
+LLM" (user/assistant turns or `node_type` in `{"context", "compression"}`);
+`build_context` routes its
 inclusion decision through it rather than re-deriving role rules inline (ADR 0014 #1).
 
 **tools/agent/** (top-level, OUTSIDE the `ctx` package — never ships, ADR 0012) —

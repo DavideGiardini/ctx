@@ -10,9 +10,13 @@ def build_context(
     """Convert a list of Nodes into LLM message dicts.
 
     Context nodes (node_type == "context") load their file, wrap it in
-    <context_import> XML, and count as user-role content. Adjacent user-role
-    content is coalesced into one user message; assistant nodes are appended
-    as their own; other roles (e.g. system) are skipped.
+    <context_import> XML, and count as user-role content. Compression nodes
+    (node_type == "compression") wrap their summary content in
+    <conversation_summary> XML and likewise count as user-role content, so a
+    summary coalesces with adjacent user material exactly like an import
+    (ADR-0016 A#1, H6). Adjacent user-role content is coalesced into one user
+    message; assistant nodes are appended as their own; other roles (e.g.
+    system) are skipped.
 
     Failures are made *visible* rather than silent: when a context node's file
     fails to load (``load_file`` raises ``OSError``/``ValueError``), a marked
@@ -27,9 +31,13 @@ def build_context(
     ``load_file`` is injected so this stays pure and testable without I/O.
     """
     messages: list[dict] = []
+    # A dropped node (e.g. a system breadcrumb) is a coalescing boundary: the
+    # user-side run before it must not merge with user-side content after it.
+    coalescing = False
 
     for node in nodes:
         if not node.goes_to_model():
+            coalescing = False
             continue
 
         node_content, node_role = node.content, node.role
@@ -55,16 +63,24 @@ def build_context(
                 )
             node_role = "user"
 
+        elif node.node_type == "compression":
+            node_content = (
+                f"<conversation_summary>\n{node_content}\n</conversation_summary>"
+            )
+            node_role = "user"
+
         if node_role == "user":
             if not node_content:
                 continue
-            if messages and messages[-1]["role"] == "user":
+            if coalescing and messages and messages[-1]["role"] == "user":
                 messages[-1]["content"] += node_content
             else:
                 messages.append({"role": "user", "content": node_content})
+            coalescing = True
         elif node_role == "assistant":
             if not node_content:
                 continue
             messages.append({"role": "assistant", "content": node_content})
+            coalescing = False
 
     return messages

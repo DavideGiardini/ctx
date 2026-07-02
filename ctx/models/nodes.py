@@ -48,9 +48,46 @@ class Node:
 
         The single source of truth for "which nodes reach the model" —
         ``build_context`` routes its inclusion decision through this predicate
-        rather than re-deriving role rules (ADR 0014 #1).
+        rather than re-deriving role rules (ADR 0014 #1). User/assistant turns,
+        context imports, and compression nodes reach the model; a compression
+        node stands in for the folded originals it summarizes (ADR-0016 H6).
         """
-        return self.role in {"user", "assistant"} or self.node_type == "context"
+        return self.role in {"user", "assistant"} or self.node_type in {
+            "context",
+            "compression",
+        }
+
+    @classmethod
+    def compression(
+        cls,
+        summary: str,
+        conversation_id: str,
+        range_ids: list[str],
+        prompt: str = "",
+    ) -> Node:
+        """Build a compression node ``K`` that folds a contiguous range of nodes.
+
+        A compression node stands in for the folded originals when context is
+        built: the model sees ``summary`` (later wrapped in
+        ``<conversation_summary>``) instead of the folded children
+        (ADR-0016 A#1/A#2, H6).
+
+        ``role`` and ``node_type`` are both ``"compression"``; ``content`` is the
+        ``summary`` text. ``meta`` carries the canonical keys (H1/H5):
+          - ``meta["prompt"]`` — the compression instruction that produced the
+            summary (``""`` for a hand-written/manual summary).
+          - ``meta["range"]`` — the ordered ids of the folded child nodes.
+
+        The node sits **off** the ``prev_id`` line (``prev_id=None``); the core
+        adds it straight to the graph, never via the line-append path.
+        """
+        return cls(
+            role="compression",
+            content=summary,
+            node_type="compression",
+            conversation_id=conversation_id,
+            meta={"prompt": prompt, "range": list(range_ids)},
+        )
 
     @classmethod
     def context(cls, source_path: str, conversation_id: str) -> Node:

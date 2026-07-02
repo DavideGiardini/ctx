@@ -64,7 +64,7 @@ Dependencies noted; every prerequisite sits above its dependent.
 
 ### Phase 3a — safe tip compression + spatial navigation
 
-- [ ] **1. Core: compression node type + `build_context` rendering** — in
+- [x] **1. Core: compression node type + `build_context` rendering** — in
       `ctx/models/nodes.py`: a `Node.compression(summary, conversation_id, range_ids,
       prompt="")` factory (`role="compression"`, `node_type="compression"`,
       `content=summary`, meta per the canonical keys); extend `goes_to_model()`

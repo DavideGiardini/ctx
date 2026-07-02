@@ -673,3 +673,38 @@ Git history is the source of truth for *what changed*; this file captures the
   it now faithfully exercises the multi-turn gauge.
 - Pre-existing uncommitted `scripts/ralph/loop.sh` (not mine) left unstaged again.
 - ALL PRD TASKS NOW CHECKED — Sprint 1 (token accounting & context budget) complete.
+
+## 2026-07-03 — Task 1 (Sprint 3): compression node type + build_context rendering
+- Added `Node.compression(summary, conversation_id, range_ids, prompt="")` factory
+  (`ctx/models/nodes.py`): role/node_type both "compression", content=summary,
+  meta={"prompt": prompt, "range": list(range_ids)} (canonical H1 keys; copies
+  range_ids so callers can't alias the stored list). prev_id/compressed_into left None
+  (off-line node; core adds it straight to `_graph` — task 3).
+- Extended `goes_to_model()`: node_type in {"context","compression"} → True (H6).
+- `build_context` (`ctx/core/context.py`) renders a compression node as user-role
+  `<conversation_summary>\n{content}\n</conversation_summary>` (exact wrapper, NO
+  preamble — Q2/Q2b), coalescing with adjacent user material like an import.
+- BEHAVIOR CHANGE to build_context coalescing: a dropped node (system, or any
+  !goes_to_model node) is now a **coalescing boundary** — the PRD acceptance criterion
+  "a system node between user content still splits coalescing". Implemented with a
+  `coalescing` flag reset to False on any dropped node and on assistant turns; user
+  runs merge only while it's True. Previously a skipped node was invisible to merging
+  (two users around a system node merged). Empty user/assistant nodes (goes_to_model
+  True, skipped for empty content) do NOT reset the flag → their merge behavior is
+  unchanged. No existing test relied on merge-across-system, so all 432 pass.
+- Tests: code-blind flow. Stubbed `Node.compression` (NotImplementedError) + updated
+  docstrings → spawned test-spec-author with interface + prose → 12 red / 1 pass
+  (collected cleanly) → implemented to green. New files:
+  `tests/specs/compression_node.md` (C1–C13) + `tests/test_compression_node.py` (13
+  tests: factory fields/meta/order/aliasing, goes_to_model, wrapping, coalescing both
+  directions, assistant & system boundaries, ordering, child-content-doesn't-leak).
+  Added C24 to `tests/specs/context.md` documenting the system-boundary change (the
+  existing build_context oracle).
+- Verification: pure core logic (no UI/runtime surface), so tests + `scripts/check.sh`
+  (432 passed, ruff+mypy clean) are the verification; qa-tester not applicable.
+- Updated AGENTS.md architecture map (nodes.py factory list + goes_to_model set +
+  context.py compression rendering / coalescing-boundary note).
+- GOTCHA for task 2 (`current_view()` folds): the compression factory stores the range
+  as a COPY (`list(range_ids)`); K is meant to be added straight to `_graph`, never via
+  `_append_to_line`. Rendering wraps content only — folded children never contribute
+  their body to K (task 5's draft is where the summary text comes from).

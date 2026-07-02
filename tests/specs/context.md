@@ -149,6 +149,15 @@ Given `[context with meta {"source_path": ""}, user "after"]` → build does not
 contains a `role=="user"` dict with content `"after"`; nothing is marked as imported for the
 empty-source node. (Distinguishes "no source" from `source_path is None`.)
 
+**C24. A dropped node (system) between user-side items is a coalescing boundary.**
+*(added 2026-07-03, Sprint 3 task 1: compression rendering.)* A node that does not
+reach the model (`goes_to_model()` False — e.g. a system breadcrumb) still acts as a
+boundary: user-side material before it does not merge with user-side material after
+it. Given `[user "u1", system "note", user "u2"]` → two separate `role=="user"` dicts,
+"u1" not merged with "u2". (Contrast C10: two *adjacent* user nodes with nothing
+between them still merge.) The compression-summary rendering and its coalescing with
+adjacent user material are contracted in `tests/specs/compression_node.md`.
+
 ## Adjudication notes
 - **A1 (wrapper token):** marker is `context_import`, source path is an attribute. Assert
   substrings, never byte-exact format.
