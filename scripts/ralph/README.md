@@ -23,8 +23,9 @@ Huntley's "Ralph Wiggum loop").
    Each task must fit one fresh session and carry a concrete acceptance criterion.
 3. Run, attended:
    ```
-   scripts/ralph/loop.sh                 # uses scripts/ralph/PRD.md, cap 10
+   scripts/ralph/loop.sh                 # uses scripts/ralph/PRD.md, cap 10, model opus
    scripts/ralph/loop.sh path/to/PRD.md 6
+   scripts/ralph/loop.sh path/to/PRD.md 6 sonnet   # override the model
    ```
 
 ## What each iteration does

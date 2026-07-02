@@ -245,3 +245,100 @@ column, because full-replace `save()` reassigns rowid); the **`"expand"` `node_t
 range stored in **`K.meta`**. This **revises** Amendment #1's "children carry `compressed_into = K`
 [as the mechanism]" and its "schema unchanged bar reliance on creation order." The append-only
 invariant and the per-turn reconstruction rule are preserved and sharpened, not changed.
+
+## Amendment #3 — hardening the reconstruction model (second-opinion review, 2026-07-02)
+
+An adversarial review of Amendment #2's derive-on-demand design against prior art
+**confirmed the model**. The `created_seq` rule is exactly transaction-time ("as-of")
+derivation as implemented by Datomic/XTDB — filter immutable facts by a monotonic
+transaction sequence — whose documented preconditions (a monotonic counter assigned at
+creation; a never-retro-edited event axis) this design already meets. The no-overlap
+partition invariant provably holds at every historical time slice, not just now: an
+overlapping `K'` can only be committed after `K`'s expand (folded children aren't
+selectable; Q7 bars selecting `K` itself), forcing `seq(K) < seq(E) < seq(K')`, so `K` and
+`K'` can never both qualify for one turn `T`. The `range ⊆ L` condition was verified to
+degrade gracefully for every probed edge (turn inside a folded range, rewind into a folded
+range, ranges "straddling" a visible turn — the last is impossible by contiguity). Git was
+reviewed as the opposite pole: it *stores* what every commit saw (the root tree — snapshots,
+never derivation), and its one derive-style mutable overlay, `git replace`, is precisely
+where its own docs catalog hazards. The lesson adopted is not to switch to snapshots but to
+add a cheap verification anchor (#4 below).
+
+Four hardenings and one forward-compat field:
+
+### 1. Sprint 3a writes the 3b-shaped event record from day one
+`commit_compression` stores the **ordered folded child ids in `K.meta`**, and 3a's
+`:expand` **appends the `E` event node** in addition to clearing `compressed_into` (3a's
+own resolution stays pointer-based). Without this, a 3a-expanded `K` either **resurrects**
+under 3b's enumeration (it qualifies for every later turn because no `E` targets it) or —
+if it stored no range — permanently loses the history of turns generated while it was
+active, making the 3b diff view lie about them. With it, the 3b migration reduces to
+"add `created_seq`, backfill by rowid." That backfill is valid because in-memory insertion
+order round-trips through the full-replace `save()` (insertion order → rowid → load order)
+— **a precondition to preserve until 3b ships**. This corrects Amendment #2's allowance
+for 3a to record nothing beyond pointers, and corrects the roadmap-Q9 claim that pre-3b
+compressions are "never reconstructed" (they are, as soon as any 3b event touches an old
+conversation).
+
+### 2. Graph events are serialized against in-flight generation
+The assistant node's `created_seq` is assigned when it is appended (`submit()`), but its
+context is built at the first stream tick, and the event loop stays live in between and
+during. A compression commit or `:expand` landing in that window would make reconstruction
+disagree with what was actually sent — in the one direction the model cannot detect
+(generation applied `K`; `seq(K) > seq(T)` says it didn't). Rule: **commit and expand are
+rejected while a turn is in flight**, and a range may never include the still-streaming
+node (its content is not yet immutable). This is the single-user analogue of Datomic's
+serialized transactor: the monotonic counter buys correctness only if events and turns are
+totally ordered against each other.
+
+### 3. Resolution reads events only; `compressed_into` is never read at runtime
+Amendment #2 kept child pointers as a "fast now-view convenience." That leaves two
+bookkeeping systems answering "is B folded?" — pointers and events — which every mutation
+(commit, expand, re-compress) must update in lockstep forever; one missed path and the
+live view and the diff view silently disagree, with nothing to catch it. The demotion is
+now total: `current_view()` and `context_at_generation()` resolve **purely by event
+enumeration** (a cheap scan over the handful of `K`/`E` nodes), and deep-dive's
+`folded_children(k_id)` reads `K.meta`'s range. The column remains in the schema
+(append-only; harmless) as vestigial/debug data, but **no runtime behavior may depend on
+it**.
+
+### 4. `ctx_hash` — a per-turn verification anchor (tripwire, not backup)
+At context-build time, the exact rendered messages are hashed and stored immutably on the
+assistant node (`meta["ctx_hash"]`, ~32 bytes) — **always on, for everyone**: only the
+real generation moment can produce it, so it cannot be retrofitted, and the runtime uses
+below need it inside users' conversations. Derivation remains the sole truth; the hash
+repairs and drives nothing (it is one-way — the graph is complete, so once a derivation
+bug is fixed the correct view is recomputable; the data is never wrong, only deriving code
+can be). Its jobs are detection:
+- **Dev/CI — the reconstruction test oracle:** after any scripted
+  compress/expand/re-compress/turn sequence, assert
+  `hash(context_at_generation(T)) == T.meta["ctx_hash"]` for every turn. Reconstruction
+  bugs do not crash — they render plausible wrong panes forever; this is the only ground
+  truth to test them against, and it guards every future refactor of the resolution code
+  (S4 branch rules, nesting).
+- **Runtime honesty:** the diff view verifies opportunistically; on mismatch it shows a
+  "reconstruction may be inexact" warning instead of confidently presenting a wrong left
+  pane (cf. git `fsck`: hashes don't repair corruption, they refuse to hide it).
+- **Pre-S5 import drift:** a mismatch with no structural drift signals that an imported
+  file changed since generation — the one genuinely unrecoverable input before S5
+  snapshots — so the UI can mark it instead of silently rendering the new content as
+  "what the model saw."
+
+A full block-id manifest as the reconstruction *driver* was considered and **rejected**:
+O(n²) storage across a conversation and a second, denormalized history that must agree
+with the events — the same dual-truth disease #3 removes.
+
+### 5. `E.meta.anchor` — forward-compat for branch-local expand (S4)
+`:expand` records the active tip at creation: `E.meta = {"target": K.id, "anchor":
+<active_leaf_id>}`. 3b resolution ignores it (3b is linear). Decided now: expand must be
+**branch-local** in S4 — `E` nodes are off-line (anchored only transitively via `K`), so
+by bare enumeration an expand made on one branch would deactivate `K` on *every* branch
+sharing it, which is not desired; the anchor gives S4 the ancestry hook without migrating
+anchor-less events. S4 must also define cleanup for `K.meta` ranges referencing nodes
+removed by a whole-branch hard delete.
+
+Minor notes of record: diff regions are **many-to-many** block sequences (expand +
+re-compress yields `[K]` ⟷ `[B, K', E]`), aligned by **node id**, never by content;
+`goes_to_model()` gains the compression node type; the next `created_seq` derives from the
+max over **all** nodes (folded children, abandoned tails, and event nodes included), never
+from the view.

@@ -7,9 +7,10 @@
 # sentinel is printed, or the iteration cap is hit.
 #
 # Usage:
-#   scripts/ralph/loop.sh [PRD_FILE] [MAX_ITERS]
+#   scripts/ralph/loop.sh [PRD_FILE] [MAX_ITERS] [MODEL]
 #     PRD_FILE   task list to work through   (default: scripts/ralph/PRD.md)
 #     MAX_ITERS  hard cap on iterations       (default: 10)
+#     MODEL      model passed to `claude --model`  (default: opus)
 #
 # This is meant to be run ATTENDED, especially the first times — watch the runs,
 # confirm the gate (scripts/check.sh) actually catches bad changes, and only
@@ -20,6 +21,7 @@ cd "$(dirname "$0")/../.."  # repo root
 
 PRD="${1:-scripts/ralph/PRD.md}"
 MAX_ITERS="${2:-10}"
+MODEL="${3:-opus}"
 PROMPT_FILE="scripts/ralph/PROMPT.md"
 SENTINEL="RALPH_COMPLETE"
 
@@ -45,6 +47,7 @@ unchecked() { grep -cE '^[[:space:]]*- \[ \]' "$PRD" || true; }
 echo "Ralph loop starting on branch '$branch'"
 echo "  PRD: $PRD  ($(unchecked) open task(s))"
 echo "  max iterations: $MAX_ITERS"
+echo "  model: $MODEL"
 echo
 
 # --- Loop --------------------------------------------------------------------
@@ -60,6 +63,7 @@ for ((i = 1; i <= MAX_ITERS; i++)); do
   # Fresh session each time; PROMPT.md tells it to do exactly one task.
   if PRD_FILE="$PRD" claude -p "$(cat "$PROMPT_FILE")" \
        --allowedTools "${ALLOWED_TOOLS[@]}" \
+       --model "$MODEL" \
        2>&1 | tee /tmp/ralph-last-iter.log; then
     :
   else

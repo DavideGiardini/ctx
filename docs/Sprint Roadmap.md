@@ -43,10 +43,13 @@ entirely; multi-project + first-run wizard last.
    of its own: the append-only graph *is* the history — see the note under S3/S4.)
 3. **Compression + spatial nav** is the differentiator; it lands as early as the
    foundation allows.
-4. **Branching/sub-chats** also rides the S2 graph; sub-chats specifically need
-   compression (S3), so it follows. Reversibility (rewind/fork) lives here.
-5. **Import snapshots** are immutable content stored on the graph (S2); re-import forks a
-   branch (S4), then staleness/`gd`/`gD` layer on the existing context-node UI.
+4. **Branching** rides the S2 graph directly (sibling `prev_id` edges + active-line
+   switching); depends on nothing but S2. Reversibility (rewind/fork) lives here.
+5. **Import primitive (files & sub-chats)** — one mechanism, three sources (file, sibling
+   branch, another conversation). A **sub-chat is `branch ∘ import`**, so it lands here,
+   *not* in branching: import is the foundational half. Re-import forks a branch (needs
+   S4), which is why import follows branching. (Re-cut 2026-07-02 — a sub-chat is *import*,
+   not *compression*, so its dependency flipped from S3 to the import primitive.)
 6. **KB expansion + access modes** generalize the knowledge base and gate it — a
    prerequisite shape for any future retrieval.
 7. **Assistants** bundle prompt+model+tools and finally send a system prompt to the LLM.
@@ -244,32 +247,43 @@ green.
 > action, not undo). The spatial *graph-map* idea is spun out to its own late nice-to-have
 > sprint (S10). This **revises ADR-0006 #2**, which had anticipated an op log.
 
-### Sprint 4 — Branching & sub-chats (§5)  *(was S5)*
-**Goal:** Branch from any node (inline tabs at the fork); a sub-chat = a branch later
-re-imported & compressed back into the parent. Indexed/not-indexed as an orthogonal
-archive flag.
+### Sprint 4 — Branching (§5)  *(was S5; sub-chats moved to S5 — see 2026-07-02 grill)*
+**Goal:** Branch from any node (inline tabs at the fork); switch the active line between
+branches. Indexed/not-indexed as an orthogonal per-conversation archive flag.
+**Sub-chat re-import is no longer here:** a sub-chat is `branch ∘ import`, and the import
+primitive lives in S5, so sub-chats land there (see the 2026-07-02 re-cut in the parking
+lot).
 **Approach:** Branches are the sibling `prev_id` edges already in the S2 graph;
 `current_view()` follows `active_leaf_id`. UI renders inline `Branch1/Branch2` tabs at the
 fork and lets the user switch the active line. Rewind/edit/expand all surface here as the
-operations that create or move between branches. Sub-chat re-import reuses the S3
-compression path. Add an `indexed` flag on the conversation row for archive/hide.
-**Depends on:** S2 (edges), S3 (sub-chat compression). **Size:** L. **Done:** branch,
-switch tabs, rewind-edit forks a branch, re-import a branch as a compressed node; archive
-via un-index; qa-tester + `check.sh` green.
+operations that create or move between branches (expand is scoped **branch-local** via
+`E.meta.anchor`, H5). Add an `indexed` flag on the conversation row for archive/hide.
+**Depends on:** S2 (edges). **Size:** L. **Done:** branch, switch tabs, rewind-edit forks
+a branch; archive via un-index; qa-tester + `check.sh` green.
 
-### Sprint 5 — Import snapshots & staleness (§3.3)  *(was S6)*
-**Goal:** File imports become **static snapshots** at import time (today they re-read
-live every stream — `context.py` calls `load_file` per build, ADR-0009). Drift gets a
-`~` marker; `gd` shows the snapshot, `gD` the live file; **re-import forks a branch**
-(the new content is genuinely different, so the conversation should diverge).
-**Approach:** Store snapshot content + a source hash on the context node (the snapshot is
-immutable, consistent with the append-only model — `meta` for the hash; a dedicated
-column/table for the content, decided here). `build_context` reads the snapshot, not the
-live file. A staleness check compares current file hash to the stored one and sets the
-`~` marker. Wire `gd`/`gD` in the detail inspector / message widget.
-**Depends on:** S2 (graph), S4 (re-import forks a branch). **Size:** M. **Done:** edit a
-source file post-import → `~` appears, model still sees the snapshot, `gD` shows live,
-re-import forks a branch with the new content; qa-tester + `check.sh` green.
+### Sprint 5 — Import primitive: files & sub-chats (§3.3, §5)  *(was S6; now owns sub-chats)*
+**Goal:** A **source-agnostic import primitive** — materialize *external* content as an
+immutable **snapshot node** on the current line, in one of two modes: **verbatim** or
+**summarize-with-prompt** (the summarize mode reuses S3's draft-with-prompt engine). Three
+sources, one mechanism: a **file** (default verbatim), a **sibling branch** (= **sub-chat**,
+default summarize, §5), and (future) **another conversation**. File imports stop re-reading
+live every stream (today `context.py` calls `load_file` per build, ADR-0009); drift gets a
+`~` marker; `gd` shows the snapshot, `gD` the live file; **re-import forks a branch** (new
+content is genuinely different, so the conversation diverges — needs S4's branching, which
+is why import follows it).
+**Approach:** Store snapshot content on the node (content-on-`content`; a `meta` source
+reference + hash for files). An import node is a **normal node on the line** — part of the
+ancestor path, always in its descendants' context; it is **not** a compression `K` and
+shares nothing with `compressed_into` / event-enumeration (a sub-chat is *someone else's
+content copied in*, not a fold of your own line). `build_context` reads the snapshot, not
+the live file. A staleness check compares current file hash to the stored one and sets the
+`~` marker. Sub-chat re-import = the same import node with source = a branch's rendered
+`current_view()`, defaulting to summarize; the branch stays live and browsable as its tab.
+**Depends on:** S2 (graph), S3 (draft engine for summarize mode), S4 (branching — sub-chat
+source + re-import-forks-a-branch). **Size:** M–L (grew: now owns sub-chats). **Done:**
+verbatim-import a file → `~` appears on edit, model sees the snapshot, `gD` shows live,
+re-import forks a branch; **summarize-import a sibling branch as a sub-chat node on the
+parent line, the branch stays browsable**; qa-tester + `check.sh` green.
 **Open decision surfaced in the S3 grill (2026-07-01):** whether a **refresh/re-import**
 surfaces inside **S3b's full-screen diff view** as a color-marked "same block, content
 changed" region (with left/right drill-down) — which would require the diff to compare
@@ -420,7 +434,10 @@ a node selects it in the main view.
     with `active_leaf_id=None` gets its `prev_id` chain rewritten on every `init()`.
   - Behavioral QA (qa-tester regression) + the code-blind `/write-tests` contract
     build-out (migration fixture, rewind, append-only-preserved, edge-field round-trip)
-    are **still pending** as separate passes.
+    ~~are **still pending** as separate passes~~ — **done, shipped with the S2 commit**
+    (contract specs C28/C29/C75 + migration fixture in `tests/specs/storage.md` /
+    `conversation.md`; qa-tester regression confirmed flows unchanged). *(Corrected
+    2026-07-02 — the note predated the passes landing.)*
 - **S3 — settled (compression model, ADR-0016 Amendment #1):** any contiguous range is
   compressible (incl. middle); compression is an immutable creation-ordered event; a
   turn's context applies only compressions created before it. Split into **3a** (safe
@@ -430,7 +447,11 @@ a node selects it in the main view.
   Coherence is mitigated (default prompt) + reversible (expand/rewind), not guaranteed.
 - **S4 — open:** whether an abandoned tail after a rewind is a **visible branch** or
   **discarded** (S4 behavior, does not affect the S2 schema).
-- **S3 — settled (grill 2026-07-01, in progress):** logical design of the compression
+- **S4 — flags from the S3 hardening review (2026-07-02):** (a) expand scope must be
+  **branch-local**, using `E.meta.anchor` (H5) — define the exact ancestry rule in S4;
+  (b) whole-branch hard delete must define cleanup for `K.meta` ranges referencing
+  deleted node ids (dangling event-node references).
+- **S3 — settled (grill 2026-07-01):** logical design of the compression
   sprint. Decisions locked so far:
   - **[Q1] Compression node `K` lives off the `prev_id` line.** It has no `prev_id`;
     discoverable only via its children's `compressed_into = K` back-pointers.
@@ -611,6 +632,114 @@ a node selects it in the main view.
     `created_seq` — on-line turns (user/assistant/context/system) plus two off-line event nodes,
     compression `K` (owns its range) and expand `E` (owns its target). Resolution walks `prev_id`
     for the raw sequence, then enumerates the event nodes and applies them by the Q14 rule.*
+  - **S3 — hardening review (second opinion, 2026-07-02).** An adversarial re-check of the
+    3b reconstruction/diff design against prior art (git, Datomic/XTDB, Jujutsu, bitemporal
+    modeling) **confirmed the Q14 model is sound**: it is exactly Datomic-style
+    transaction-time ("as-of") derivation, and the no-overlap partition invariant provably
+    holds at every historical time slice, not just now. Five deltas adopted (full reasoning
+    in **ADR-0016 Amendment #3**):
+    - **[H1] 3a writes 3b-shaped event data from day one** *(amends Q3/Q6)*:
+      `commit_compression` stores the **ordered folded child ids in `K.meta`**; 3a `:expand`
+      **appends the `E` event node** in addition to clearing pointers (3a resolution stays
+      pointer-based). ~3 lines; erases the 3a→3b migration seam — 3b migration reduces to
+      "add `created_seq` + backfill by rowid." Without it, a 3a-expanded `K` either
+      *resurrects* under 3b enumeration (no `E` targets it) or its history is unrecoverable.
+      3a/3b ship back-to-back so interim-data risk was low anyway; adopted because it is
+      cheaper than the migration logic it replaces. *Corrects Q9's justification:* pre-3b
+      compressions **are** reconstructed (as soon as any 3b event touches an old
+      conversation); the rowid backfill is valid because in-memory insertion order
+      round-trips through the full-replace save — a precondition to preserve until 3b ships.
+    - **[H2] Graph events are serialized against in-flight generation.** Compression commit
+      and `:expand` are **rejected while a turn is streaming**, and a range may never contain
+      the still-streaming node (its content isn't immutable yet). Window: the assistant
+      node's `created_seq` is assigned at `submit()` but its context is built at the first
+      stream tick — an event landing between the two makes reconstruction disagree with what
+      was actually sent, in the one direction the model cannot detect.
+    - **[H3] Event-only resolution** *(amends Q14's fast path)*: `current_view()` and
+      `context_at_generation()` resolve **purely by event enumeration**; `compressed_into`
+      is **never read at runtime** (deep-dive `folded_children(k_id)` reads `K.meta`'s
+      range). Kills the two-sources-of-truth drift risk of keeping pointers as a live fast
+      path; the column stays in the schema as vestigial/debug data only.
+    - **[H4] `ctx_hash` verification anchor (tripwire, not backup).** At context-build time
+      the exact rendered messages are hashed into the assistant node's `meta["ctx_hash"]`
+      (~32 bytes, **always on, for everyone** — only the real generation moment can produce
+      it). Derivation stays the sole truth; the hash repairs/drives nothing (one-way). Jobs:
+      *(dev/CI)* the reconstruction test oracle —
+      `hash(context_at_generation(T)) == T.meta["ctx_hash"]` for every turn after any
+      scripted compress/expand/re-compress sequence (reconstruction bugs don't crash, they
+      render plausible wrong panes; this is the only ground truth); *(runtime)* the diff
+      view verifies opportunistically and shows a "reconstruction may be inexact" warning on
+      mismatch instead of lying confidently; *(pre-S5)* mismatch with no structural drift =
+      imported-file drift. A full block-id manifest as *driver* was considered and
+      **rejected** (O(n²) denormalized second history — the same dual-truth disease H3
+      removes).
+    - **[H5] `E.meta.anchor`.** `:expand` records the active tip alongside the target:
+      `E.meta = {"target": K.id, "anchor": <active_leaf_id>}`. Ignored by 3b (linear); S4
+      uses it to scope expands **branch-locally** — decided now that global-by-enumeration
+      expand (an `E` deactivating `K` on every branch sharing it) is **not** desired.
+    - **[H6] Implementation notes:** diff regions are **many-to-many** block sequences
+      (expand + re-compress yields e.g. `[K]` ⟷ `[B, K′, E]`), not only "run ⟷ single K" —
+      align blocks by **node id**, never by content; `goes_to_model()` gains the compression
+      node type; next `created_seq` = max over **all** nodes (incl. folded children,
+      abandoned tails, event nodes) + 1 — a total order per conversation, never derived from
+      the view.
+- **S4/S5 — grill (2026-07-02): branch vs import, and the sub-chat re-cut.** Logical
+  design of branching and the sub-chat mechanism. Decisions locked:
+  - **[B1] A branch is a within-conversation sibling line, not a separate conversation.**
+    All nodes share `conversation_id`; the conversation has one `active_leaf_id` selecting
+    the active branch; switching branches moves the tip. Confirms what S2 already built.
+    The §5 "chat" language ("archive a chat") is read as operating on the **whole
+    conversation**, and cross-*conversation* import is a **separate, later** capability.
+  - **[B2] Branch and import are two distinct primitives; import never grafts a foreign
+    line.** *Branch* = diverge *your own* line (sibling `prev_id`, same `conversation_id`,
+    live shared ancestry, tabs). *Import* = materialize *external* content as a **snapshot
+    node on your current line** (content-on-node; the source keeps its own identity). This
+    is *why* importing another conversation later poses **no logical problem** for the
+    branch definition — foreign content arrives as a snapshot, never as a branch sibling
+    (which would create two owners of the same rows and break per-conversation
+    `active_leaf_id`).
+  - **[B3] A sub-chat = `branch ∘ import`.** A sub-chat is a branch that is later
+    **re-imported** into the parent line as an import node holding a (usually AI-drafted)
+    summary. The branch stays live and browsable **as its tab** (the full thing); the
+    import node is the summary snapshot (the outcome). Re-import is the **import**
+    primitive — **not** compression: it reuses S3's draft-with-prompt *engine* but emits an
+    **import node**, sharing nothing with `K` / `compressed_into` / event-enumeration.
+    Rejected calling it a compression `K`: a `K` means "contiguous children **on my line**
+    folded in," but a sibling branch is off-line — a `K` would lie about `compressed_into`
+    and needlessly drag in `created_seq`/event-enumeration/`:expand` reconstruction. An
+    import node is a normal on-line node (always in its descendants' context, no per-turn
+    reconstruction).
+  - **[B4] Import is source-agnostic with two modes; only the default differs by source.**
+    Modes = `{verbatim, summarize-with-prompt}` (summarize = S3's three draft modes:
+    default / ad-hoc / manual). Sources = file (default **verbatim**), sibling branch (=
+    sub-chat, default **summarize**, §5's "and compressed"), and future another
+    conversation. This parity was the user's push-back that corrected an earlier
+    "sub-chats have no verbatim mode" proposal (which wrongly conflated *default* with
+    *capability*). Import-with-prompt (Future Sprints) is the same primitive; it collapses
+    into S5.
+  - **[B5] The sprint re-cut (the reason S4/S5 changed).** The old order put branching (S4)
+    before import (S5) on the premise "sub-chats need *compression* (S3)." That premise
+    **dissolved** once a sub-chat became *import*, not compression — its dependency flipped
+    from S3 to the **import primitive**. But import can't simply go first: its "re-import
+    forks a branch" needs branching. Resolution = a **boundary re-cut, not a swap**:
+    **S4 = branching only** (fork/tabs/switch/rewind-edit; depends solely on S2);
+    **S5 = the unified source-agnostic import primitive** (files + sub-chats +
+    conversation-ready), built on finished branching so sub-chat re-import and
+    re-import-forks-a-branch both just work. Builds the import primitive **once** (no
+    half-import in S4 that S5 retrofits — the anti-pattern S2's rationale warns against).
+  - **[B6] No new storage needed for sub-chat summaries in S5's core.** A summarized
+    sub-chat is just summary text in `Node.content` + a `meta` source-branch reference —
+    the existing `Node` carries both. S5's genuinely new work is **file** snapshotting:
+    raw content + a source **hash** for staleness (`~`) + `gd`/`gD`. Staleness-vs-the-
+    source-branch (a sub-chat's branch grew after import) is deferrable polish.
+  - **Indexing** stays in **S4** as conversation-management (orthogonal per-conversation
+    flag); a coin-flip vs S5.
+  - **Still open (carried into the S4 grill, unchanged):** (a) abandoned-tail after rewind
+    = visible branch or discarded; (b) exact **branch-local expand** ancestry rule via
+    `E.meta.anchor` (H5); (c) whole-branch hard-delete cleanup for `K.meta` ranges
+    referencing deleted node ids. Plus new: branch **creation gestures**, **tab UI /
+    switching keybindings**, branch **naming/ordering**, and how **edit-a-past-message**
+    forks. To grill next.
 - _(Add per-sprint refinement notes below as we go through each one.)_
 
 ---

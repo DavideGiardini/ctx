@@ -17,6 +17,27 @@
 - **current_view()** — the projection of the active line into the flat
   `list[Node]` the UI and `build_context` consume.
 
+## Branching & sub-chats (Sprint 4)
+
+- **Branch** — a sibling `prev_id` line *within one conversation* (all nodes
+  share `conversation_id`; the conversation has one `active_leaf_id` that
+  selects the active branch). A branch is **not** a separate conversation.
+  (Supersedes the terse entry above.)
+- **Import node** — a node that materializes **external** content as a
+  self-contained snapshot **on the current line** (content-on-`content`, source
+  reference in `meta`). Distinct from a **branch**: a branch is *your own* line
+  diverging; an import is *someone else's* content copied in. One concept, three
+  sources — a **file**, a **sibling branch** (sub-chat), or (future) **another
+  conversation**. Never a graft of the source's live nodes.
+- **Sub-chat** — a branch that is later **re-imported** into the parent line as
+  an import node holding a (usually AI-drafted) *summary* of that branch. The
+  branch stays live and browsable (as its tab); the import node is the summary
+  snapshot. Re-import is the **import** primitive, **not** compression: it
+  reuses S3's draft-with-prompt *engine* but emits an import node, sharing
+  nothing with `K` / `compressed_into` / event-enumeration.
+- **Indexed** — an orthogonal per-*conversation* flag: an indexed conversation
+  is searchable/importable by other chats; un-indexing archives it (private).
+
 ## Compression (Sprint 3)
 
 - **Compression node (`K`)** — an immutable node holding an (AI-drafted,
