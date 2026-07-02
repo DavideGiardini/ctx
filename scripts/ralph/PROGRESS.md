@@ -708,3 +708,34 @@ Git history is the source of truth for *what changed*; this file captures the
   as a COPY (`list(range_ids)`); K is meant to be added straight to `_graph`, never via
   `_append_to_line`. Rendering wraps content only — folded children never contribute
   their body to K (task 5's draft is where the summary text comes from).
+
+## 2026-07-03 — Task 2 (Sprint 3): current_view() resolves compression folds
+- `ctx/core/conversation.py` `current_view()`: after the existing `prev_id` walk (root-
+  first view), a second pass collapses each **maximal contiguous run** of view nodes
+  sharing the same non-None `compressed_into = K` into the single `K` node from `_graph`
+  (Q1 pointer-based 3a resolution). Loop: at each position, if the node's
+  `compressed_into` is set AND that K exists in `_graph`, append K once and skip the whole
+  run of same-K children; else pass the node through. A `compressed_into` pointing at a
+  missing id → treated as unfolded (defensive, mirrors the walk's missing-id tolerance).
+  K appears despite `prev_id=None`; `_append_to_line` still chains from the real
+  `_active_leaf_id`, so append-after-folded-tip yields `[..., K, new]`.
+- Tests: code-blind flow. Updated `current_view()` docstring (interface) → spawned
+  test-spec-author with interface + prose → 7 red / 3 pass (collected cleanly) →
+  implemented to green. New: `tests/specs/conversation.md` C81–C90 + 10 tests
+  `tests/test_conversation.py::test_c81..c90` (no-fold identity, tip fold, append-after-
+  fold, middle fold, two independent Ks, single-node fold, dangling id, empty, save/reload
+  round-trip, root fold). Helpers `_view_core`/`_chain` added.
+- DELIBERATE TEST FIX (Ralph rule): the authored C85 was self-inconsistent — its setup
+  folded BOTH e and f into K2 (a contiguous run → one K2, no surviving f) yet asserted
+  `[a, K1, d, K2, f]` expecting f to survive. My impl is correct (both folded → single
+  K2). Fixed the test to match its clear intent: only e→K2, f left unfolded as the
+  surviving tail → `[a, K1, d, K2, f]`. Updated C85 spec text in lockstep. Also added
+  `strict=False` to the `_chain` zip (ruff B905).
+- Verification: pure core projection logic, no new UI/runtime surface (K rendering in the
+  message list is task 8), so tests + `scripts/check.sh` (442 passed, was 432; +10;
+  ruff+mypy clean) are the verification; qa-tester not applicable this iteration.
+- GOTCHA for task 3 (`commit_compression`): folding is now purely pointer-based in
+  current_view — commit must set `compressed_into=K.id` on each slice node and add K
+  straight to `_graph` (never `_append_to_line`); the view then resolves automatically.
+  Task 15 later swaps the resolution mechanism (event-enumeration) behind this same
+  `current_view()` signature — don't bake pointer-following assumptions into callers.

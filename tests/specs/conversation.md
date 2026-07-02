@@ -626,6 +626,56 @@ stored nodes (a dangling tip) → after `resume_conversation(cid)` into a fresh 
 == `[n1.id, n2.id, n3.id]` — the projection falls back to the last stored node as the tip and yields the
 full stored line, NOT an empty view.
 
+### current_view() compression folding (ADR-0016 Q1)
+
+**C81. No compression → identical to a plain prev_id walk.** Given a linear chain
+a→b→c on the active line, no node has `compressed_into` set, tip = c → `current_view()`
+returns ids `[a, b, c]` in order, all `node_type` `"message"`. (Hard backward-compat:
+folding must be a no-op when nothing is compressed.)
+
+**C82. Folded tip → view ends with K.** Given chain a→b→c, tip = c,
+`c.compressed_into = K.id`, K (`node_type "compression"`, `prev_id None`) in the graph →
+`current_view()` ids `[a, b, K]`, node_types `["message","message","compression"]`; the
+view ends with K.
+
+**C83. Append after a folded tip → [..., K, new].** Given chain a→b→c with
+`c.compressed_into=K.id` (K in graph); a new message node `new` chained from the real
+leaf c (`new.prev_id=c.id`) and made the tip → `current_view()` ids `[a, b, K, new]`; the
+freshly appended real node follows K; K's own `prev_id` stays None.
+
+**C84. Middle fold in place.** Given chain a→b→c→d→e, tip = e, b,c,d each
+`compressed_into = K.id` (K in graph) → `current_view()` ids `[a, K, e]`, node_types
+`["message","compression","message"]`; folded children absent, order preserved.
+
+**C85. Two independent compressions → two K nodes.** Given chain a→b→c→d→e→f, tip = f;
+b,c → K1.id; e → K2.id; d and f unfolded; K1,K2 in graph → `current_view()` ids
+`[a, K1, d, K2, f]`; two distinct compression nodes appear, with an unfolded tail f
+surviving after K2.
+
+**C86. Single-node fold still collapses to K.** Given chain a→b→c, tip = c, only b has
+`compressed_into = K.id` (run length 1), K in graph → `current_view()` ids `[a, K, c]`.
+
+**C87. Dangling compressed_into → treated as unfolded.** Given chain a→b→c, tip = c,
+`b.compressed_into` = an id NOT present in the graph → `current_view()` ids `[a, b, c]`,
+all `node_type "message"`; b stays as itself (defensive, mirrors the missing-id walk
+tolerance).
+
+**C88. Empty conversation → [].** Given an empty graph and `active_leaf_id None` →
+`current_view() == []`.
+
+**C89. Save → reload round-trip preserves folding.** Given chain a→b→c→d→e plus
+compression node K (all persisted via `repo.save` with `active_leaf_id=e`),
+b,c,d.compressed_into=K.id; core resumes the conversation → `current_view()` ids
+`[a, K, e]`; folding is derived from persisted graph state.
+
+**C90. Root fold → view starts with K.** Given chain a→b→c, tip = c, a and b have
+`compressed_into = K.id` (K in graph) → `current_view()` ids `[K, c]`, node_types
+`["compression","message"]`; K can appear first despite `prev_id None`.
+
+_Intent ambiguities flagged by the code-blind author (assumed past):_ non-contiguous
+runs sharing the same K each yield their own K occurrence (no de-dup); K takes the run's
+slot; a K accidentally on-line (prev_id ≠ None) is a precondition violation, untested.
+
 ## Adjudication notes (ADR-0016 graph)
 - **Node identity in `current_view()`:** tests compare projected nodes by `.id` (+ role/content), so they
   hold whether the projection returns the same `Node` objects or equal copies.

@@ -78,7 +78,7 @@ Dependencies noted; every prerequisite sits above its dependent.
       wraps + coalesces; a system node between user content still splits coalescing.
       `scripts/check.sh` green.
 
-- [ ] **2. Core: `current_view()` resolves compression folds** _(deps: 1)_ — in
+- [x] **2. Core: `current_view()` resolves compression folds** _(deps: 1)_ — in
       `ctx/core/conversation.py:119-138`, after the `prev_id` walk, replace each
       **maximal contiguous run** of view nodes sharing the same non-None
       `compressed_into = K` with the `K` node from `_graph`, in place (Q1 —

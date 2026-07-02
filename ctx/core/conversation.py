@@ -124,7 +124,19 @@ class ConversationCore:
         walk defensively stops on an id missing from the graph or already seen,
         so a malformed chain can never hang the UI. Empty conversation → ``[]``;
         after a ``rewind`` the view is correspondingly shorter (the dropped tail
-        stays in ``_graph``). Compression folding (S3) resolves here later.
+        stays in ``_graph``).
+
+        Compression folding (ADR-0016, Q1): after the walk, each **maximal
+        contiguous run** of view nodes sharing the same non-``None``
+        ``compressed_into = K`` is replaced *in place* by the compression node
+        ``K`` from the graph. The folded children leave the view and ``K``
+        appears despite its ``prev_id=None`` (it lives off the line). Two
+        independent compressions yield two ``K`` nodes; a run whose
+        ``compressed_into`` points at a node missing from the graph is treated as
+        unfolded (defensive, like the walk). The tip may itself be folded — the
+        view then ends with ``K`` — but ``_append_to_line`` still chains new
+        nodes from the real ``_active_leaf_id``, so appending after a folded tip
+        yields ``[…, K, new]``.
         """
         view: list[Node] = []
         seen: set[str] = set()
@@ -135,7 +147,20 @@ class ConversationCore:
             view.append(node)
             cur = node.prev_id
         view.reverse()
-        return view
+
+        resolved: list[Node] = []
+        i = 0
+        while i < len(view):
+            k_id = view[i].compressed_into
+            if k_id is not None and k_id in self._graph:
+                # Collapse the maximal contiguous run folded into the same K.
+                resolved.append(self._graph[k_id])
+                while i < len(view) and view[i].compressed_into == k_id:
+                    i += 1
+            else:
+                resolved.append(view[i])
+                i += 1
+        return resolved
 
     @property
     def nodes(self) -> list[Node]:
