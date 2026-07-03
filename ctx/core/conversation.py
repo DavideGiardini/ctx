@@ -161,42 +161,80 @@ class ConversationCore:
         line.reverse()
         return line
 
+    def _expanded_k_ids(self) -> set[str]:
+        """Ids of compressions deactivated by an expand event ``E`` (A#2 now-rule).
+
+        A compression ``K`` is inactive as soon as any ``E`` node targets it
+        (``E.meta["target"] == K.id``); ``expand_compression`` appends that ``E``.
+        The single event read behind both the now-view fold and the ``expand``
+        liveness guard — ``compressed_into`` is never consulted (ADR-0016 A#3 §3).
+        """
+        return {
+            target
+            for n in self._graph.values()
+            if n.node_type == "expand"
+            and (target := n.meta.get("target")) is not None
+        }
+
+    def _active_folds(self, line_ids: set[str]) -> dict[str, Node]:
+        """Map each folded child id on the current line to its active ``K``.
+
+        Event-enumeration resolution (ADR-0016 A#2/H3 now-rule): a compression
+        ``K`` applies iff **no ``E`` targets it** and its whole stored range
+        (``K.meta["range"]``) lies on the line (``⊆ line_ids``). Discovery scans
+        the ``K``/``E`` event nodes in the graph; child ``compressed_into``
+        pointers are never read, so a stale pointer with no matching applying
+        ``K`` folds nothing. Active compressions never overlap (A#3), so each
+        folded child maps to exactly one ``K``.
+        """
+        expanded = self._expanded_k_ids()
+        folds: dict[str, Node] = {}
+        for k in self._graph.values():
+            if k.node_type != "compression" or k.id in expanded:
+                continue
+            range_ids = k.meta.get("range", [])
+            if range_ids and all(child_id in line_ids for child_id in range_ids):
+                for child_id in range_ids:
+                    folds[child_id] = k
+        return folds
+
     def current_view(self) -> list[Node]:
         """Project the active line as the linear ``list[Node]`` the UI consumes.
 
         Walks ``prev_id`` from the active tip back to the root and reverses, so
-        the result is root-first. O(active-line length) and deterministic; the
-        walk defensively stops on an id missing from the graph or already seen,
-        so a malformed chain can never hang the UI. Empty conversation → ``[]``;
-        after a ``rewind`` the view is correspondingly shorter (the dropped tail
-        stays in ``_graph``).
+        the result is root-first. Deterministic; the walk defensively stops on an
+        id missing from the graph or already seen, so a malformed chain can never
+        hang the UI. Empty conversation → ``[]``; after a ``rewind`` the view is
+        correspondingly shorter (the dropped tail stays in ``_graph``).
 
-        Compression folding (ADR-0016, Q1): after the walk, each **maximal
-        contiguous run** of view nodes sharing the same non-``None``
-        ``compressed_into = K`` is replaced *in place* by the compression node
-        ``K`` from the graph. The folded children leave the view and ``K``
-        appears despite its ``prev_id=None`` (it lives off the line). Two
-        independent compressions yield two ``K`` nodes; a run whose
-        ``compressed_into`` points at a node missing from the graph is treated as
-        unfolded (defensive, like the walk). The tip may itself be folded — the
-        view then ends with ``K`` — but ``_append_to_line`` still chains new
-        nodes from the real ``_active_leaf_id``, so appending after a folded tip
-        yields ``[…, K, new]``.
+        Compression folding (ADR-0016 A#2/H3 now-rule): after the walk, each
+        **maximal contiguous run** of the applying compressions' children is
+        replaced *in place* by the compression node ``K``. Which ``K`` applies is
+        resolved by **event enumeration** (``_active_folds``) — a ``K`` folds iff
+        no ``E`` targets it and its stored range lies on the line — **never** by
+        following child ``compressed_into`` pointers (ADR-0016 A#3 §3). The folded
+        children leave the view and ``K`` appears despite its ``prev_id=None`` (it
+        lives off the line). Two independent compressions yield two ``K`` nodes;
+        after an ``expand`` the ``E`` deactivates ``K`` so its children reappear.
+        The tip may itself be folded — the view then ends with ``K`` — but
+        ``_append_to_line`` still chains new nodes from the real
+        ``_active_leaf_id``, so appending after a folded tip yields ``[…, K, new]``.
         """
         view = self._active_line()
+        folds = self._active_folds({n.id for n in view})
 
         resolved: list[Node] = []
         i = 0
         while i < len(view):
-            k_id = view[i].compressed_into
-            if k_id is not None and k_id in self._graph:
-                # Collapse the maximal contiguous run folded into the same K.
-                resolved.append(self._graph[k_id])
-                while i < len(view) and view[i].compressed_into == k_id:
-                    i += 1
-            else:
+            k = folds.get(view[i].id)
+            if k is None:
                 resolved.append(view[i])
                 i += 1
+            else:
+                # Collapse the maximal contiguous run folded into the same K.
+                resolved.append(k)
+                while i < len(view) and folds.get(view[i].id) is k:
+                    i += 1
         return resolved
 
     @property
@@ -385,11 +423,14 @@ class ConversationCore:
         contains off-line ``K``/``E`` nodes, and rewinding to a ``K`` (``prev_id
         =None``) would collapse the view to ``[K]`` and land it on the line on the
         next ``submit`` (Q1). Folded children are on the raw line but rejected too
-        for now (S4 revisits branching onto a folded turn).
+        for now (S4 revisits branching onto a folded turn) — a child is "folded"
+        iff event enumeration (``_active_folds``) currently folds it, not by any
+        ``compressed_into`` pointer (ADR-0016 A#3 §3).
         """
+        line = self._active_line()
+        folds = self._active_folds({n.id for n in line})
         if not any(
-            node.id == target_id and node.compressed_into is None
-            for node in self._active_line()
+            node.id == target_id and node.id not in folds for node in line
         ):
             raise ValueError(f"rewind target not on active line: {target_id}")
         self._active_leaf_id = target_id
@@ -468,9 +509,10 @@ class ConversationCore:
         """Expand an active compression ``K`` back to its folded children.
 
         The non-destructive inverse of ``commit_compression``. Validates that
-        ``k_id`` names a compression node that is currently **active** — some node
-        still carries ``compressed_into == k_id`` — and that no turn is streaming
-        (H2); raises ``ValueError`` otherwise.
+        ``k_id`` names a compression node that is currently **active** — no
+        ``E`` event already targets it (A#2 now-rule, not a ``compressed_into``
+        read) — and that no turn is streaming (H2); raises ``ValueError``
+        otherwise.
 
         The mutation records the 3b-shaped event even though 3a's own resolution
         stays pointer-based (ADR-0016 A#3 §1): an ``E`` expand event node
@@ -486,9 +528,9 @@ class ConversationCore:
         k = self._graph.get(k_id)
         if k is None or k.node_type != "compression":
             raise ValueError(f"not a compression node: {k_id}")
-        # Active iff some node still folds into it; an already-expanded K has no
-        # child pointing at it (3a resolution is pointer-based).
-        if not any(n.compressed_into == k_id for n in self._graph.values()):
+        # Active iff no E already targets it (event enumeration, A#3 §3) — an
+        # already-expanded K has an E and re-expanding it is rejected.
+        if k_id in self._expanded_k_ids():
             raise ValueError(f"compression is not active: {k_id}")
         e = Node.expand(k_id, self._active_leaf_id, self.conversation_id)
         self._add_to_graph(e)

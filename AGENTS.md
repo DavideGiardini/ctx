@@ -44,8 +44,11 @@ reach end users (ADR 0012). See `docs/decisions/` for *why* it's shaped this way
   `nodes`); `persist()` saves the *full* graph (`_all_nodes()`) + tip so a rewind's
   tail survives (append-only). `rewind(target_id)` moves the tip back to a node on
   the active line (non-destructive; core-only proof op). The compression lifecycle
-  (ADR-0016, S3) is core-only too: `current_view()` folds each maximal run sharing a
-  `compressed_into = K` into that `K`; `commit_compression(start, end, summary, prompt)`
+  (ADR-0016, S3) is core-only too: `current_view()` folds each maximal run of an
+  applying `K`'s children into that `K` by **event enumeration** (`_active_folds`
+  — a `K` applies iff no `E` targets it and `K.meta["range"]` ⊆ the line; child
+  `compressed_into` pointers are never read at runtime, A#3 §3, task 15);
+  `commit_compression(start, end, summary, prompt)`
   builds `K` (validated by `_validate_compress_range` — no streaming, contiguous view
   slice, flat, 3a tip guard) and sets the children's `compressed_into`;
   `expand_compression(k_id)` is its non-destructive inverse — appends an off-line

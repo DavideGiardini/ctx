@@ -1460,7 +1460,12 @@ def test_c82_folded_tip_ends_with_k(repo, test_provider, workspace, make_node):
     b = make_node(role="assistant", content="first answer")
     c = make_node(content="tail that gets folded")
     _chain(a, b, c)
-    k = make_node(role="compression", content="summary of tail", node_type="compression")
+    k = make_node(
+        role="compression",
+        content="summary of tail",
+        node_type="compression",
+        meta={"prompt": "", "range": [c.id]},
+    )
     c.compressed_into = k.id
 
     core = _view_core(repo, test_provider, workspace)
@@ -1478,7 +1483,12 @@ def test_c83_append_after_folded_tip(repo, test_provider, workspace, make_node):
     b = make_node(role="assistant", content="reply")
     c = make_node(content="folded tip node")
     _chain(a, b, c)
-    k = make_node(role="compression", content="folded summary", node_type="compression")
+    k = make_node(
+        role="compression",
+        content="folded summary",
+        node_type="compression",
+        meta={"prompt": "", "range": [c.id]},
+    )
     c.compressed_into = k.id
 
     # New node is chained from the REAL leaf c (not K) and becomes the tip.
@@ -1504,7 +1514,12 @@ def test_c84_middle_fold_in_place(repo, test_provider, workspace, make_node):
     d = make_node(role="assistant", content="folded 3")
     e = make_node(content="anchor after run")
     _chain(a, b, c, d, e)
-    k = make_node(role="compression", content="middle summary", node_type="compression")
+    k = make_node(
+        role="compression",
+        content="middle summary",
+        node_type="compression",
+        meta={"prompt": "", "range": [b.id, c.id, d.id]},
+    )
     for child in (b, c, d):
         child.compressed_into = k.id
 
@@ -1526,8 +1541,18 @@ def test_c85_two_independent_compressions(repo, test_provider, workspace, make_n
     e = make_node(content="run2 folded")
     f = make_node(role="assistant", content="surviving tail")
     _chain(a, b, c, d, e, f)
-    k1 = make_node(role="compression", content="summary one", node_type="compression")
-    k2 = make_node(role="compression", content="summary two", node_type="compression")
+    k1 = make_node(
+        role="compression",
+        content="summary one",
+        node_type="compression",
+        meta={"prompt": "", "range": [b.id, c.id]},
+    )
+    k2 = make_node(
+        role="compression",
+        content="summary two",
+        node_type="compression",
+        meta={"prompt": "", "range": [e.id]},
+    )
     b.compressed_into = k1.id
     c.compressed_into = k1.id
     e.compressed_into = k2.id  # f left unfolded → surviving tail after K2
@@ -1549,7 +1574,12 @@ def test_c86_single_node_fold(repo, test_provider, workspace, make_node):
     b = make_node(role="assistant", content="the only folded node")
     c = make_node(content="after")
     _chain(a, b, c)
-    k = make_node(role="compression", content="single summary", node_type="compression")
+    k = make_node(
+        role="compression",
+        content="single summary",
+        node_type="compression",
+        meta={"prompt": "", "range": [b.id]},
+    )
     b.compressed_into = k.id
 
     core = _view_core(repo, test_provider, workspace)
@@ -1603,6 +1633,7 @@ def test_c89_save_reload_roundtrip_fold(repo, test_provider, workspace, make_nod
         content="persisted summary",
         node_type="compression",
         conversation_id=cid,
+        meta={"prompt": "", "range": [b.id, c.id, d.id]},
     )
     for child in (b, c, d):
         child.compressed_into = k.id
@@ -1623,7 +1654,12 @@ def test_c90_root_fold_view_starts_with_k(repo, test_provider, workspace, make_n
     b = make_node(role="assistant", content="folded root 2")
     c = make_node(content="surviving tail")
     _chain(a, b, c)
-    k = make_node(role="compression", content="head summary", node_type="compression")
+    k = make_node(
+        role="compression",
+        content="head summary",
+        node_type="compression",
+        meta={"prompt": "", "range": [a.id, b.id]},
+    )
     a.compressed_into = k.id
     b.compressed_into = k.id
 
@@ -1635,6 +1671,86 @@ def test_c90_root_fold_view_starts_with_k(repo, test_provider, workspace, make_n
     assert [n.id for n in view] == [k.id, c.id]
     assert [n.node_type for n in view] == ["compression", "message"]
     assert view[0].prev_id is None
+
+
+# ---------------------------------------------------------------------------
+# Task 15: event-enumeration resolution (ADR-0016 A#2/H3 now-rule). Resolution
+# reads K/E event nodes + K.meta["range"], never child compressed_into pointers
+# (A#3 §3). C97/C98 discriminate the two mechanisms; C99 guards re-compression.
+# ---------------------------------------------------------------------------
+
+
+# C97 — a child carries compressed_into pointing at a REAL K in the graph, but
+# that K's range does not cover the child (range ⊄ line) → the child is NOT
+# folded. Resolution ignores the stale pointer; only the event range decides.
+def test_c97_stale_compressed_into_with_real_k_not_folded(
+    repo, test_provider, workspace, make_node
+):
+    a = make_node(content="alpha")
+    b = make_node(role="assistant", content="carries a stale pointer")
+    c = make_node(content="gamma")
+    _chain(a, b, c)
+    k = make_node(
+        role="compression",
+        content="folds something off this line",
+        node_type="compression",
+        meta={"prompt": "", "range": ["orphan-id-not-on-line"]},
+    )
+    b.compressed_into = k.id  # stale/wrong pointer — enumeration must ignore it
+
+    core = _view_core(repo, test_provider, workspace)
+    core._graph = {n.id: n for n in (a, b, c, k)}
+    core._active_leaf_id = c.id
+
+    view = core.current_view()
+    assert [n.id for n in view] == [a.id, b.id, c.id]
+    assert [n.node_type for n in view] == ["message", "message", "message"]
+
+
+# C98 — folding is driven by K.meta["range"] alone: a child whose id is in the
+# range folds even with compressed_into never set (the pointer is vestigial).
+def test_c98_range_only_folds_without_pointer(
+    repo, test_provider, workspace, make_node
+):
+    a = make_node(content="before")
+    b = make_node(role="assistant", content="folded by range only")
+    c = make_node(content="after")
+    _chain(a, b, c)
+    k = make_node(
+        role="compression",
+        content="range summary",
+        node_type="compression",
+        meta={"prompt": "", "range": [b.id]},
+    )
+    # NB: b.compressed_into stays None — no pointer, only the event range.
+
+    core = _view_core(repo, test_provider, workspace)
+    core._graph = {n.id: n for n in (a, b, c, k)}
+    core._active_leaf_id = c.id
+
+    view = core.current_view()
+    assert [n.id for n in view] == [a.id, k.id, c.id]
+    assert [n.node_type for n in view] == ["message", "compression", "message"]
+
+
+# C99 — expand + re-compress an overlapping range: K′ folds, the expanded K
+# never reappears (its E deactivates it) and stays in the graph (never deleted).
+def test_c99_expand_then_recompress_overlap(repo, test_provider, workspace):
+    core = ConversationCore(repo, test_provider(["hi"]), workspace)
+    core.setup()
+    core.submit("First question")
+    u2, a2 = core.submit("Second question")
+    view = core.current_view()
+    k = core.commit_compression(view[0].id, view[-1].id, "whole summary")
+    core.expand_compression(k.id)
+    # Re-compress the tail [u2, a2] — an overlap with K's now-inactive range.
+    k2 = core.commit_compression(u2.id, a2.id, "tail summary")
+
+    view = core.current_view()
+    view_ids = [n.id for n in view]
+    assert k2.id in view_ids
+    assert k.id not in view_ids  # the expanded K must not resurrect
+    assert k.id in core._graph  # ...but it is preserved (append-only)
 
 
 # ---------------------------------------------------------------------------
@@ -1741,7 +1857,7 @@ def test_c94_rewind_to_compression_node_raises(repo, test_provider, workspace):
 
 
 # C95 — rewind to a folded child raises (folded children are on the raw line but
-# rejected for now; guards the compressed_into clause).
+# rejected for now; guards the enumeration fold clause in rewind).
 def test_c95_rewind_to_folded_child_raises(repo, test_provider, workspace):
     core = ConversationCore(repo, test_provider(["hi"]), workspace)
     core.setup()

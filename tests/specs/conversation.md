@@ -626,51 +626,77 @@ stored nodes (a dangling tip) → after `resume_conversation(cid)` into a fresh 
 == `[n1.id, n2.id, n3.id]` — the projection falls back to the last stored node as the tip and yields the
 full stored line, NOT an empty view.
 
-### current_view() compression folding (ADR-0016 Q1)
+### current_view() compression folding (ADR-0016 Q1 / A#2 / H3)
+
+**Mechanism (task 15, revised):** folding is resolved by **event enumeration**, not by
+following child `compressed_into` pointers. A compression `K` applies iff **no `E` node
+targets it** (`E.meta["target"] == K.id`) **and** its whole stored range
+(`K.meta["range"]`) lies on the current line. Every C82–C90 fixture therefore carries
+`K.meta["range"]` = the ordered folded child ids (the source of truth); the
+`compressed_into` pointers they also set are vestigial and never read at runtime (A#3 §3).
+This is a **deliberate, recorded** change from the 3a pointer-run resolution — the
+scenarios and expected views are unchanged (same observable behavior), only the fixtures'
+range meta and the underlying mechanism moved.
 
 **C81. No compression → identical to a plain prev_id walk.** Given a linear chain
-a→b→c on the active line, no node has `compressed_into` set, tip = c → `current_view()`
+a→b→c on the active line, no compression node in the graph, tip = c → `current_view()`
 returns ids `[a, b, c]` in order, all `node_type` `"message"`. (Hard backward-compat:
 folding must be a no-op when nothing is compressed.)
 
-**C82. Folded tip → view ends with K.** Given chain a→b→c, tip = c,
-`c.compressed_into = K.id`, K (`node_type "compression"`, `prev_id None`) in the graph →
+**C82. Folded tip → view ends with K.** Given chain a→b→c, tip = c, K
+(`node_type "compression"`, `prev_id None`, `meta["range"] = [c]`) in the graph →
 `current_view()` ids `[a, b, K]`, node_types `["message","message","compression"]`; the
 view ends with K.
 
-**C83. Append after a folded tip → [..., K, new].** Given chain a→b→c with
-`c.compressed_into=K.id` (K in graph); a new message node `new` chained from the real
-leaf c (`new.prev_id=c.id`) and made the tip → `current_view()` ids `[a, b, K, new]`; the
+**C83. Append after a folded tip → [..., K, new].** Given chain a→b→c with K
+(`range = [c]`) in the graph; a new message node `new` chained from the real leaf c
+(`new.prev_id=c.id`) and made the tip → `current_view()` ids `[a, b, K, new]`; the
 freshly appended real node follows K; K's own `prev_id` stays None.
 
-**C84. Middle fold in place.** Given chain a→b→c→d→e, tip = e, b,c,d each
-`compressed_into = K.id` (K in graph) → `current_view()` ids `[a, K, e]`, node_types
+**C84. Middle fold in place.** Given chain a→b→c→d→e, tip = e, K with
+`range = [b, c, d]` in the graph → `current_view()` ids `[a, K, e]`, node_types
 `["message","compression","message"]`; folded children absent, order preserved.
 
 **C85. Two independent compressions → two K nodes.** Given chain a→b→c→d→e→f, tip = f;
-b,c → K1.id; e → K2.id; d and f unfolded; K1,K2 in graph → `current_view()` ids
+K1 with `range = [b, c]`; K2 with `range = [e]`; d and f unfolded → `current_view()` ids
 `[a, K1, d, K2, f]`; two distinct compression nodes appear, with an unfolded tail f
 surviving after K2.
 
-**C86. Single-node fold still collapses to K.** Given chain a→b→c, tip = c, only b has
-`compressed_into = K.id` (run length 1), K in graph → `current_view()` ids `[a, K, c]`.
+**C86. Single-node fold still collapses to K.** Given chain a→b→c, tip = c, K with
+`range = [b]` (run length 1) → `current_view()` ids `[a, K, c]`.
 
-**C87. Dangling compressed_into → treated as unfolded.** Given chain a→b→c, tip = c,
-`b.compressed_into` = an id NOT present in the graph → `current_view()` ids `[a, b, c]`,
-all `node_type "message"`; b stays as itself (defensive, mirrors the missing-id walk
-tolerance).
+**C87. Stale/dangling pointer at a missing K → treated as unfolded.** Given chain a→b→c,
+tip = c, `b.compressed_into` = an id NOT present in the graph and no compression node →
+`current_view()` ids `[a, b, c]`, all `node_type "message"`; b stays as itself
+(enumeration finds no applying K).
 
 **C88. Empty conversation → [].** Given an empty graph and `active_leaf_id None` →
 `current_view() == []`.
 
 **C89. Save → reload round-trip preserves folding.** Given chain a→b→c→d→e plus
-compression node K (all persisted via `repo.save` with `active_leaf_id=e`),
-b,c,d.compressed_into=K.id; core resumes the conversation → `current_view()` ids
-`[a, K, e]`; folding is derived from persisted graph state.
+compression node K (`range = [b, c, d]`), all persisted via `repo.save` with
+`active_leaf_id=e`; core resumes the conversation → `current_view()` ids `[a, K, e]`;
+folding is derived from persisted graph state (the range meta round-trips).
 
-**C90. Root fold → view starts with K.** Given chain a→b→c, tip = c, a and b have
-`compressed_into = K.id` (K in graph) → `current_view()` ids `[K, c]`, node_types
-`["compression","message"]`; K can appear first despite `prev_id None`.
+**C90. Root fold → view starts with K.** Given chain a→b→c, tip = c, K with
+`range = [a, b]` → `current_view()` ids `[K, c]`, node_types `["compression","message"]`;
+K can appear first despite `prev_id None`.
+
+**C97. Stale `compressed_into` at a real K whose range excludes the node → not folded.**
+Given chain a→b→c, tip = c, a compression K in the graph whose `range` points off this
+line and `b.compressed_into = K.id` (a stale/wrong pointer) → `current_view()` ids
+`[a, b, c]`; enumeration ignores the pointer and K does not apply (range ⊄ line). (This
+would fold under the old pointer resolution — the discriminator.)
+
+**C98. Range-only folds without any pointer.** Given chain a→b→c, tip = c, K with
+`range = [b]` and `b.compressed_into` left None → `current_view()` ids `[a, K, c]`;
+`K.meta["range"]` alone drives folding. (Would NOT fold under pointer resolution — the
+reverse discriminator.)
+
+**C99. Expand + re-compress an overlapping range.** Submit two turns, `commit_compression`
+the whole tip → K, `expand_compression(K)`, then `commit_compression` the tail `[u2, a2]`
+→ K′. `current_view()` contains K′ and **not** K (K's `E` deactivates it; it never
+resurrects) while K remains present in `_graph` (append-only, never row-deleted).
 
 _Intent ambiguities flagged by the code-blind author (assumed past):_ non-contiguous
 runs sharing the same K each yield their own K occurrence (no de-dup); K takes the run's
