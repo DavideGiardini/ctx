@@ -1911,3 +1911,53 @@ Git history is the source of truth for *what changed*; this file captures the
   path — drive a continued conversation, middle-compress an early range, confirm later
   turns read coherently and the earlier turn's `g d` diff shows what it saw (left=
   originals, right=K). Drift markers now legitimately appear on non-tip turns.
+
+## 2026-07-03 — Task 23: Sprint 3 end-to-end verification (qa-tester, verify-feature)
+
+- No code changes (verification-only task). Ran two sequential `qa-tester`
+  verify-feature passes against the live `HarnessApp` (deterministic `TestProvider`,
+  fresh temp workspace per launch). Config is read LIVE from `~/.config/ctx/config.json`
+  (no caching, `ctx/core/config.py::get_config`), so config-override checkpoints were
+  set from the main agent by writing that file before each pass; the file did NOT exist
+  before and was REMOVED after (clean state restored).
+- Pass A (config: custom `compression.default_prompt` = "CUSTOM_QA_MARKER…" + drift ON):
+  ALL 7 checkpoints PASS — (1) config prompt reached editor prefill; (2) tip compress
+  draft→edit→commit + deep-dive/`Ctrl+o`/`i`; (3) middle compress, later turns coherent,
+  A2 `drift:true` / A3 `drift:false`; (4a) diff overview+drill left=[U1,A1]/right=[K],
+  warning False; (4b) post-expand drift reverses direction, diff shows correctly;
+  (5) expand→re-compress overlapping range commits (empty-summary correctly rejected);
+  (6) `/new`+`/resume` SQLite round-trip preserved K/originals/weights; (7)
+  `textual_check_errors` clean throughout.
+- Pass B (config: `ui.show_context_drift: false`): drift `Δ` markers correctly
+  suppressed on all nodes (PASS — this is the "disappear" half of checkpoint 3).
+- Harness constraints handled: full process restart is not testable (each launch gets a
+  fresh `tempfile.mkdtemp` workspace, `tools/agent/harness.py`), so checkpoint 6
+  persistence was exercised via `/new`+`/resume` (save→load through SQLite in the same
+  process/tempdir) rather than a real restart — noted, meaningful round-trip either way.
+- Verification: `scripts/check.sh` green at start of iteration (615 passed); no code
+  touched this iteration, so still green. Config file removed post-run.
+
+### Findings triaged (NOT patched here — filed as new tasks 24/25/26 per task 23's rule)
+- NOT a defect: `v` range-select re-anchors on every press (by design,
+  `ctx/ui/app.py:338` "a fresh press re-anchors at the cursor"). Correct mechanic is
+  `v` once → move cursor with up/down to extend → `c`. My first pass-A brief had the
+  wrong "v…v" mechanic; qa-tester self-corrected. Nothing to fix.
+- Task 24 (consistency): `g d` diff drill uses `reconstruction.has_drift` DIRECTLY
+  (`ctx/ui/app.py:427`), NOT the config-gated `_node_drift`, so the diff view opens on a
+  drifted assistant turn even with `show_context_drift:false`. Config docstring is
+  marker-scoped so this may be intended → task 24 is DECIDE-then-align, not a blind fix.
+  Note: PRD checkpoint 3 only requires MARKERS to disappear (they do) — this passed.
+- Task 25 (cosmetic, unconfirmed): qa-tester saw `Δ` seemingly overlapping the weight-%
+  digit (`2Δ%`) in character-grid screenshots. Both `.weight`/`.drift` are `dock:right`
+  (`message_list.css:28-40`) which should stack, and AGENTS.md limit (b) says the harness
+  can't judge layout → task 25 is confirm-then-fix-if-real.
+- Task 26 (QA tooling): `tools/agent/snapshot.py::render()` surfaces none of the Sprint 3
+  `describe_state` fields (`drift`, `diff_view`, breadcrumb, `context_gauge`,
+  `range_selection`), forcing screenshot inference this pass. Extend the renderer.
+
+### Gotcha for future iterations
+- To test config-dependent UI in qa-tester: write `~/.config/ctx/config.json` from the
+  MAIN agent BEFORE spawning qa-tester (qa-tester has no Write). `get_config()` reads
+  live, so no relaunch needed for the flag to take effect on the next action — but you
+  cannot change it mid-run, so one config state per qa-tester pass. ALWAYS restore
+  (delete if it didn't exist) afterward — it's the real user config, not a repo file.

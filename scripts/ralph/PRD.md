@@ -603,7 +603,7 @@ Dependencies noted; every prerequisite sits above its dependent.
       read coherently, the earlier turn's diff shows what it saw.
       `scripts/check.sh` green.
 
-- [ ] **23. Sprint 3 end-to-end verification (qa-tester, verify-feature)** _(deps:
+- [x] **23. Sprint 3 end-to-end verification (qa-tester, verify-feature)** _(deps:
       all)_ — no code changes. Full brief on the harness: (1) config-overridden
       default prompt reaches the editor prefill; (2) tip compress via draft→edit→
       commit; deep-dive + `Ctrl+o` + `i`; (3) middle compress on a continued
@@ -614,6 +614,54 @@ Dependencies noted; every prerequisite sits above its dependent.
       everything persists (K, E, seqs, hashes); (7) `textual_check_errors` clean
       throughout. _Acceptance:_ qa-tester reports PASS on all checkpoints. Defects
       become new `- [ ]` tasks; do not patch inside this task.
+
+### Phase 3c — follow-ups surfaced by the task-23 end-to-end pass
+_(All 7 task-23 checkpoints PASSED — Sprint 3 features work end-to-end. These are
+defects/gaps the qa-tester surfaced during that pass, filed here per task 23's "defects
+become new `- [ ]` tasks" instruction. Not blockers for the Sprint 3 feature set.)_
+
+- [ ] **24. Decide + align: should `g d` diff-view respect `ui.show_context_drift`?**
+      _(deps: 19, 20)_ — the passive `Δ` marker is config-gated (`_node_drift` returns
+      all-`False` when `ui.show_context_drift` is off, `ctx/ui/app.py:956`), but the
+      active diff drill is **not**: `_drill_selected` calls `reconstruction.has_drift`
+      directly (`ctx/ui/app.py:427`), so `g d` on a drifted assistant turn still opens
+      the full-screen diff even with drift display disabled. The config docstring frames
+      the flag as "whether the UI **marks** … drifted" turns (marker-scoped), so this may
+      be intended — but it's an observable inconsistency (no marker, yet the diff opens).
+      First DECIDE the intent (marker-only vs. all drift UI). If the diff should also be
+      gated, route `_drill_selected`'s assistant branch through the same config check (a
+      small helper both `_node_drift` and `_drill_selected` share) and add a Pilot test:
+      drift off → `g d` on an otherwise-drifted turn is a no-op. If intended as-is,
+      document the split in the config docstring + AGENTS.md and add a Pilot test locking
+      the current behavior. _Acceptance:_ decision recorded; behavior + test + docs agree;
+      `scripts/check.sh` green.
+
+- [ ] **25. Confirm/fix drift `Δ` marker vs. weight-% layout** _(deps: 19)_ — the
+      qa-tester repeatedly observed (character-grid screenshots) the `Δ` marker appearing
+      to overlap a weight-% digit (e.g. `2Δ%` where `20%` was expected). Both `.weight`
+      and `.drift` use `dock: right` (`ctx/ui/widgets/message_list.css:28-40`), `.drift`
+      with `margin: 0 1 0 0`; the pattern *should* stack (Δ left of the %), so this is
+      unconfirmed — the MCP harness cannot adjudicate layout (AGENTS.md limit b). First
+      confirm whether the overlap is real (a Pilot/snapshot assertion on the rendered
+      row, or a manual `uv run ctx` look). If real, fix the dock/margin/width so the Δ
+      and the % never collide, and lock it with a widget-level layout test. If it's only
+      a character-grid artifact, record that in PROGRESS and close without code changes.
+      _Acceptance:_ real-vs-artifact determined; if real, fixed + regression test;
+      `scripts/check.sh` green.
+
+- [ ] **26. QA tooling: surface Sprint 3 state in `snapshot.py::render()`** _(deps: 19,
+      20, 21)_ — `ChatApp.describe_state()` emits `drift` (per node), `diff_view`
+      (`{open, regions, warning, drill}`), the deep-dive breadcrumb, `context_gauge`, and
+      `range_selection`, but `tools/agent/render()` (`tools/agent/snapshot.py`) renders
+      none of them — it stops at mode/title/input/footer/detail/colors/nodes(role/
+      content/weight). The task-23 pass had to infer drift/diff-view state from
+      screenshots instead of reading structured fields, which is exactly the fragile path
+      AGENTS.md limit (b) warns against. Extend `render()` to emit these fields compactly
+      (per-node drift glyph tied to the `drift` bool; a `diff:` line with region count +
+      warning + drill state; the breadcrumb; the gauge `{pct, approximate}`; the active
+      range) and add/extend the pure `render()` unit tests. QA tooling only — `tools/agent`
+      is outside the shippable `ctx` package (ADR 0012). _Acceptance:_ `render()` surfaces
+      each Sprint 3 field; unit tests cover them; `scripts/check.sh` green.
 
 ## Out of scope
 - **Nested compression** (compressing a range containing a K) — Q7: the flat guard
