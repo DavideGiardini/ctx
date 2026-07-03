@@ -159,7 +159,7 @@ Dependencies noted; every prerequisite sits above its dependent.
       `.range-selected`; `Esc` empties it and stays in Edit; single node (`v` alone)
       = range of one. `scripts/check.sh` green.
 
-- [ ] **7. UI: draft editor opens/edits/cancels** _(deps: 5, 6)_ — new
+- [x] **7. UI: draft editor opens/edits/cancels** _(deps: 5, 6)_ — new
       `CompressionEditor` (e.g. `ctx/ui/widgets/compression_editor.py`): a left-pane
       **2-split** (Q4) — Top: editable `TextArea` prefilled with
       DEFAULT_COMPRESSION_PROMPT; Bottom: editable `TextArea`, empty; **no Center**

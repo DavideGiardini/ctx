@@ -141,7 +141,11 @@ a left `DetailInspector` and a right `#conversation` pane (the `MessageList` +
 - `widgets/` — `MessageList`/`MessageWidget` (truncated nodes via per-role
   `max-height`, right-docked weight slot, conversation-pass margins),
   `DetailInspector` (reactive `show(NodeView)`; standard Markdown view vs. 3-split
-  Prompt/Content/Output context view, empty splits hidden), `AppHeader` (title /
+  Prompt/Content/Output context view, empty splits hidden),
+  `CompressionEditor` (left-pane 2-split draft editor — editable prompt + summary
+  `TextArea`s, no Center; shown in place of the inspector while drafting a
+  compression, cancels for free on Esc, ADR-0016 Q4; opened by `c` in Edit mode
+  or `/compress` on an active selection), `AppHeader` (title /
   logo / context-window gauge — `set_context_pct(pct, approximate)` renders a
   filled bar and a leading `~` when the figure is only an estimate; `--%` when
   the window is unknown),

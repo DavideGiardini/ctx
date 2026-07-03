@@ -901,3 +901,48 @@ Git history is the source of truth for *what changed*; this file captures the
   → range-of-one on the selected node (Q5). The selection must survive Esc-closing the
   editor (task 7 keeps it), so do NOT call `_clear_range()`/`_clear_selection()` on
   editor cancel.
+
+## 2026-07-03 — Task 7 (Sprint 3): compression draft editor opens/edits/cancels (Q4)
+- New `CompressionEditor` widget (`ctx/ui/widgets/compression_editor.py`): a left-pane
+  **2-split** (Q4) `Container` — Top editable prompt `TextArea` (prefilled with
+  `DEFAULT_COMPRESSION_PROMPT`), Bottom editable summary `TextArea` (empty on open),
+  **no Center** (the originals stay highlighted on the right as the selection). Interface:
+  `open(prompt)` / `close()` / `is_open` / `prompt` / `output`. Hidden by default
+  (`display: none`); its DEFAULT_CSS mirrors `#detail`'s `width:1fr; border-right` so it
+  sits exactly in the inspector's slot when shown.
+- DECISION: **sibling widget, not an inspector mode** (PRD left it to the implementer).
+  The editor has editable `TextArea`s; the committed-K inspector (task 10) is a read-only
+  3-split. Keeping them separate keeps each deep+simple; opening toggles
+  `DetailInspector.display=False` + `CompressionEditor.display=True`, closing reverses it.
+- `ChatApp` wiring (`ctx/ui/app.py`): composed as the 2nd child of `#body`. New `c` Binding
+  → `action_compress` (Edit mode only, no-op in detail pane / with no selection);
+  `_compression_range()` = active range (`_range_ids()`) or **range-of-one** on the selected
+  node when no anchor (Q5); `_open/_close_compression_editor()`. `action_escape` closes the
+  editor FIRST (before the detail/range/mode-toggle chain) — cancels for free, restores the
+  inspector, refocuses `MessageList`, and **preserves the selection** (never clears
+  `_selected_node_id`/`_range_anchor_id`). `/compress` added to `InputBar.COMMANDS` + an
+  `on_input_bar_submitted` branch → `_handle_compress_command`: opens on an active selection,
+  else a system breadcrumb "Select a range first: v in Edit mode".
+- `describe_state()` gains `"compression_editor": {"open": bool, "prompt": str, "output": str}`
+  (the Pilot floor). Footer `_HINTS["edit"]` gains `c Compress` (trimmed `Navigate`→`Nav` and
+  dropped the cosmetic `Home Top` to stay ≤100 cols for ruff E501 — no test pins the hint; Home
+  binding itself is unchanged).
+- On open the prompt `TextArea` is focused so editing works immediately; TextArea has no
+  `escape` binding (verified) so Esc bubbles to the app's `escape` action and closes cleanly.
+- NO CORE CHANGE this task — `draft_compression` (task 5) already exists; task 7 is pure
+  UI open/edit/cancel with **no graph mutation** (Commit/Draft keys are tasks 8/9). So per the
+  task-6 precedent this is a UI task: Pilot is the mandatory floor, no code-blind test-spec flow.
+- Tests: `tests/test_app_compression_editor.py` — 4 Pilot tests via `pilot.press` (real binding
+  wiring): `c` on a 2-node range → editor open w/ default prompt + empty output, inspector
+  hidden; `c` with no anchor → range-of-one opens; `/compress` with no selection → breadcrumb +
+  editor stays closed; `Esc` closes, keeps range_selection, stays in Edit, restores inspector.
+- Verification: `scripts/check.sh` green (486 passed, was 482; +4; ruff+mypy clean). qa-tester
+  NOT applicable — task 7 doesn't request it and the in-process harness can't see this
+  iteration's uncommitted edits anyway.
+- Did NOT commit the pre-existing dirty `CONTEXT.md` / `docs/Sprint Roadmap.md` (dirty at
+  session start; Roadmap edits are forbidden by the PRD).
+- GOTCHA for task 8 (`Ctrl+S` commit): read the range from `_compression_range()` (start=ids[0],
+  end=ids[-1]); the summary is `CompressionEditor.output`; commit with `prompt=""` for now (task 9
+  switches it to the drafted Top). On commit, `_close_compression_editor()` then clear the
+  selection + rebuild the list. `Ctrl+S`/`Ctrl+D` bindings must live on the editor (or be gated to
+  when it's open) so they don't fire in normal Edit mode — the editor currently owns no bindings.

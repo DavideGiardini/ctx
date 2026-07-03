@@ -6,13 +6,13 @@ from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
-from textual.widgets import Input, Static
+from textual.widgets import Input, Static, TextArea
 from textual.worker import Worker, WorkerState
 
 from ctx.core import tokens
 from ctx.core.config import get_config
 from ctx.core.context import build_context
-from ctx.core.conversation import ConversationCore
+from ctx.core.conversation import DEFAULT_COMPRESSION_PROMPT, ConversationCore
 from ctx.core.log import logger
 from ctx.core.provider import LiteLLMProvider, Provider
 from ctx.core.storage import ConversationRepository, StoragePort
@@ -20,6 +20,7 @@ from ctx.core.workspace import Workspace
 from ctx.models.nodes import Node
 from ctx.ui.widgets.app_footer import AppFooter
 from ctx.ui.widgets.app_header import AppHeader
+from ctx.ui.widgets.compression_editor import CompressionEditor
 from ctx.ui.widgets.detail_inspector import DetailInspector, NodeView
 from ctx.ui.widgets.history_screen import HistoryScreen
 from ctx.ui.widgets.include_screen import IncludeScreen
@@ -47,6 +48,7 @@ class ChatApp(App):
         Binding("escape", "escape", "Toggle mode", show=False),
         Binding("i", "enter_insert", "Insert Mode", show=False),
         Binding("v", "anchor_range", "Select range", show=False),
+        Binding("c", "compress", "Compress", show=False),
         Binding("up", "up", "Up", show=False),
         Binding("down", "down", "Down", show=False),
         Binding("enter", "detail_enter", "Select split", show=False),
@@ -91,6 +93,7 @@ class ChatApp(App):
         yield AppHeader(id="app-header")
         with Horizontal(id="body"):
             yield DetailInspector(id="detail")
+            yield CompressionEditor(id="compression-editor")
             with Vertical(id="conversation"):
                 yield MessageList(id="messages")
                 # Suggestions + input share one docked container so they stack
@@ -159,6 +162,11 @@ class ChatApp(App):
                 return
         except Exception:
             pass
+        # The draft editor cancels for free: Esc closes it, restores the
+        # inspector, and keeps the selection (Q4). No graph mutation.
+        if self.query_one(CompressionEditor).is_open:
+            self._close_compression_editor()
+            return
         # Inside the detail pane, Esc backs out one level (Maximized→Browse→right pane)
         # before it falls through to the Insert/Edit toggle.
         if self.mode == "edit" and self._focus_in_detail():
@@ -294,6 +302,40 @@ class ChatApp(App):
                 widget.set_range_selected(False)
         except Exception:
             pass
+
+    # --- compression draft editor ---------------------------------------
+
+    def _compression_range(self) -> list[str]:
+        """Node ids the draft editor would compress: the active range, or a
+        range-of-one on the selected node when no anchor is set (Q5). Empty when
+        nothing is selected at all."""
+        if self._range_anchor_id is not None:
+            return self._range_ids()
+        if self._selected_node_id is not None:
+            return [self._selected_node_id]
+        return []
+
+    def action_compress(self) -> None:
+        """`c` in Edit mode: open the draft editor on the active selection (Q4).
+
+        No anchor → range-of-one on the selected node; no selection → no-op
+        (the discoverable ``/compress`` command explains how to select)."""
+        if self.mode != "edit" or self._focus_in_detail():
+            return
+        if not self._compression_range():
+            return
+        self._open_compression_editor()
+
+    def _open_compression_editor(self) -> None:
+        editor = self.query_one(CompressionEditor)
+        self.query_one(DetailInspector).display = False
+        editor.open(DEFAULT_COMPRESSION_PROMPT)
+        editor.query_one("#compress-prompt", TextArea).focus()
+
+    def _close_compression_editor(self) -> None:
+        self.query_one(CompressionEditor).close()
+        self.query_one(DetailInspector).display = True
+        self.query_one(MessageList).focus()
 
     def _focus_in_detail(self) -> bool:
         return self._is_focused_in(self.query_one(DetailInspector))
@@ -552,6 +594,7 @@ class ChatApp(App):
             "selected_index": selected_index,
             "selected_role": selected_role,
             "range_selection": self._range_ids(),
+            "compression_editor": self._compression_editor_state(),
             "layout": {"header": True, "footer": True, "panes": ["detail", "conversation"]},
             "footer": self.query_one(AppFooter).current_hint(),
             "detail": {
@@ -571,6 +614,12 @@ class ChatApp(App):
             "colors": get_config()["colors"],
             "nodes": node_states,
         }
+
+    def _compression_editor_state(self) -> dict:
+        """Snapshot of the draft editor for ``describe_state`` (the Pilot floor):
+        whether it is open plus its current prompt/output text."""
+        editor = self.query_one(CompressionEditor)
+        return {"open": editor.is_open, "prompt": editor.prompt, "output": editor.output}
 
     @staticmethod
     def _regions_overlap(a, b) -> bool:
@@ -626,6 +675,11 @@ class ChatApp(App):
         if text == "/include":
             logger.info("matched /include")
             self._handle_include_command()
+            return
+
+        if text == "/compress":
+            logger.info("matched /compress")
+            await self._handle_compress_command()
             return
 
         logger.info("no command matched, sending to model")
@@ -727,6 +781,16 @@ class ChatApp(App):
         self._refresh_token_ui()
         if self.mode == "insert":
             self._lock_inspector_to_last()
+
+    async def _handle_compress_command(self) -> None:
+        if not self._compression_range():
+            node = self.core.add_system_message("Select a range first: v in Edit mode")
+            await self.query_one(MessageList).add_node(node)
+            self._refresh_token_ui()
+            if self.mode == "insert":
+                self._lock_inspector_to_last()
+            return
+        self._open_compression_editor()
 
     # --- streaming ------------------------------------------------------
 
