@@ -3,8 +3,9 @@
 In Edit mode ``v`` anchors a contiguous range at the cursor; Up/Down extend it;
 ``Esc`` clears the anchor but stays in Edit; entering Insert clears it. The
 oracle is the Task 6 acceptance criterion, asserted through the public
-``describe_state()`` snapshot (``range_selection`` = node ids in view order) and
-the ``.range-selected`` CSS class the qa-tester harness can query.
+``describe_state()`` snapshot (``range_selection`` = node *indices* into the
+reported ``nodes`` array, in view order — 13i) and the ``.range-selected`` CSS
+class the qa-tester harness can query.
 """
 
 from ctx.core.provider import TestProvider as CannedProvider
@@ -39,8 +40,8 @@ async def test_v_then_down_down_selects_three_contiguous_ids(repo, workspace):
 
         state = app.describe_state()
         assert state["mode"] == "edit"
-        # Three contiguous ids, in view order, starting at the anchor.
-        assert state["range_selection"] == view_ids[0:3]
+        # Three contiguous indices, in view order, starting at the anchor.
+        assert state["range_selection"] == [0, 1, 2]
 
         # The widgets in the range carry .range-selected; the one outside does not.
         message_list = app.query_one("#messages")
@@ -80,7 +81,7 @@ async def test_v_alone_is_range_of_one(repo, workspace):
 
         state = app.describe_state()
         assert len(state["range_selection"]) == 1
-        assert state["range_selection"] == [app.core.nodes[state["selected_index"]].id]
+        assert state["range_selection"] == [state["selected_index"]]
 
 
 async def test_down_at_bottom_edge_does_not_wrap(repo, workspace):
@@ -100,7 +101,7 @@ async def test_down_at_bottom_edge_does_not_wrap(repo, workspace):
         await pilot.press("v", "down")  # anchor at tip, try to extend past the edge
 
         # Clamped: the range stays a range-of-one at the tip, not the whole list.
-        assert app.describe_state()["range_selection"] == [view_ids[-1]]
+        assert app.describe_state()["range_selection"] == [len(view_ids) - 1]
 
 
 async def test_up_at_top_edge_does_not_wrap(repo, workspace):
@@ -112,13 +113,11 @@ async def test_up_at_top_edge_does_not_wrap(repo, workspace):
         await app.on_input_bar_submitted(InputBar.Submitted("second"))
         await app.workers.wait_for_complete()
 
-        view_ids = [n.id for n in app.core.nodes]
-
         await pilot.press("escape")
         await pilot.press("home")  # cursor on the first node
         await pilot.press("v", "up")  # anchor at first, try to extend past the top
 
-        assert app.describe_state()["range_selection"] == [view_ids[0]]
+        assert app.describe_state()["range_selection"] == [0]
 
 
 async def test_in_bounds_extension_unchanged(repo, workspace):
@@ -130,10 +129,8 @@ async def test_in_bounds_extension_unchanged(repo, workspace):
         await app.on_input_bar_submitted(InputBar.Submitted("second"))
         await app.workers.wait_for_complete()
 
-        view_ids = [n.id for n in app.core.nodes]
-
         await pilot.press("escape")
         await pilot.press("home")
         await pilot.press("v", "down", "down")
 
-        assert app.describe_state()["range_selection"] == view_ids[0:3]
+        assert app.describe_state()["range_selection"] == [0, 1, 2]

@@ -13,6 +13,7 @@ and the CSS ``display`` state the qa-tester harness can query.
 from ctx.core.conversation import DEFAULT_COMPRESSION_PROMPT
 from ctx.core.provider import TestProvider as CannedProvider
 from ctx.ui.app import ChatApp
+from ctx.ui.widgets.app_footer import _HINTS
 from ctx.ui.widgets.compression_editor import CompressionEditor
 from ctx.ui.widgets.detail_inspector import DetailInspector
 from ctx.ui.widgets.input_bar import InputBar
@@ -84,3 +85,22 @@ async def test_esc_closes_editor_restores_inspector_keeps_selection(repo, worksp
         assert state["range_selection"] == range_before  # selection preserved
         assert app.query_one(DetailInspector).display is True
         assert app.query_one(CompressionEditor).display is False
+
+
+async def test_footer_shows_editor_hint_while_open_then_restores(repo, workspace):
+    """13i: the editor's own keys must be advertised while it is open, and the
+    Edit-mode hint restored the moment it closes."""
+    app = _app(repo, workspace)
+    async with app.run_test() as pilot:
+        await _two_turns(app)
+
+        await pilot.press("escape")  # → Edit mode
+        assert app.describe_state()["footer"] == _HINTS["edit"]
+
+        await pilot.press("c")  # open the editor
+        assert app.describe_state()["compression_editor"]["open"] is True
+        assert app.describe_state()["footer"] == _HINTS["editor"]
+
+        await pilot.press("escape")  # cancels the editor
+        assert app.describe_state()["compression_editor"]["open"] is False
+        assert app.describe_state()["footer"] == _HINTS["edit"]

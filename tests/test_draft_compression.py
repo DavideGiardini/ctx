@@ -146,6 +146,32 @@ async def test_default_prompt_when_none(repo, workspace, test_provider):
     )
 
 
+# C124b (13i) - a blank/whitespace-only prompt also falls back to the default.
+# Documented addition (not code-blind): an empty user message is not a real
+# instruction and several APIs reject it, so the UI's verbatim editor.prompt must
+# not reach the provider blank.
+async def test_blank_prompt_falls_back_to_default(repo, workspace, test_provider):
+    core = ConversationCore(repo, test_provider(["ok"]), workspace)
+    core.setup()
+    _, _, u2, a2 = await _build_line(core)
+
+    rec = RecordingProvider(["s1"])
+    core._provider = rec
+    async for _ in core.draft_compression(u2.id, a2.id, prompt="   "):
+        pass
+
+    assert rec.captured is not None
+    # The whitespace prompt never reaches the provider as the final user message;
+    # the default instruction does.
+    assert any(
+        m.get("role") == "user" and DEFAULT_COMPRESSION_PROMPT in m.get("content", "")
+        for m in rec.captured
+    )
+    assert not any(
+        m.get("role") == "user" and m.get("content", "") == "   " for m in rec.captured
+    )
+
+
 # C125 - the range is rendered (model-facing content reaches the provider)
 async def test_range_content_rendered_to_provider(repo, workspace, test_provider):
     core = ConversationCore(repo, test_provider(["ok"]), workspace)

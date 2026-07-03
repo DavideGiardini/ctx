@@ -442,7 +442,7 @@ Dependencies noted; every prerequisite sits above its dependent.
       in the live view; (c) commit → inspector shows the empty/placeholder state.
       `scripts/check.sh` green.
 
-- [ ] **13i. Polish: editor footer hints, blank-prompt fallback, `range_selection`
+- [x] **13i. Polish: editor footer hints, blank-prompt fallback, `range_selection`
       indices** _(deps: 7, 9; review findings)_ — Three small fixes. (1) The editor
       state has NO footer hint — while it is open the footer still shows the Edit hints
       (`v`/`c`/`i` now type into the TextArea) and the real keys (`Tab` split, `Ctrl+D`

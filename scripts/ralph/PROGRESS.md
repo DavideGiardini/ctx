@@ -1466,3 +1466,39 @@ Git history is the source of truth for *what changed*; this file captures the
   directly WHILE a dive is active (TestProvider's connectivity returns instantly, so you
   can't race the real `/model` worker) and assert widget count unchanged, then `ctrl+o`
   and assert the "✔ Connected to <model>" node is in the rebuilt live view.
+
+## 2026-07-03 — Task 13i: editor footer hint + blank-prompt fallback + range indices
+
+- Three small review-finding fixes:
+  1. **Editor footer hint** (`app_footer.py` + `app.py`): the draft editor had no
+     footer entry — while open the footer still advertised the Edit hints (`v`/`c`/`i`
+     now type into the TextArea) and the real keys were undiscoverable. Added
+     `_HINTS["editor"] = "Tab Split  ^D Draft  ^S Commit  Esc Cancel"`, an `_editor`
+     flag + `set_editor(bool)` on `AppFooter`, and gave it top precedence in
+     `current_hint` (editor owns the pane while open). Wired `set_editor(True/False)`
+     into `_open_compression_editor`/`_close_compression_editor` — close is the single
+     chokepoint (commit, Esc-cancel, `/new`/`/resume` reset all route through it).
+  2. **Blank-prompt fallback** (`conversation.py` `draft_compression`): `""`/whitespace
+     was treated as a real instruction (only `None` fell back), appending an empty user
+     message several APIs reject; the UI passes `editor.prompt` verbatim and the user can
+     blank the Top split. Now `prompt.strip() == ""` → `DEFAULT_COMPRESSION_PROMPT`.
+     COMMIT semantics untouched — `K.meta["prompt"] == ""` still means manual.
+  3. **`range_selection` as indices** (`app.py` `describe_state`): was returning raw node
+     uuids, contradicting the method's own stable-index convention. Now maps range ids to
+     indices into the reported `nodes` array.
+- Tests (all documented additions, not code-blind — UI/Pilot + a deliberate contract
+  change to a field that shipped this sprint with no external consumer):
+  - `test_app_compression_editor.py::test_footer_shows_editor_hint_while_open_then_restores`
+    — acceptance floor #1 (editor open → `footer == _HINTS["editor"]`, Esc → `_HINTS["edit"]`).
+  - `test_draft_compression.py::test_blank_prompt_falls_back_to_default` (C124b) —
+    acceptance floor #2 (`prompt="   "` sends DEFAULT to the provider, never the blank).
+  - Updated the task-6 Pilot assertions in `test_app_range_selection.py` from uuids to
+    indices (`[0,1,2]`, `[state["selected_index"]]`, `[len(view_ids)-1]`, `[0]`) + the
+    module docstring. `compression_editor`/`deep_dive` tests already used `len()`/`== []`
+    /equality → index-compatible, no change.
+- Verification: `scripts/check.sh` green (536 passed; was 534, +2). ruff+mypy clean.
+  NO qa-tester: harness caches `ctx.*` at session start (can't see this iteration's edits);
+  footer/range invariants are queryable state → the Pilot tests driving the real ChatApp are
+  the verification layer (step 7 a/b).
+- Gotcha: `set_mode` resets `_detail` but NOT `_editor` — the editor flag is owned solely by
+  open/close (mode never changes while the editor is open), so no reset needed there.

@@ -505,12 +505,14 @@ class ChatApp(App):
         editor = self.query_one(CompressionEditor)
         self.query_one(DetailInspector).display = False
         editor.open(DEFAULT_COMPRESSION_PROMPT)
+        self.query_one(AppFooter).set_editor(True)
         # Fresh editor → no draft has run yet, so a commit now is manual (Q4).
         self._last_drafted_prompt = ""
         editor.query_one("#compress-prompt", TextArea).focus()
 
     def _close_compression_editor(self) -> None:
         self.query_one(CompressionEditor).close()
+        self.query_one(AppFooter).set_editor(False)
         # Cancel before dropping the reference: an orphaned draft worker keeps
         # streaming into the now-hidden TextArea and would overwrite a re-opened
         # editor's Summary with the old range's draft (13d).
@@ -948,7 +950,11 @@ class ChatApp(App):
             "focus": self._focus_target(),
             "selected_index": selected_index,
             "selected_role": selected_role,
-            "range_selection": self._range_ids(),
+            # Indices into the reported ``nodes`` array (never raw uuids), per this
+            # method's own stable-index convention (13i).
+            "range_selection": [
+                i for i, node in enumerate(nodes) if node.id in set(self._range_ids())
+            ],
             "compression_editor": self._compression_editor_state(),
             "layout": {"header": True, "footer": True, "panes": ["detail", "conversation"]},
             "footer": self.query_one(AppFooter).current_hint(),

@@ -15,6 +15,7 @@ _HINTS = {
     "browse": "↑↓ Move  Enter Select  1/2/3 Open  Esc Back  Tab Conversation",
     "maximized": "↑↓/PgUp/PgDn Scroll  1/2/3 Switch  Esc Back  Tab Conversation",
     "deep_dive": "↑↓ Nav  ^o/Esc Back  i Exit  Tab Pane  (read-only)",
+    "editor": "Tab Split  ^D Draft  ^S Commit  Esc Cancel",
 }
 
 
@@ -34,6 +35,7 @@ class AppFooter(Static):
         self._mode = "insert"
         self._detail = "none"
         self._deep_dive = False
+        self._editor = False
         self._model = ""
 
     def on_mount(self) -> None:
@@ -52,11 +54,18 @@ class AppFooter(Static):
         self._deep_dive = active
         self._refresh()
 
+    def set_editor(self, active: bool) -> None:
+        self._editor = active
+        self._refresh()
+
     def set_model(self, model: str) -> None:
         self._model = model
         self._refresh()
 
     def current_hint(self) -> str:
+        # The draft editor owns the pane while open, so its keys win outright.
+        if self._editor:
+            return _HINTS["editor"]
         if self._mode == "edit" and self._detail in ("browse", "maximized"):
             return _HINTS[self._detail]
         if self._deep_dive:

@@ -510,8 +510,9 @@ class ConversationCore:
         import → the full file body; an already-summarized node → its summary; never
         the "Included:" label) — the Q10c invariant that the draft sees what the
         model sees. One final user message carrying the instruction (``prompt`` when
-        given, else ``DEFAULT_COMPRESSION_PROMPT``) is appended, and the result is
-        streamed via the provider on the active model.
+        it is non-blank, else ``DEFAULT_COMPRESSION_PROMPT`` — a ``None`` or
+        whitespace-only prompt is not a real instruction, 13i) is appended, and the
+        result is streamed via the provider on the active model.
 
         This is a meta-operation, never a gauge anchor (Q10b): it hands the provider
         a no-op ``on_usage``, so ``last_usage``/``calibration``/``usage_generation``
@@ -521,7 +522,10 @@ class ConversationCore:
         """
         range_nodes = self._validate_compress_range(start_id, end_id)
         messages = build_context(range_nodes, self._workspace.read_file)
-        instruction = prompt if prompt is not None else DEFAULT_COMPRESSION_PROMPT
+        # A blank/whitespace-only prompt is not a real instruction (several APIs
+        # reject an empty user message); fall back to the default (13i).
+        has_prompt = prompt is not None and prompt.strip() != ""
+        instruction = prompt if has_prompt else DEFAULT_COMPRESSION_PROMPT
         messages.append({"role": "user", "content": instruction})
 
         # No gauge anchor (Q10b): a no-op on_usage keeps last_usage/calibration/
