@@ -177,10 +177,14 @@ a left `DetailInspector` and a right `#conversation` pane (the `MessageList` +
   the deep-dive stack): `_enter_diff` block-aligns `reconstruction.diff_regions`
   (`context_at_generation` left ⟷ `now_prefix` right) and runs the H4 tripwire
   (`reconstruction.reconstruction_warning`) to toggle the "reconstruction may be
-  inexact" banner; `up`/`down` move a region cursor; `Esc`/`Ctrl+o` pop it (restoring
-  the live view), `i` exits fully. `describe_state()` gains `"diff_view"`
-  `{open, regions: [{left, right}] (changed only), warning}` and the unified
-  breadcrumb appends "Diff …" (task 20).
+  inexact" banner; `up`/`down` move a region cursor. `Enter` (`action_detail_enter`,
+  routed through `_drill_diff_region`) drills into the cursored changed region —
+  `_diff_view["drill"]` holds that `DiffRegion` and `DiffView.show_drill` renders its
+  left/right block sequences in full (H6 many-to-many, task 21). `Esc`/`Ctrl+o` pop
+  one level (drill → overview → live via `_close_drill`/`_close_diff`), `i` exits
+  fully. `describe_state()` gains `"diff_view"`
+  `{open, regions: [{left, right}] (changed only), warning, drill: {left, right} | None}`
+  and the unified breadcrumb appends "Diff …" then "Region" while drilled (task 20/21).
 - `widgets/` — `MessageList`/`MessageWidget` (truncated nodes via per-role
   `max-height`, right-docked weight slot + subtle drift `Δ` marker
   (`set_drift`, task 19), conversation-pass margins),
@@ -196,8 +200,10 @@ a left `DetailInspector` and a right `#conversation` pane (the `MessageList` +
   slash commands, ADR-0016 A#5, task 13b),
   `DiffView` (full right-pane replacement rendering a turn's context-drift block
   diff — left/right block columns aligned by node id, a changed-region cursor
-  (`move_cursor`), and a reconstruction-inexact warning banner; shown in place of
-  the `MessageList` while `_diff_view` is open, task 20), `AppHeader` (title /
+  (`move_cursor`), a reconstruction-inexact warning banner, and a `#diff-drill`
+  overlay (`show_drill`/`close_drill`) that isolates one region's full block
+  sequences; shown in place of the `MessageList` while `_diff_view` is open,
+  task 20/21), `AppHeader` (title /
   logo / context-window gauge — `set_context_pct(pct, approximate)` renders a
   filled bar and a leading `~` when the figure is only an estimate; `--%` when
   the window is unknown),

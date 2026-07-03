@@ -1828,3 +1828,41 @@ Git history is the source of truth for *what changed*; this file captures the
   `_validate_compress_range` will let `has_drift`/`diff_regions` fire on middle turns —
   the diff view is already general (aligns any T's prefix), so no diff-view change needed;
   the oracle extension is the work.
+
+## 2026-07-03 — Task 21: UI diff drill-down (Q12/H6, ADR-0016)
+
+- `ctx/ui/widgets/diff_view.py`: extracted the two-column region row into a shared
+  `_region_row(region, row_id=, extra=)` builder (used by both the overview `show`
+  and the new drill). Added a hidden `#diff-drill` `Vertical`; `show_drill(region)`
+  clears+mounts one full region row and hides `#diff-regions`; `close_drill()`
+  reverses (and is called by `show`/`close` so a re-open always starts at the
+  overview). New `cursor` property exposes the changed-region cursor position.
+- `ctx/ui/app.py`:
+  - `_diff_view` dict gains `"drill": DiffRegion | None` (None on `_enter_diff`).
+  - `action_detail_enter` is now **async**; when `_diff_view` is open it drills the
+    cursored changed region via `_drill_diff_region` (no-op with no changed regions
+    or when already drilled), else falls through to the existing inspector maximize.
+  - `_close_drill()` clears `drill` + calls `DiffView.close_drill()`.
+  - `action_pop_deep_dive` (Ctrl+o) pops **one level**: drill → overview (via
+    `_close_drill`) before overview → live (via `_close_diff`). `action_escape`'s
+    diff branch now delegates to `action_pop_deep_dive` so Esc gets the same
+    one-level semantics (previously it closed the diff outright). `i`
+    (`action_enter_insert`) still exits the whole family (`_close_diff` → `None`).
+  - `describe_state()["diff_view"]` gains `"drill": {"left":[ids],"right":[ids]} |
+    None`; the unified breadcrumb appends "Region" while drilled.
+- Tests (`tests/test_app_diff_view.py`, +3 Pilot, the UI acceptance floor):
+  `test_enter_drills_into_cursored_region` (from the task-20 drift state: `g d` →
+  `enter` → `drill == {left:[K], right:[U1,A1]}`, breadcrumb ends "Region", the
+  rendered `#diff-drill` shows "SUMMARY" left / "first"+"ok" right — reads Statics
+  via `.render()` per the task-20 gotcha); `test_ctrl_o_from_drill_returns_to_overview`
+  (Ctrl+o → drill None, overview still open, regions intact); `test_i_from_drill_exits_all_the_way`.
+- Verification: `scripts/check.sh` green (612 passed; was 609, +3). ruff+mypy clean.
+  NO live qa-tester: same-iteration UI change, MCP harness runs `ctx.*` cached and
+  can't see the new diff_view/app.py edits (AGENTS.md limit a) — Pilot tests are the
+  correct verification, matching tasks 19/20.
+- Updated AGENTS.md: app.py `_diff_view`/`_drill_diff_region`/breadcrumb bullet and
+  the `DiffView` widget bullet (`show_drill`/`close_drill`, `#diff-drill`).
+- Gotcha for task 22 (delete tip guard): task 21 needs no change; the diff view +
+  drill are already general over any drifted turn. Task 22's work is removing the
+  last-node-is-active-leaf check from `_validate_compress_range` (commit AND draft)
+  and extending the task-17 oracle suite with a middle sequence.

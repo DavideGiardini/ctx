@@ -217,10 +217,11 @@ class ChatApp(App):
         if self.mode == "edit" and self._range_anchor_id is not None:
             self._clear_range()
             return
-        # While the diff view is open, Esc backs out of it (like Ctrl+o) rather
-        # than toggling the mode (task 20, same family as deep-dive).
+        # While the diff view is open, Esc backs out of it one level (like
+        # Ctrl+o: drill → overview → live) rather than toggling the mode
+        # (task 20/21, same family as deep-dive).
         if self.mode == "edit" and self._diff_view is not None:
-            await self._close_diff()
+            await self.action_pop_deep_dive()
             return
         # While deep-diving, Esc backs out one level (like Ctrl+o) rather than
         # toggling the mode, keeping the view and mode consistent (task 12).
@@ -454,8 +455,13 @@ class ChatApp(App):
 
         Inert when no deep-dive is active. The cursor lands back on the K that
         was dived into (or the last node if it is gone)."""
-        # The diff view is the same navigation family (Q12): Ctrl+o pops it too.
+        # The diff view is the same navigation family (Q12): Ctrl+o pops it too,
+        # one level at a time — a drilled region backs out to the overview first
+        # (task 21), then the overview closes to the live view.
         if self._diff_view is not None:
+            if self._diff_view.get("drill") is not None:
+                self._close_drill()
+                return
             await self._close_diff()
             return
         if not self._deep_dive_stack:
@@ -497,6 +503,7 @@ class ChatApp(App):
             "label": f"Diff …{node.id[-4:]}",
             "regions": regions,
             "warning": warning,
+            "drill": None,
         }
         self.query_one(MessageList).display = False
         diff = self.query_one(DiffView)
@@ -520,6 +527,26 @@ class ChatApp(App):
     def _move_region_cursor(self, step: int) -> None:
         """Move the diff view's changed-region cursor by ``step`` (clamped)."""
         self.query_one(DiffView).move_cursor(step)
+
+    async def _drill_diff_region(self) -> None:
+        """``Enter`` in the diff view: drill into the cursored changed region,
+        rendering its left/right block sequences in full (H6 many-to-many;
+        task 21). No-op with no changed regions or when already drilled."""
+        diff = self._diff_view
+        if diff is None or diff.get("drill") is not None:
+            return
+        changed = [r for r in diff["regions"] if r.changed]
+        if not changed:
+            return
+        region = changed[self.query_one(DiffView).cursor]
+        diff["drill"] = region
+        await self.query_one(DiffView).show_drill(region)
+
+    def _close_drill(self) -> None:
+        """Return from a drilled region to the diff overview (task 21)."""
+        if self._diff_view is not None:
+            self._diff_view["drill"] = None
+        self.query_one(DiffView).close_drill()
 
     # --- compression draft editor ---------------------------------------
 
@@ -816,8 +843,14 @@ class ChatApp(App):
         idx = (start + step) % len(nodes)
         self._select_message(nodes[idx].id)
 
-    def action_detail_enter(self) -> None:
-        if self.mode != "edit" or not self._focus_in_detail():
+    async def action_detail_enter(self) -> None:
+        if self.mode != "edit":
+            return
+        # In the diff view, Enter drills into the cursored changed region (task 21).
+        if self._diff_view is not None:
+            await self._drill_diff_region()
+            return
+        if not self._focus_in_detail():
             return
         inspector = self.query_one(DetailInspector)
         if inspector.pane_mode == "browse":
@@ -1092,6 +1125,11 @@ class ChatApp(App):
                     "Chat",
                     *(f["label"] for f in self._deep_dive_stack),
                     *([self._diff_view["label"]] if self._diff_view else []),
+                    *(
+                        ["Region"]
+                        if self._diff_view and self._diff_view.get("drill") is not None
+                        else []
+                    ),
                 ],
             },
             "diff_view": self._diff_view_state(),
@@ -1109,12 +1147,14 @@ class ChatApp(App):
         return {"open": editor.is_open, "prompt": editor.prompt, "output": editor.output}
 
     def _diff_view_state(self) -> dict:
-        """Snapshot of the context-diff view for ``describe_state`` (task 20):
+        """Snapshot of the context-diff view for ``describe_state`` (task 20/21):
         whether it is open, its **changed** regions (each ``{"left": [ids],
-        "right": [ids]}``, aligned by node id), and the H4 warning flag."""
+        "right": [ids]}``, aligned by node id), the H4 warning flag, and the
+        drilled region (``{"left": [ids], "right": [ids]}`` or ``None``)."""
         diff = self._diff_view
         if diff is None:
-            return {"open": False, "regions": [], "warning": False}
+            return {"open": False, "regions": [], "warning": False, "drill": None}
+        drill = diff.get("drill")
         return {
             "open": True,
             "regions": [
@@ -1123,6 +1163,11 @@ class ChatApp(App):
                 if r.changed
             ],
             "warning": diff["warning"],
+            "drill": (
+                {"left": [n.id for n in drill.left], "right": [n.id for n in drill.right]}
+                if drill is not None
+                else None
+            ),
         }
 
     @staticmethod

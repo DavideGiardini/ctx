@@ -70,11 +70,32 @@ class DiffView(VerticalScroll):
     DiffView .diff-region.cursor { border-left: thick $warning; }
     DiffView .diff-side { width: 1fr; padding: 0 1; }
     DiffView .diff-side-label { color: $text-muted; text-style: italic; }
+    DiffView #diff-drill { display: none; height: auto; }
     """
 
     def compose(self) -> ComposeResult:
         yield Static("", id="diff-warning")
         yield Vertical(id="diff-regions")
+        yield Vertical(id="diff-drill")
+
+    def _region_row(
+        self, region: DiffRegion, *, row_id: str | None = None, extra: str = ""
+    ) -> Horizontal:
+        classes = "diff-region changed" if region.changed else "diff-region"
+        return Horizontal(
+            Vertical(
+                Static("was", classes="diff-side-label"),
+                Static(_column(region.left)),
+                classes="diff-side",
+            ),
+            Vertical(
+                Static("now", classes="diff-side-label"),
+                Static(_column(region.right)),
+                classes="diff-side",
+            ),
+            classes=f"{classes} {extra}".strip(),
+            id=row_id,
+        )
 
     async def show(self, regions: list[DiffRegion], warning: bool) -> None:
         """Render ``regions`` and toggle the reconstruction-inexact banner.
@@ -90,27 +111,35 @@ class DiffView(VerticalScroll):
         for child in list(container.children):
             await child.remove()
         for i, region in enumerate(regions):
-            row = Horizontal(
-                Vertical(
-                    Static("was", classes="diff-side-label"),
-                    Static(_column(region.left)),
-                    classes="diff-side",
-                ),
-                Vertical(
-                    Static("now", classes="diff-side-label"),
-                    Static(_column(region.right)),
-                    classes="diff-side",
-                ),
-                classes="diff-region changed" if region.changed else "diff-region",
-                id=f"diff-region-{i}",
-            )
-            await container.mount(row)
+            await container.mount(self._region_row(region, row_id=f"diff-region-{i}"))
         self._changed_indices = [i for i, r in enumerate(regions) if r.changed]
         self.set_cursor(0)
+        self.close_drill()
         self.display = True
+
+    async def show_drill(self, region: DiffRegion) -> None:
+        """Drill into one changed ``region``: render its left/right block
+        sequences in full and hide the overview (H6 many-to-many; task 21)."""
+        drill = self.query_one("#diff-drill", Vertical)
+        for child in list(drill.children):
+            await child.remove()
+        await drill.mount(self._region_row(region, extra="drill"))
+        self.query_one("#diff-regions", Vertical).display = False
+        drill.display = True
+
+    def close_drill(self) -> None:
+        """Return from a drilled region to the overview (no-op if not drilled)."""
+        self.query_one("#diff-drill", Vertical).display = False
+        self.query_one("#diff-regions", Vertical).display = True
+
+    @property
+    def cursor(self) -> int:
+        """Position of the cursored region among the changed regions."""
+        return self._cursor
 
     def close(self) -> None:
         """Hide the view (the caller restores the live message list)."""
+        self.close_drill()
         self.display = False
 
     def set_cursor(self, changed_pos: int) -> None:

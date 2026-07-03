@@ -578,7 +578,7 @@ Dependencies noted; every prerequisite sits above its dependent.
       `Ctrl+o` restores the live view. qa-tester walks it. `scripts/check.sh`
       green.
 
-- [ ] **21. UI: diff drill-down** _(deps: 20)_ — `Enter` on a marked region opens it
+- [x] **21. UI: diff drill-down** _(deps: 20)_ — `Enter` on a marked region opens it
       full: left blocks rendered in full vs right blocks (regions are
       **many-to-many** block sequences, H6 — e.g. `[K]` ⟷ `[B, K′, E]`); pushes a
       breadcrumb level; `Ctrl+o` returns to the overview; `i` exits all the way.
