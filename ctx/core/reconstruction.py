@@ -12,9 +12,31 @@ module generalizes that resolution in two ways — it works over an arbitrary
 time slice (``created_seq(K) < created_seq(T)``) rather than the present.
 """
 
+import hashlib
+import json
 from collections.abc import Callable
+from typing import Any
 
 from ctx.models.nodes import Node
+
+
+def hash_context(messages: list[dict[str, Any]]) -> str:
+    """Canonical, stable digest of a rendered ``build_context`` message list.
+
+    Returns the hex sha256 of ``json.dumps(messages, sort_keys=True,
+    ensure_ascii=False)``. The digest depends only on the *content* of the
+    messages, not on dict key insertion order (``sort_keys=True``), and is a
+    pure function — identical input always yields the identical string, and any
+    change to message roles, content, ordering, or count changes it.
+
+    This is the per-turn verification anchor (ADR-0016 A#3 §4): at generation
+    time the exact rendered messages are hashed and stored immutably on the
+    assistant node's ``meta["ctx_hash"]``; the reconstruction oracle later
+    re-derives the turn's context and compares. The hash detects a
+    reconstruction bug — it never repairs or drives anything.
+    """
+    canonical = json.dumps(messages, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _strict_ancestors(index: dict[str, Node], node_id: str) -> list[Node]:

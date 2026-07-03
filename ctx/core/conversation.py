@@ -6,6 +6,7 @@ from ctx.core import tokens
 from ctx.core.config import get_config
 from ctx.core.context import build_context
 from ctx.core.provider import Provider, Usage
+from ctx.core.reconstruction import hash_context
 from ctx.core.storage import StoragePort
 from ctx.core.workspace import Workspace
 from ctx.models.nodes import Node
@@ -631,6 +632,9 @@ class ConversationCore:
         """
         context_nodes = [n for n in self.nodes if n is not assistant_node]
         messages = build_context(context_nodes, self._workspace.read_file)
+        # AIDEV-NOTE: stamp the per-turn ctx_hash once, at the real generation
+        # moment — immutable after (ADR-0016 A#3 §4 tripwire, reconstruction oracle).
+        assistant_node.meta["ctx_hash"] = hash_context(messages)
         local_sum = tokens.count_messages(messages, self.model)
 
         def on_usage(usage: Usage) -> None:
