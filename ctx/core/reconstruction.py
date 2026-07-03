@@ -4,7 +4,8 @@ Pure functions over a flat node list — **never on the live generation
 pipeline**. They answer "what context did turn ``T`` see when it was generated"
 by *event enumeration* over the append-only graph (compression ``K`` nodes and
 their expand ``E`` events), keyed on the monotonic ``created_seq`` transaction
-axis. Framework-free: this module imports only :class:`Node`.
+axis. Framework-free: this module imports only :class:`Node` and the sibling
+pure ``build_context`` (for the ``ctx_hash`` tripwire).
 
 The live now-view lives in ``ConversationCore.current_view`` (task 15); this
 module generalizes that resolution in two ways — it works over an arbitrary
@@ -15,8 +16,11 @@ time slice (``created_seq(K) < created_seq(T)``) rather than the present.
 import hashlib
 import json
 from collections.abc import Callable
+from dataclasses import dataclass
+from difflib import SequenceMatcher
 from typing import Any
 
+from ctx.core.context import build_context
 from ctx.models.nodes import Node
 
 
@@ -182,3 +186,73 @@ def has_drift(all_nodes: list[Node], node_id: str) -> bool:
     then_ids = [n.id for n in context_at_generation(all_nodes, node_id)]
     now_ids = [n.id for n in now_prefix(all_nodes, node_id)]
     return then_ids != now_ids
+
+
+@dataclass(frozen=True)
+class DiffRegion:
+    """One aligned block-region of a turn's then-context vs its now-context.
+
+    ``left`` are the generation-time blocks (from :func:`context_at_generation`),
+    ``right`` the now-view blocks (from :func:`now_prefix`), aligned **by node
+    id** — never by content (ADR-0016 H6: every shared node is byte-identical by
+    construction, so this is a structural block diff, not an intra-block text
+    diff). ``changed`` is ``True`` when the two sides differ over this region (a
+    verbatim run ⟷ a summary ``K``, or a many-to-many run after expand +
+    re-compress) and ``False`` for a run present identically on both sides.
+    """
+
+    left: list[Node]
+    right: list[Node]
+    changed: bool
+
+
+def diff_regions(all_nodes: list[Node], node_id: str) -> list[DiffRegion]:
+    """Block-align ``node_id``'s then-context and now-context into regions.
+
+    Aligns :func:`context_at_generation` (left) against :func:`now_prefix`
+    (right) by node id and returns the full contiguous-region sequence,
+    root-first: each :class:`DiffRegion` is either an unchanged shared run
+    (``changed=False``, identical id-sequence on both sides) or a changed run
+    (``changed=True``) — the two directions being a verbatim run folding into a
+    ``K`` (post-compression) or a ``K`` unfolding into its originals
+    (post-expand), plus the many-to-many case after expand + re-compression.
+
+    A turn with no drift (:func:`has_drift` ``False``) yields regions all of
+    which are ``changed=False``; an unknown/root/off-line ``node_id`` yields a
+    single empty unchanged region (or ``[]`` when both prefixes are empty).
+    """
+    left = context_at_generation(all_nodes, node_id)
+    right = now_prefix(all_nodes, node_id)
+    matcher = SequenceMatcher(a=[n.id for n in left], b=[n.id for n in right], autojunk=False)
+    regions: list[DiffRegion] = []
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        regions.append(
+            DiffRegion(left=left[i1:i2], right=right[j1:j2], changed=tag != "equal")
+        )
+    return regions
+
+
+def reconstruction_warning(
+    all_nodes: list[Node], node_id: str, load_file: Callable[[str], str]
+) -> bool:
+    """Whether ``node_id``'s reconstruction cannot be verified against its hash.
+
+    Recomputes ``hash_context(build_context(context_at_generation(node_id)))``
+    and compares it to the turn's immutable ``meta["ctx_hash"]`` (ADR-0016 A#3
+    §4 tripwire). Returns ``True`` — the diff view then shows a "reconstruction
+    may be inexact" banner instead of confidently presenting a possibly-wrong
+    left pane — when either the stored hash is **absent** (a pre-3b turn that
+    never recorded one) or it **mismatches** the recomputed digest (a
+    reconstruction bug, or a pre-S5 imported file that changed since generation).
+    ``False`` when the recomputed hash matches the stored one. An unknown
+    ``node_id`` is ``False`` (there is no turn to warn about).
+    """
+    index = {n.id: n for n in all_nodes}
+    turn = index.get(node_id)
+    if turn is None:
+        return False
+    stored = turn.meta.get("ctx_hash")
+    if not stored:
+        return True
+    recomputed = hash_context(build_context(context_at_generation(all_nodes, node_id), load_file))
+    return bool(recomputed != stored)

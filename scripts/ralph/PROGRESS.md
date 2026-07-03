@@ -1768,3 +1768,63 @@ Git history is the source of truth for *what changed*; this file captures the
   `context_at_generation`/`now_prefix` (left/right) + `hash_context` vs
   `T.meta["ctx_hash"]` for the H4 warning banner. `Static.render()` (not
   `.renderable`) is the way to read a Static's text in tests here.
+
+## 2026-07-03 — Task 20: UI diff view overview (ADR-0016 concern "b", Q12/A#3 §4)
+
+- `ctx/core/reconstruction.py`: added `DiffRegion` dataclass + `diff_regions(all_nodes,
+  node_id)` (block-aligns `context_at_generation` LEFT vs `now_prefix` RIGHT **by node
+  id** via `difflib.SequenceMatcher`; each opcode → a `DiffRegion(left, right, changed)`,
+  `changed = tag != "equal"`; H6 structural diff, never content) and
+  `reconstruction_warning(all_nodes, node_id, load_file)` (H4 tripwire: recompute
+  `hash_context(build_context(context_at_generation(T), load_file))` and return `True`
+  on missing **or** mismatched `meta["ctx_hash"]`, `False` on match / unknown node).
+  Module now also imports the sibling pure `build_context` (no cycle: context.py imports
+  only log+nodes).
+- `ctx/ui/widgets/diff_view.py` (NEW): `DiffView(VerticalScroll)` — full right-pane
+  replacement. `show(regions, warning)` mounts one `.diff-region` row per region (two
+  `.diff-side` columns, `changed` class on drifted regions), toggles the `#diff-warning`
+  banner, lands the region cursor on the first **changed** region. `move_cursor(step)` /
+  `set_cursor(pos)` walk changed regions only (clamped). Delegates `up`/`down` to the App
+  (SkipAction, mirrors MessageList) so arrows move the region cursor, not the scrollbar.
+- `ctx/ui/app.py`:
+  - `_diff_view: dict | None` state (mutually exclusive with `_deep_dive_stack`).
+  - `on_key` `g d` now routes through `_drill_selected`: K → `_enter_deep_dive` (task 12),
+    drifted assistant (`reconstruction.has_drift`) → `_enter_diff`; else no-op.
+  - `_enter_diff` computes regions + warning, hides `MessageList`, shows+focuses
+    `DiffView`, sets footer deep-dive hint. `_close_diff` reverses + reselects the turn.
+  - `action_pop_deep_dive` (Ctrl+o) / `action_escape` (Esc) close the diff first (same
+    family); `action_enter_insert` (`i`) closes diff then exits. `action_up`/`down` move
+    the region cursor when `_diff_view` is open. `_reset_transient_ui` (/new,/resume)
+    tears the diff down.
+  - `describe_state()` gains `"diff_view"` `{open, regions:[{left,right}] (changed only),
+    warning}`; unified `deep_dive.breadcrumb` appends the "Diff …" label.
+- Tests:
+  - `tests/test_reconstruction.py` (+8): `diff_regions` expand-direction (the acceptance
+    shape: changed region left=[K] right=[U1,A1]) / compression-direction / no-drift
+    all-unchanged / unknown-empty; `reconstruction_warning` match=False / mismatch=True /
+    absent=True / unknown=False. Authored directly (extends the existing code-blind
+    helper-based file; test-spec-author uses Write and would clobber it) but keyed to
+    PRD/spec intent, not to SequenceMatcher internals.
+  - `tests/test_app_diff_view.py` (+4, the Pilot acceptance floor): reuses the task-19
+    drift scenario → `g d` on A2 → one region left=[K.id] right=[U1.id,A1.id],
+    warning False, DiffView shown/MessageList hidden, breadcrumb "Diff …"; tamper
+    `ctx_hash` → warning True; Ctrl+o restores the live view; `g d` on non-drifted A1
+    is a no-op.
+- Verification: `scripts/check.sh` green (609 passed; was 597, +12). ruff+mypy clean.
+  NO live qa-tester: the MCP harness runs `ctx.*` cached in-process and cannot see this
+  iteration's new diff_view.py / app.py edits (AGENTS.md limit a); the Pilot tests are
+  the correct verification for a same-iteration UI change.
+- Updated AGENTS.md: added the missing `reconstruction.py` core bullet (pre-existing gap
+  from tasks 16/17) with the new diff functions, the app.py `g d`/`_diff_view` behavior,
+  and the `DiffView` widget bullet.
+- Gotcha for task 21 (diff drill-down, deps 20): `Enter` on a marked region opens it full
+  (left blocks vs right blocks, many-to-many H6); pushes a breadcrumb level; `Ctrl+o`
+  returns to overview, `i` exits. `describe_state().diff_view` gains
+  `"drill": {"left":[...], "right":[...]} | None`. The region cursor lives in
+  `DiffView._cursor` / `_changed_indices`; the selected changed region is
+  `[r for r in _diff_view["regions"] if r.changed][_cursor]`. Wire `Enter`
+  (`action_detail_enter`) to a drill sub-state on `_diff_view` when it is open.
+- Gotcha for task 22 (middle compression): removing the 3a tip guard in
+  `_validate_compress_range` will let `has_drift`/`diff_regions` fire on middle turns —
+  the diff view is already general (aligns any T's prefix), so no diff-view change needed;
+  the oracle extension is the work.

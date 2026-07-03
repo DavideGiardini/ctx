@@ -557,7 +557,7 @@ Dependencies noted; every prerequisite sits above its dependent.
       false` all `False`. qa-tester spot-checks the marker. `scripts/check.sh`
       green.
 
-- [ ] **20. UI: diff view overview (full-screen)** _(deps: 12, 17, 19)_ — extend the
+- [x] **20. UI: diff view overview (full-screen)** _(deps: 12, 17, 19)_ — extend the
       task-12 chord: `g d` on an **assistant node with drift** opens the context
       diff (on a K it still deep-dives — one family, one navigation stack, Q12);
       breadcrumb pushes "Diff › …". Full right-pane replacement showing **block

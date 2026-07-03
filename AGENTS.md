@@ -106,6 +106,17 @@ reach end users (ADR 0012). See `docs/decisions/` for *why* it's shaped this way
   Renders a `compression` node as a user-role `<conversation_summary>` wrapper (no
   preamble, ADR-0016 H6/Q2) that coalesces with adjacent user content like an import;
   a dropped node (system) is a coalescing boundary (user runs on either side don't merge).
+- `reconstruction.py` — pure, read-only per-turn context reconstruction over a flat
+  node list, **never on the live pipeline** (ADR-0016 A#2/A#3): `context_at_generation`
+  (what turn `T` saw, as-of `created_seq(K) < created_seq(T)`) / `now_prefix` (the same
+  ancestor prefix folded under today's events) / `has_drift` (their id-sequences differ);
+  all resolve by **event enumeration** over `K`/`E` nodes, never child pointers.
+  `hash_context` is the canonical `build_context`-message digest stamped on each turn's
+  `meta["ctx_hash"]` at generation (the A#3 §4 tripwire). `diff_regions` block-aligns
+  `context_at_generation` vs `now_prefix` **by node id** (`difflib`) into contiguous
+  `DiffRegion`s (`changed` flag; H6 structural diff, never content); `reconstruction_warning`
+  recomputes the hash and returns `True` on a missing/mismatched `ctx_hash` (feeds the
+  diff view's honesty banner). Imports only `Node` + the sibling `build_context` (task 20).
 - `tokens.py` — pure, stateless token accounting for the context-budget UI (no
   Protocol seam — single impl). `count_messages` (the sole home of litellm's
   `token_counter`/tiktoken fallback), `per_node_tokens` (per-node local estimate,
@@ -159,7 +170,17 @@ a left `DetailInspector` and a right `#conversation` pane (the `MessageList` +
   whose generation context has drifted from the now-view — `reconstruction.has_drift`
   over `core.all_nodes()`, gated by `ui.show_context_drift`; other roles/off = `False`.
   `describe_state()` emits it as each node's `"drift"`, and `MessageWidget.set_drift`
-  renders a subtle `Δ` marker (task 19).
+  renders a subtle `Δ` marker (task 19). The `g d` chord (`on_key` → `_drill_selected`)
+  drills into the selected node: a `compression` K deep-dives (task 12), a **drifted
+  assistant** turn opens the full-pane context diff (`_enter_diff`, task 20) — one
+  navigation family (Q12). Diff state lives in `_diff_view` (mutually exclusive with
+  the deep-dive stack): `_enter_diff` block-aligns `reconstruction.diff_regions`
+  (`context_at_generation` left ⟷ `now_prefix` right) and runs the H4 tripwire
+  (`reconstruction.reconstruction_warning`) to toggle the "reconstruction may be
+  inexact" banner; `up`/`down` move a region cursor; `Esc`/`Ctrl+o` pop it (restoring
+  the live view), `i` exits fully. `describe_state()` gains `"diff_view"`
+  `{open, regions: [{left, right}] (changed only), warning}` and the unified
+  breadcrumb appends "Diff …" (task 20).
 - `widgets/` — `MessageList`/`MessageWidget` (truncated nodes via per-role
   `max-height`, right-docked weight slot + subtle drift `Δ` marker
   (`set_drift`, task 19), conversation-pass margins),
@@ -172,7 +193,11 @@ a left `DetailInspector` and a right `#conversation` pane (the `MessageList` +
   `TextArea`s, no Center; shown in place of the inspector while drafting a
   compression, cancels for free on Esc, ADR-0016 Q4; opened by `c` in Edit mode
   on an active selection — `x` expands the selected K, both Edit-mode keys, never
-  slash commands, ADR-0016 A#5, task 13b), `AppHeader` (title /
+  slash commands, ADR-0016 A#5, task 13b),
+  `DiffView` (full right-pane replacement rendering a turn's context-drift block
+  diff — left/right block columns aligned by node id, a changed-region cursor
+  (`move_cursor`), and a reconstruction-inexact warning banner; shown in place of
+  the `MessageList` while `_diff_view` is open, task 20), `AppHeader` (title /
   logo / context-window gauge — `set_context_pct(pct, approximate)` renders a
   filled bar and a leading `~` when the figure is only an estimate; `--%` when
   the window is unknown),

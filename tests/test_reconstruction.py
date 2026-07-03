@@ -5,10 +5,14 @@ contract item(s) it covers. All nodes set created_seq and prev_id EXPLICITLY;
 structural assertions compare id-sequences ([n.id for n in result]).
 """
 
+from ctx.core.context import build_context
 from ctx.core.reconstruction import (
     context_at_generation,
+    diff_regions,
     has_drift,
+    hash_context,
     now_prefix,
+    reconstruction_warning,
 )
 from ctx.models.nodes import Node
 
@@ -294,3 +298,116 @@ def test_drift_false_for_unknown_and_root():
     nodes = [a, b, c, t]
     assert has_drift(nodes, "does-not-exist") is False
     assert has_drift(nodes, "a") is False  # root turn, both views []
+
+
+# =====================================================================
+# diff_regions — structural block-alignment of then- vs now-context
+# =====================================================================
+
+def _expand_direction_graph():
+    """The task-20 shape: T saw K, K expanded after T ran.
+
+    U1=a, A1=b, K folds [a,b], U2=c, A2=T, then E expands K.
+    then-context(T) = [K, c]; now-context(T) = [a, b, c].
+    """
+    a = msg("a", None, 1)
+    b = msg("b", "a", 2, role="assistant")
+    k = compression("K", ["a", "b"], 3)
+    c = msg("c", "b", 4)
+    t = msg("T", "c", 5, role="assistant")
+    e = expand("E", "K", 6)
+    return [a, b, k, c, t, e]
+
+
+def _changed(regions):
+    return [r for r in regions if r.changed]
+
+
+# D1 — expand direction: the changed region is K (left) ⟷ its originals (right).
+def test_diff_regions_expand_direction():
+    nodes = _expand_direction_graph()
+    regions = diff_regions(nodes, "T")
+    changed = _changed(regions)
+    assert len(changed) == 1
+    assert ids(changed[0].left) == ["K"]
+    assert ids(changed[0].right) == ["a", "b"]
+    # The shared tail (c) is present as an unchanged region on both sides.
+    unchanged = [r for r in regions if not r.changed]
+    assert unchanged and ids(unchanged[-1].left) == ["c"]
+    assert ids(unchanged[-1].right) == ["c"]
+
+
+# D2 — compression direction: T ran verbatim, a K created afterwards folds it now.
+def test_diff_regions_compression_direction():
+    a = msg("a", None, 1)
+    b = msg("b", "a", 2, role="assistant")
+    c = msg("c", "b", 3)
+    t = msg("T", "c", 4, role="assistant")
+    k = compression("K", ["a", "b"], 5)  # created after T
+    regions = diff_regions([a, b, c, t, k], "T")
+    changed = _changed(regions)
+    assert len(changed) == 1
+    assert ids(changed[0].left) == ["a", "b"]  # what T saw
+    assert ids(changed[0].right) == ["K"]  # what it folds to now
+
+
+# D3 — no drift: every region is unchanged and spans the whole prefix.
+def test_diff_regions_no_drift_all_unchanged():
+    a, b, c = _line_abc()
+    t = msg("T", "c", 4, role="assistant")
+    regions = diff_regions([a, b, c, t], "T")
+    assert regions  # not empty
+    assert all(not r.changed for r in regions)
+    left = [n for r in regions for n in r.left]
+    right = [n for r in regions for n in r.right]
+    assert ids(left) == ["a", "b", "c"]
+    assert ids(right) == ["a", "b", "c"]
+
+
+# D4 — unknown node: both prefixes empty → no regions.
+def test_diff_regions_unknown_node_empty():
+    a, b, c = _line_abc()
+    t = msg("T", "c", 4)
+    assert diff_regions([a, b, c, t], "nope") == []
+
+
+# =====================================================================
+# reconstruction_warning — the ctx_hash H4 tripwire
+# =====================================================================
+
+def _loader(_path):
+    return ""
+
+
+def _turn_with_hash(nodes, turn_id, hash_value):
+    """Stamp meta['ctx_hash'] on the turn node in ``nodes``."""
+    for n in nodes:
+        if n.id == turn_id:
+            n.meta["ctx_hash"] = hash_value
+
+
+# W1 — matching hash: reconstruction verifies, no warning.
+def test_warning_false_when_hash_matches():
+    nodes = _expand_direction_graph()
+    genuine = hash_context(build_context(context_at_generation(nodes, "T"), _loader))
+    _turn_with_hash(nodes, "T", genuine)
+    assert reconstruction_warning(nodes, "T", _loader) is False
+
+
+# W2 — mismatched hash: warns (a reconstruction bug or drifted import).
+def test_warning_true_when_hash_mismatches():
+    nodes = _expand_direction_graph()
+    _turn_with_hash(nodes, "T", "deadbeef")
+    assert reconstruction_warning(nodes, "T", _loader) is True
+
+
+# W3 — missing hash (pre-3b turn): warns rather than claiming exactness.
+def test_warning_true_when_hash_absent():
+    nodes = _expand_direction_graph()  # T carries no ctx_hash
+    assert reconstruction_warning(nodes, "T", _loader) is True
+
+
+# W4 — unknown node: nothing to warn about.
+def test_warning_false_for_unknown_node():
+    nodes = _expand_direction_graph()
+    assert reconstruction_warning(nodes, "nope", _loader) is False

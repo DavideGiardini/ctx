@@ -26,6 +26,7 @@ from ctx.ui.widgets.detail_inspector import (
     DetailInspector,
     NodeView,
 )
+from ctx.ui.widgets.diff_view import DiffView
 from ctx.ui.widgets.history_screen import HistoryScreen
 from ctx.ui.widgets.include_screen import IncludeScreen
 from ctx.ui.widgets.input_bar import InputBar
@@ -109,8 +110,13 @@ class ChatApp(App):
         # Ephemeral — never persisted.
         self._deep_dive_stack: list[dict] = []
         # One-key chord buffer: ``g`` arms it, the next key completes/cancels
-        # (``g d`` opens a deep-dive). ``None`` when disarmed. See ``on_key``.
+        # (``g d`` opens a deep-dive or a context diff). ``None`` when disarmed.
         self._pending_chord: str | None = None
+        # Context-diff view state (task 20), shared "navigation family" with the
+        # deep-dive stack but mutually exclusive with it: a diff is opened by
+        # ``g d`` on a *drifted assistant* turn (a K still deep-dives). ``None``
+        # = no diff open. Ephemeral — never persisted.
+        self._diff_view: dict | None = None
         logger.info("app initialized | default_model=%s", self.core.model)
 
     def compose(self) -> ComposeResult:
@@ -120,6 +126,7 @@ class ChatApp(App):
             yield CompressionEditor(id="compression-editor")
             with Vertical(id="conversation"):
                 yield MessageList(id="messages")
+                yield DiffView(id="diff-view")
                 # Suggestions + input share one docked container so they stack
                 # in normal flow (docking both directly would overlap them).
                 with Container(id="input-area"):
@@ -210,6 +217,11 @@ class ChatApp(App):
         if self.mode == "edit" and self._range_anchor_id is not None:
             self._clear_range()
             return
+        # While the diff view is open, Esc backs out of it (like Ctrl+o) rather
+        # than toggling the mode (task 20, same family as deep-dive).
+        if self.mode == "edit" and self._diff_view is not None:
+            await self._close_diff()
+            return
         # While deep-diving, Esc backs out one level (like Ctrl+o) rather than
         # toggling the mode, keeping the view and mode consistent (task 12).
         if self.mode == "edit" and self._deep_dive_stack:
@@ -225,6 +237,8 @@ class ChatApp(App):
         # restored before dropping into Insert (appends go to the active tip;
         # deep-dive never moved it).
         if self.mode == "edit":
+            if self._diff_view is not None:
+                await self._close_diff()
             if self._deep_dive_stack:
                 self._deep_dive_stack.clear()
                 await self._rebuild_message_list()
@@ -380,9 +394,11 @@ class ChatApp(App):
         """Minimal ``g``-prefixed key-chord buffer (task 12).
 
         Only active while the message list holds focus in Edit mode: ``g`` arms
-        the chord, a following ``d`` opens a deep-dive on the selected K, and any
-        other key cancels it (falling through to normal handling). Keys outside
-        that context disarm the chord and are left untouched."""
+        the chord, a following ``d`` drills into the selected node — a deep-dive
+        on a compression ``K``, or the context-diff view on a *drifted assistant*
+        turn (one navigation family, Q12) — and any other key cancels it (falling
+        through to normal handling). Keys outside that context disarm the chord
+        and are left untouched."""
         if self.mode != "edit" or self._focus_target() != "messages":
             self._pending_chord = None
             return
@@ -390,11 +406,27 @@ class ChatApp(App):
             self._pending_chord = None
             if event.key == "d":
                 event.stop()
-                await self._enter_deep_dive()
+                await self._drill_selected()
             return
         if event.key == "g":
             self._pending_chord = "g"
             event.stop()
+
+    async def _drill_selected(self) -> None:
+        """``g d`` dispatch: deep-dive a K, else diff a drifted assistant turn.
+
+        A compression node opens its folded originals (task 12); an assistant
+        turn whose generation context has drifted from now opens the context
+        diff (task 20). Any other selection is a no-op."""
+        node = self._get_selected_node()
+        if node is None:
+            return
+        if node.node_type == "compression":
+            await self._enter_deep_dive()
+        elif node.role == "assistant" and reconstruction.has_drift(
+            self.core.all_nodes(), node.id
+        ):
+            await self._enter_diff(node)
 
     async def _enter_deep_dive(self) -> None:
         """Push a deep-dive frame for the selected K and render its originals.
@@ -422,6 +454,10 @@ class ChatApp(App):
 
         Inert when no deep-dive is active. The cursor lands back on the K that
         was dived into (or the last node if it is gone)."""
+        # The diff view is the same navigation family (Q12): Ctrl+o pops it too.
+        if self._diff_view is not None:
+            await self._close_diff()
+            return
         if not self._deep_dive_stack:
             return
         popped = self._deep_dive_stack.pop()
@@ -438,6 +474,52 @@ class ChatApp(App):
         self.query_one(AppFooter).set_deep_dive(bool(self._deep_dive_stack))
         self._select_message(select_id)
         self._refresh_token_ui()
+
+    # --- context diff view (task 20) ------------------------------------
+
+    async def _enter_diff(self, node: Node) -> None:
+        """Open the full-pane context diff for assistant turn ``node``.
+
+        Aligns the turn's generation-time context (left) against the now-view
+        (right) by node id and swaps the message list for the ``DiffView``. The
+        H4 tripwire runs on open: a stored-hash mismatch (or a pre-3b turn with
+        no hash) shows the "reconstruction may be inexact" banner (A#3 §4). The
+        region cursor lands on the first changed region."""
+        all_nodes = self.core.all_nodes()
+        regions = reconstruction.diff_regions(all_nodes, node.id)
+        warning = reconstruction.reconstruction_warning(
+            all_nodes, node.id, self.core.read_file
+        )
+        # A range selection can't survive the view swap (mirrors deep-dive, 13h #1).
+        self._clear_range()
+        self._diff_view = {
+            "node_id": node.id,
+            "label": f"Diff …{node.id[-4:]}",
+            "regions": regions,
+            "warning": warning,
+        }
+        self.query_one(MessageList).display = False
+        diff = self.query_one(DiffView)
+        await diff.show(regions, warning)
+        diff.focus()
+        self.query_one(AppFooter).set_deep_dive(True)
+
+    async def _close_diff(self) -> None:
+        """Pop the diff view, restoring the live message list and its cursor."""
+        target = self._diff_view["node_id"] if self._diff_view else None
+        self._diff_view = None
+        self.query_one(DiffView).close()
+        self.query_one(MessageList).display = True
+        self.query_one(AppFooter).set_deep_dive(bool(self._deep_dive_stack))
+        self.query_one(MessageList).focus()
+        self._select_message(
+            target if any(n.id == target for n in self.core.nodes) else None
+        )
+        self._refresh_token_ui()
+
+    def _move_region_cursor(self, step: int) -> None:
+        """Move the diff view's changed-region cursor by ``step`` (clamped)."""
+        self.query_one(DiffView).move_cursor(step)
 
     # --- compression draft editor ---------------------------------------
 
@@ -535,6 +617,11 @@ class ChatApp(App):
         worker survives the switch. So pop the whole dive stack + reset the
         footer hint, close the editor without committing (cancels a live worker,
         13d), and clear the chord/last-draft/selection state."""
+        if self._diff_view is not None:
+            self._diff_view = None
+            self.query_one(DiffView).close()
+            self.query_one(MessageList).display = True
+            self.query_one(AppFooter).set_deep_dive(False)
         if self._deep_dive_stack:
             self._deep_dive_stack.clear()
             self.query_one(AppFooter).set_deep_dive(False)
@@ -666,6 +753,9 @@ class ChatApp(App):
     def action_up(self) -> None:
         if self.mode != "edit":
             return
+        if self._diff_view is not None:
+            self._move_region_cursor(-1)
+            return
         if self._focus_in_detail():
             inspector = self.query_one(DetailInspector)
             if inspector.pane_mode == "browse":
@@ -677,6 +767,9 @@ class ChatApp(App):
 
     def action_down(self) -> None:
         if self.mode != "edit":
+            return
+        if self._diff_view is not None:
+            self._move_region_cursor(1)
             return
         if self._focus_in_detail():
             inspector = self.query_one(DetailInspector)
@@ -995,8 +1088,13 @@ class ChatApp(App):
             "context_gauge": {"pct": gauge_pct, "approximate": gauge_approximate},
             "deep_dive": {
                 "active": in_deep_dive,
-                "breadcrumb": ["Chat", *(f["label"] for f in self._deep_dive_stack)],
+                "breadcrumb": [
+                    "Chat",
+                    *(f["label"] for f in self._deep_dive_stack),
+                    *([self._diff_view["label"]] if self._diff_view else []),
+                ],
             },
+            "diff_view": self._diff_view_state(),
             "truncation": truncation,
             "input": input_bar.value,
             "command_menu": command_menu,
@@ -1009,6 +1107,23 @@ class ChatApp(App):
         whether it is open plus its current prompt/output text."""
         editor = self.query_one(CompressionEditor)
         return {"open": editor.is_open, "prompt": editor.prompt, "output": editor.output}
+
+    def _diff_view_state(self) -> dict:
+        """Snapshot of the context-diff view for ``describe_state`` (task 20):
+        whether it is open, its **changed** regions (each ``{"left": [ids],
+        "right": [ids]}``, aligned by node id), and the H4 warning flag."""
+        diff = self._diff_view
+        if diff is None:
+            return {"open": False, "regions": [], "warning": False}
+        return {
+            "open": True,
+            "regions": [
+                {"left": [n.id for n in r.left], "right": [n.id for n in r.right]}
+                for r in diff["regions"]
+                if r.changed
+            ],
+            "warning": diff["warning"],
+        }
 
     @staticmethod
     def _regions_overlap(a, b) -> bool:
