@@ -516,6 +516,31 @@ class ChatApp(App):
         self.query_one(DetailInspector).display = True
         self.query_one(MessageList).focus()
 
+    def _reset_transient_ui(self) -> None:
+        """Tear down all transient compression/navigation UI before a
+        conversation switch (13f).
+
+        `/new` and `/resume` (and any future switch path) can fire while a
+        deep-dive, an open draft editor, or a running draft worker stands — a
+        mouse click focuses the InputBar without entering Insert or clearing
+        state. Left standing, a dead dive frame keeps feeding `_visible_nodes()`
+        (resurrecting the old conversation's folded children), the editor sits
+        open over dead range ids (→ 13a's ValueError site), and a live draft
+        worker survives the switch. So pop the whole dive stack + reset the
+        footer hint, close the editor without committing (cancels a live worker,
+        13d), and clear the chord/last-draft/selection state."""
+        if self._deep_dive_stack:
+            self._deep_dive_stack.clear()
+            self.query_one(AppFooter).set_deep_dive(False)
+        if self.query_one(CompressionEditor).is_open:
+            self._close_compression_editor()
+        elif self._draft_worker is not None and not self._draft_worker.is_finished:
+            self._draft_worker.cancel()
+        self._draft_worker = None
+        self._last_drafted_prompt = ""
+        self._pending_chord = None
+        self._clear_selection()
+
     def action_draft_compression(self) -> None:
         """`Ctrl+D` in the draft editor: stream an AI summary into the Bottom
         split (Q4). Inert unless the editor owns the left pane. Re-drafting
@@ -1032,7 +1057,7 @@ class ChatApp(App):
         old_id = self.core.conversation_id
         node = self.core.new_conversation()
         logger.info("new conversation | old_id=%s", old_id)
-        self._clear_selection()
+        self._reset_transient_ui()
         message_list = self.query_one(MessageList)
         for child in list(message_list.children):
             await child.remove()
@@ -1056,7 +1081,7 @@ class ChatApp(App):
         if result is None:
             return
         nodes = self.core.resume_conversation(result)
-        self._clear_selection()
+        self._reset_transient_ui()
         message_list = self.query_one(MessageList)
         for child in list(message_list.children):
             await child.remove()

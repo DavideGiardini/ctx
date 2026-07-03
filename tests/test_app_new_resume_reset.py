@@ -1,0 +1,173 @@
+"""Pilot tests for conversation-switch UI reset (PRD Sprint 3, Task 13f).
+
+``/new`` and ``/resume`` can fire (e.g. after a mouse click focuses the InputBar
+without entering Insert) while a deep-dive, an open draft editor, or a running
+draft worker still stands. Each handler must tear that transient state down via
+``_reset_transient_ui()`` before the switch: pop the whole deep-dive stack (and
+its footer hint), close the editor without committing, cancel a live draft
+worker, and clear the selection/chord/last-draft state. Otherwise a dead dive
+frame resurrects the old conversation's folded children through
+``_visible_nodes()``, the editor sits open over dead range ids, and a live worker
+survives the switch.
+
+The oracle is the Task 13f acceptance criterion, asserted through the public
+``describe_state()`` snapshot, the footer hint, and ``app._draft_worker``
+liveness. The handlers are invoked directly — the mouse path (focus without a
+mode switch) has no Pilot key equivalent.
+"""
+
+import asyncio
+
+from textual.widgets import TextArea
+
+from ctx.core.provider import TestProvider as CannedProvider
+from ctx.ui.app import ChatApp
+from ctx.ui.widgets.input_bar import InputBar
+
+
+class _BlockingProvider:
+    """Yields its ``before`` tokens, then blocks on ``gate`` before ``AFTER``.
+
+    Keeps a consuming draft worker live (PENDING/RUNNING) while the test drives
+    the switch, modelling the "draft still streaming" race.
+    """
+
+    def __init__(self, before: list[str], gate: asyncio.Event) -> None:
+        self._before = before
+        self._gate = gate
+
+    async def stream(self, messages, model, on_usage=None):  # type: ignore[no-untyped-def]
+        for token in self._before:
+            yield token
+        await self._gate.wait()
+        yield "AFTER"
+
+    async def check_connectivity(self, model):  # type: ignore[no-untyped-def]
+        return (True, "ok")
+
+
+def _app(repo, workspace) -> ChatApp:
+    return ChatApp(provider=CannedProvider(["ok"]), workspace=workspace, storage=repo)
+
+
+async def _two_turns(app) -> None:
+    await app.on_input_bar_submitted(InputBar.Submitted("first"))
+    await app.workers.wait_for_complete()
+    await app.on_input_bar_submitted(InputBar.Submitted("second"))
+    await app.workers.wait_for_complete()
+
+
+async def _compress_full_tip_range(app, pilot, summary: str) -> None:
+    await pilot.press("escape")  # → Edit mode
+    await pilot.press("home")  # cursor on the first node
+    await pilot.press("v", "down", "down", "down")  # range = all 4 nodes (ends at tip)
+    await pilot.press("c")  # open the draft editor
+    app.query_one("#compress-output", TextArea).text = summary
+    await pilot.press("ctrl+s")  # commit → one K in the view
+
+
+async def _enter_deep_dive(app, pilot) -> None:
+    await _two_turns(app)
+    await _compress_full_tip_range(app, pilot, "SUMMARY")
+    # A commit clears the selection; bounce out and back to re-select the K tip.
+    await pilot.press("escape")  # → Insert
+    await pilot.press("escape")  # → Edit, selects the tip (K)
+    assert app._get_selected_node().node_type == "compression"
+    await pilot.press("g", "d")
+    await pilot.pause()
+    assert app.describe_state()["deep_dive"]["active"] is True
+
+
+async def _open_editor_on_full_range(pilot) -> None:
+    await pilot.press("escape")  # → Edit mode
+    await pilot.press("home")
+    await pilot.press("v", "down", "down", "down")
+    await pilot.press("c")  # open the draft editor
+
+
+async def _start_blocked_draft(app, pilot, gate) -> None:
+    app.core._provider = _BlockingProvider(["partial"], gate)
+    await pilot.press("ctrl+d")
+    for _ in range(200):
+        if app._draft_worker is not None and not app._draft_worker.is_finished:
+            break
+        await pilot.pause()
+    assert app._draft_worker is not None and not app._draft_worker.is_finished
+
+
+async def test_new_resets_a_live_deep_dive(repo, workspace):
+    app = _app(repo, workspace)
+    async with app.run_test() as pilot:
+        await _enter_deep_dive(app, pilot)
+
+        await app._handle_new_command()
+        await pilot.pause()
+
+        state = app.describe_state()
+        # Dive gone: state reflects the fresh (empty) conversation, not the four
+        # frozen folded children the dead dive frame would have resurrected.
+        assert state["deep_dive"]["active"] is False
+        assert state["deep_dive"]["breadcrumb"] == ["Chat"]
+        assert state["nodes"] == []
+        # Footer is back to the mode hint, not the deep-dive hint.
+        assert "read-only" not in state["footer"]
+
+
+async def test_resume_resets_a_live_deep_dive(repo, workspace, monkeypatch):
+    app = _app(repo, workspace)
+    async with app.run_test() as pilot:
+        await _enter_deep_dive(app, pilot)
+        conv_id = app.core.conversation_id
+
+        async def _fake_pick(screen):  # noqa: ANN001
+            return conv_id
+
+        monkeypatch.setattr(app, "push_screen_wait", _fake_pick)
+        app._handle_resume_command()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        state = app.describe_state()
+        assert state["deep_dive"]["active"] is False
+        assert state["deep_dive"]["breadcrumb"] == ["Chat"]
+        # The resumed view is the single folded K, not the four dive children.
+        assert len(state["nodes"]) == 1
+        assert state["nodes"][0]["node_type"] == "compression"
+
+
+async def test_new_closes_an_open_editor_without_committing(repo, workspace):
+    app = _app(repo, workspace)
+    async with app.run_test() as pilot:
+        await _two_turns(app)
+        await _open_editor_on_full_range(pilot)
+        assert app.describe_state()["compression_editor"]["open"] is True
+
+        await app._handle_new_command()
+        await pilot.pause()
+
+        state = app.describe_state()
+        assert state["compression_editor"]["open"] is False
+        # No K was committed by the switch.
+        assert not any(n["node_type"] == "compression" for n in state["nodes"])
+
+
+async def test_new_cancels_a_live_draft_worker(repo, workspace):
+    app = _app(repo, workspace)
+    async with app.run_test() as pilot:
+        await _two_turns(app)
+        await _open_editor_on_full_range(pilot)
+        gate = asyncio.Event()
+        await _start_blocked_draft(app, pilot, gate)
+        worker = app._draft_worker
+
+        await app._handle_new_command()
+        await pilot.pause()
+
+        assert app._draft_worker is None
+        for _ in range(200):
+            if worker.is_finished:
+                break
+            await pilot.pause()
+        assert worker.is_finished  # cancelled, not orphaned
+        gate.set()
+        await app.workers.wait_for_complete()
