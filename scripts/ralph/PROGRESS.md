@@ -1961,3 +1961,29 @@ Git history is the source of truth for *what changed*; this file captures the
   live, so no relaunch needed for the flag to take effect on the next action — but you
   cannot change it mid-run, so one config state per qa-tester pass. ALWAYS restore
   (delete if it didn't exist) afterward — it's the real user config, not a repo file.
+
+## 2026-07-03 — Task 24: gate `g d` diff view on `ui.show_context_drift`
+
+- DECISION (the DECIDE-then-align call): the flag gates *all* drift UI, not just
+  the passive `Δ` marker. Rationale — with drift off there is no marker signalling
+  that any turn drifted, so it's incoherent for the active `g d` drill to still open
+  the full-screen diff on a turn the UI otherwise presents as undrifted. The K
+  deep-dive branch of `g d` is untouched (that's compression navigation, not drift).
+- Implementation: extracted a shared predicate `_turn_has_drift(node, all_nodes)`
+  in `ctx/ui/app.py` that returns `False` for non-assistant roles, for undrifted
+  turns, and for *every* node when `ui.show_context_drift` is off; otherwise
+  `reconstruction.has_drift`. Both `_node_drift` (maps it over the view; keeps its
+  own early-return so `get_config()`/`all_nodes()` aren't re-hit per node) and
+  `_drill_selected`'s assistant branch now route through it. Previously the drill
+  called `reconstruction.has_drift` directly (`app.py:427`), bypassing the gate.
+- Docs aligned: `ctx/core/config.py` docstring widened from "marks" to "surfaces
+  (marker + `g d` diff drill)"; AGENTS.md updated to describe the shared predicate.
+- Test: added `test_gd_diff_is_noop_on_drifted_turn_when_config_disabled` to
+  tests/test_app_drift.py — drift off, cursor on the drifted A2, `g d` →
+  `describe_state()["diff_view"]["open"] is False`. A regression re-introducing the
+  ungated drill would survive without it. The existing test_app_diff_view.py already
+  locks the positive (drift on → diff opens).
+- Verification: `scripts/check.sh` green (616 passed; was 615). ruff+mypy clean.
+  NO qa-tester: same-iteration UI edit, MCP harness runs `ctx.*` cached in-process
+  and can't see it (AGENTS.md limit a) — Pilot test is the verification (as tasks
+  19–22). Remaining Phase 3c tasks: 25 (Δ vs weight-% layout), 26 (snapshot.py render).

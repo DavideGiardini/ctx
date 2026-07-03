@@ -620,7 +620,7 @@ _(All 7 task-23 checkpoints PASSED — Sprint 3 features work end-to-end. These 
 defects/gaps the qa-tester surfaced during that pass, filed here per task 23's "defects
 become new `- [ ]` tasks" instruction. Not blockers for the Sprint 3 feature set.)_
 
-- [ ] **24. Decide + align: should `g d` diff-view respect `ui.show_context_drift`?**
+- [x] **24. Decide + align: should `g d` diff-view respect `ui.show_context_drift`?**
       _(deps: 19, 20)_ — the passive `Δ` marker is config-gated (`_node_drift` returns
       all-`False` when `ui.show_context_drift` is off, `ctx/ui/app.py:956`), but the
       active diff drill is **not**: `_drill_selected` calls `reconstruction.has_drift`
