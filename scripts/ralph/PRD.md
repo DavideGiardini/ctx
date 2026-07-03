@@ -198,7 +198,7 @@ Dependencies noted; every prerequisite sits above its dependent.
       resolved view (round-trip). Then qa-tester (verify-feature) confirms the manual
       flow on the harness. `scripts/check.sh` green.
 
-- [ ] **9. UI: draft streaming (`Ctrl+D`)** _(deps: 5, 7, 8)_ — `Ctrl+D` in the
+- [x] **9. UI: draft streaming (`Ctrl+D`)** _(deps: 5, 7, 8)_ — `Ctrl+D` in the
       editor runs a `@work` worker consuming `core.draft_compression(start, end,
       prompt=<Top text>)` into Bottom (clear first — **re-draft overwrites**, Q4);
       ignore further `Ctrl+D` while a draft streams; `Esc` during a draft cancels the

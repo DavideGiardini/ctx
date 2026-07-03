@@ -1002,3 +1002,36 @@ Git history is the source of truth for *what changed*; this file captures the
   make the draft key a priority app binding or an editor binding. (2) On `Ctrl+S`, task 9
   must pass the LAST-DRAFTED prompt as `prompt=` (still `""` if never drafted); currently
   hard-coded `prompt=""`. (3) Re-draft OVERWRITES Bottom (clear first, Q4).
+
+## 2026-07-03 — Task 9 (Sprint 3): draft streaming (`Ctrl+D`) + drafted-prompt commit (Q4/Q10b)
+- `ChatApp.action_draft_compression` (new `ctrl+d` Binding, **priority=True** so it beats
+  the focused TextArea's `delete_right`; inert unless `CompressionEditor.is_open`). Reads
+  the range via `_compression_range()`, captures `editor.prompt` into `self._last_drafted_prompt`,
+  and launches `@work _draft_compression_worker(start, end, prompt)`.
+- Worker consumes `core.draft_compression(...)`, `editor.set_output("")` first (clear → re-draft
+  overwrites, Q4), accumulates tokens and re-sets the Bottom split each token. `CancelledError`
+  re-raises (keeps partial text, no graph mutation); other exceptions render `Draft failed: …`.
+- New editor method `CompressionEditor.set_output(text)` (deep widget owns its TextArea).
+- Ignore-while-streaming: `action_draft_compression` returns early if `_draft_worker` is RUNNING.
+- Esc during a draft: `action_escape` now cancels a RUNNING `_draft_worker` and returns (editor
+  stays open); a second Esc (no running draft) closes as before.
+- `action_commit_compression` now passes `prompt=self._last_drafted_prompt` (was hard-coded `""`);
+  `_open_compression_editor` resets `_last_drafted_prompt=""` (fresh open = manual until a draft
+  runs); `_close_compression_editor` clears `_draft_worker`.
+- Tests: `tests/test_app_draft_compression.py` (4 Pilot tests via `pilot.press` = real binding
+  wiring): `Ctrl+D` fills Bottom with canned tokens AND leaves `usage_generation`/`calibration`
+  unchanged (Q10b — provider reports a valid `Usage` so a wrongly-anchoring draft would trip);
+  re-draft after a stale hand-edit + edited Top overwrites (not doubled); `Ctrl+D`→`Ctrl+S`
+  stamps the drafted Top as `K.meta["prompt"]` (not `""`); `Ctrl+D` inert when editor closed.
+  UI task → Pilot is the mandatory floor; core `draft_compression` already exists+tested (task 5).
+- Did NOT write an Esc-cancels-draft test: with a canned provider the draft completes instantly,
+  so mid-stream cancel isn't deterministic; the cancel path isn't in the task-9 acceptance floor
+  (deletion test → skip). The RUNNING-guard + Esc-cancel wiring is exercised by code inspection.
+- Verification: `scripts/check.sh` green (495 passed, was 491; +4; ruff+mypy clean). qa-tester
+  NOT applicable — task-9 acceptance lists only Pilot (no "then qa-tester" clause, unlike tasks
+  8/10/11/12), and the in-process harness can't see this iteration's uncommitted/cached edits.
+- Did NOT commit the pre-existing dirty `CONTEXT.md` / `docs/Sprint Roadmap.md` (dirty at session
+  start; Roadmap edits forbidden by the PRD).
+- GOTCHA for task 10 (committed-K inspector 3-split): the drafted prompt now survives onto K via
+  `K.meta["prompt"]` — task 10's Top split reads exactly that (empty prompt → hide Top). Add the
+  `folded_children(k_id)` core accessor first (children are NOT in `current_view()`).
