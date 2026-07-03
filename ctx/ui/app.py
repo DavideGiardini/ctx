@@ -191,9 +191,7 @@ class ChatApp(App):
         # draft is streaming the first Esc cancels the worker but keeps the
         # editor open; a second Esc then closes it (task 9).
         if self.query_one(CompressionEditor).is_open:
-            if self._draft_worker is not None and (
-                self._draft_worker.state == WorkerState.RUNNING
-            ):
+            if self._draft_worker is not None and not self._draft_worker.is_finished:
                 self._draft_worker.cancel()
                 return
             self._close_compression_editor()
@@ -483,9 +481,7 @@ class ChatApp(App):
             return
         if self._deep_dive_stack:  # deep-dive is read-only (task 12)
             return
-        if self._stream_worker is not None and (
-            self._stream_worker.state == WorkerState.RUNNING
-        ):
+        if self._stream_worker is not None and not self._stream_worker.is_finished:
             await self._breadcrumb("Cannot expand while a response is streaming.")
             return
         node = self._get_selected_node()
@@ -511,6 +507,11 @@ class ChatApp(App):
 
     def _close_compression_editor(self) -> None:
         self.query_one(CompressionEditor).close()
+        # Cancel before dropping the reference: an orphaned draft worker keeps
+        # streaming into the now-hidden TextArea and would overwrite a re-opened
+        # editor's Summary with the old range's draft (13d).
+        if self._draft_worker is not None and not self._draft_worker.is_finished:
+            self._draft_worker.cancel()
         self._draft_worker = None
         self.query_one(DetailInspector).display = True
         self.query_one(MessageList).focus()
@@ -524,7 +525,7 @@ class ChatApp(App):
         editor = self.query_one(CompressionEditor)
         if not editor.is_open:
             return
-        if self._draft_worker is not None and self._draft_worker.state == WorkerState.RUNNING:
+        if self._draft_worker is not None and not self._draft_worker.is_finished:
             return
         ids = self._compression_range()
         if not ids:
@@ -563,6 +564,11 @@ class ChatApp(App):
         """
         editor = self.query_one(CompressionEditor)
         if not editor.is_open:
+            return
+        if self._draft_worker is not None and not self._draft_worker.is_finished:
+            # A live draft is still overwriting the Bottom split — committing now
+            # would fold a half-streamed summary. Refuse; Esc cancels it (13d).
+            await self._breadcrumb("Draft in progress — Esc cancels it first.")
             return
         if not editor.output.strip():
             await self._breadcrumb("Write a summary before committing (Ctrl+S).")
@@ -843,10 +849,7 @@ class ChatApp(App):
                 entry["source_path"] = source_path
             node_states.append(entry)
 
-        streaming = (
-            self._stream_worker is not None
-            and self._stream_worker.state == WorkerState.RUNNING
-        )
+        streaming = self._stream_worker is not None and not self._stream_worker.is_finished
 
         input_bar = self.query_one(InputBar)
         suggestions = self.query_one("#command-suggestions", Static)
@@ -1104,7 +1107,7 @@ class ChatApp(App):
             inspector.append_stream(node.content)
 
     def action_cancel_stream(self) -> None:
-        if self._stream_worker and self._stream_worker.state == WorkerState.RUNNING:
+        if self._stream_worker and not self._stream_worker.is_finished:
             self._stream_worker.cancel()
         else:
             self.exit()

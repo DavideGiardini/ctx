@@ -1,0 +1,182 @@
+"""Pilot tests for draft-worker lifecycle safety (PRD Sprint 3, Task 13d).
+
+A live ``Ctrl+D`` draft worker must never be orphaned:
+
+* ``Ctrl+S`` while a draft still streams must refuse (breadcrumb, no commit) —
+  committing then would fold a half-streamed summary.
+* Closing the editor (Esc, or a successful commit) must **cancel** the worker
+  before dropping the reference, so it cannot keep streaming into the hidden
+  TextArea and overwrite a re-opened editor's Summary with the old draft.
+
+The oracle is the Task 13d acceptance criterion, asserted through the public
+``describe_state()`` / editor state, ``app._draft_worker`` liveness, and
+``app.workers``. A ``_BlockingProvider`` (yields a partial token, then blocks on
+a gate) keeps the draft worker live while the test drives the UI.
+"""
+
+import asyncio
+
+from textual.widgets import TextArea
+
+from ctx.core.provider import TestProvider as CannedProvider
+from ctx.ui.app import ChatApp
+from ctx.ui.widgets.input_bar import InputBar
+
+
+class _BlockingProvider:
+    """Yields its ``before`` tokens, then blocks on ``gate`` before ``AFTER``.
+
+    Models an LLM suspended mid-stream so a consuming draft worker stays live
+    (PENDING/RUNNING) while the test drives the editor.
+    """
+
+    def __init__(self, before: list[str], gate: asyncio.Event) -> None:
+        self._before = before
+        self._gate = gate
+
+    async def stream(self, messages, model, on_usage=None):  # type: ignore[no-untyped-def]
+        for token in self._before:
+            yield token
+        await self._gate.wait()
+        yield "AFTER"
+
+    async def check_connectivity(self, model):  # type: ignore[no-untyped-def]
+        return (True, "ok")
+
+
+def _app(repo, workspace) -> ChatApp:
+    return ChatApp(
+        provider=CannedProvider(["ok"]),
+        workspace=workspace,
+        storage=repo,
+    )
+
+
+async def _two_turns(app) -> None:
+    await app.on_input_bar_submitted(InputBar.Submitted("first"))
+    await app.workers.wait_for_complete()
+    await app.on_input_bar_submitted(InputBar.Submitted("second"))
+    await app.workers.wait_for_complete()
+
+
+async def _open_editor_on_full_range(pilot) -> None:
+    await pilot.press("escape")  # → Edit mode
+    await pilot.press("home")  # cursor on the first node
+    await pilot.press("v", "down", "down", "down")  # range = all 4 nodes (ends at tip)
+    await pilot.press("c")  # open the draft editor
+
+
+async def _start_blocked_draft(app, pilot, gate) -> None:
+    """Swap in the blocking provider, Ctrl+D, and wait until the draft is live
+    with its partial token rendered (so the worker is genuinely mid-stream)."""
+    app.core._provider = _BlockingProvider(["partial"], gate)
+    await pilot.press("ctrl+d")
+    for _ in range(200):
+        if (
+            app._draft_worker is not None
+            and not app._draft_worker.is_finished
+            and app.query_one("#compress-output", TextArea).text == "partial"
+        ):
+            break
+        await pilot.pause()
+    assert app._draft_worker is not None and not app._draft_worker.is_finished
+
+
+def _compression_nodes(app) -> list[dict]:
+    return [n for n in app.describe_state()["nodes"] if n["node_type"] == "compression"]
+
+
+def _has_system_breadcrumb(app, needle: str) -> bool:
+    return any(
+        n["role"] == "system" and needle in n["content"].lower()
+        for n in app.describe_state()["nodes"]
+    )
+
+
+async def test_commit_mid_draft_is_refused(repo, workspace):
+    app = _app(repo, workspace)
+    async with app.run_test() as pilot:
+        await _two_turns(app)
+        await _open_editor_on_full_range(pilot)
+        gate = asyncio.Event()
+        await _start_blocked_draft(app, pilot, gate)
+
+        await pilot.press("ctrl+s")
+
+        # No K committed, a breadcrumb warns, and the editor is still open.
+        assert _compression_nodes(app) == []
+        assert app.describe_state()["compression_editor"]["open"] is True
+        assert _has_system_breadcrumb(app, "draft in progress")
+
+        gate.set()
+        await app.workers.wait_for_complete()
+
+
+async def test_esc_cancels_a_live_draft(repo, workspace):
+    app = _app(repo, workspace)
+    async with app.run_test() as pilot:
+        await _two_turns(app)
+        await _open_editor_on_full_range(pilot)
+        gate = asyncio.Event()
+        await _start_blocked_draft(app, pilot, gate)
+        worker = app._draft_worker
+
+        await pilot.press("escape")  # first Esc cancels the draft, keeps editor open
+
+        assert app.describe_state()["compression_editor"]["open"] is True
+        for _ in range(200):
+            if worker.is_finished:
+                break
+            await pilot.pause()
+        assert worker.is_finished
+        await app.workers.wait_for_complete()
+
+
+async def test_close_cancels_a_live_worker(repo, workspace):
+    # The close seam itself (used by future conversation-switch paths, not just
+    # Esc) must cancel a live worker before dropping the reference.
+    app = _app(repo, workspace)
+    async with app.run_test() as pilot:
+        await _two_turns(app)
+        await _open_editor_on_full_range(pilot)
+        gate = asyncio.Event()
+        await _start_blocked_draft(app, pilot, gate)
+        worker = app._draft_worker
+
+        app._close_compression_editor()
+
+        assert app.describe_state()["compression_editor"]["open"] is False
+        assert app._draft_worker is None
+        for _ in range(200):
+            if worker.is_finished:
+                break
+            await pilot.pause()
+        # The close path leaves no live worker behind.
+        assert worker.is_finished
+        assert all(w.is_finished for w in app.workers)
+        await app.workers.wait_for_complete()
+
+
+async def test_reopened_editor_summary_is_clean_after_orphan(repo, workspace):
+    # Without the cancel-on-close fix, the orphaned worker unblocks and writes
+    # its draft into the RE-OPENED editor's Summary. With the fix it is dead.
+    app = _app(repo, workspace)
+    async with app.run_test() as pilot:
+        await _two_turns(app)
+        await _open_editor_on_full_range(pilot)
+        gate = asyncio.Event()
+        await _start_blocked_draft(app, pilot, gate)
+
+        app._close_compression_editor()  # close WITHOUT going through Esc
+
+        # Re-open on a different (tip) range and let the old provider unblock.
+        await pilot.press("home", "down", "down", "down")  # cursor on the tip
+        await pilot.press("v", "up")  # range = last two nodes
+        await pilot.press("c")
+        gate.set()
+        for _ in range(50):
+            await pilot.pause()
+
+        # The re-opened editor's Summary is untouched by the dead worker.
+        assert app.query_one("#compress-output", TextArea).text == ""
+        await app.workers.wait_for_complete()
