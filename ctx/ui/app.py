@@ -53,6 +53,7 @@ class ChatApp(App):
         Binding("i", "enter_insert", "Insert Mode", show=False),
         Binding("v", "anchor_range", "Select range", show=False),
         Binding("c", "compress", "Compress", show=False),
+        Binding("x", "expand", "Expand", show=False),
         # ``ctrl+d`` must be a priority binding: the focused prompt/summary
         # ``TextArea`` binds it to delete_right, so the app has to intercept it
         # first to drive the draft (the action is inert unless the editor is open).
@@ -452,7 +453,10 @@ class ChatApp(App):
         """`c` in Edit mode: open the draft editor on the active selection (Q4).
 
         No anchor → range-of-one on the selected node; no selection → no-op
-        (the discoverable ``/compress`` command explains how to select)."""
+        (select a range first with ``v`` in Edit mode). Compression is a
+        selection-dependent action, so it is an Edit-mode key only — never a
+        slash command (task 13b: entering Insert to type a command clears the
+        selection, so a command can never act on it)."""
         if self.mode != "edit" or self._focus_in_detail():
             return
         if self._deep_dive_stack:  # deep-dive is read-only (task 12)
@@ -460,6 +464,42 @@ class ChatApp(App):
         if not self._compression_range():
             return
         self._open_compression_editor()
+
+    async def action_expand(self) -> None:
+        """`x` in Edit mode: restore the selected compression ``K``'s children.
+
+        The non-destructive inverse of a commit (task 11 logic, now bound to a
+        key rather than the removed ``/expand`` command — task 13b): calls
+        ``core.expand_compression`` so the folded children return to the line in
+        place, ``K`` is kept as an off-line orphan and an ``E`` expand event is
+        recorded (ADR-0016 A#3). The message list is rebuilt from the restored
+        view and the selection moves to the first restored child.
+
+        Inert unless a node is selected in Edit mode (not while focus is in the
+        detail pane, and not while deep-diving — the deep-dive is read-only, Q8).
+        A non-compression selection breadcrumbs "Not a compression node" and
+        mutates nothing; refused while a turn is streaming (H2)."""
+        if self.mode != "edit" or self._focus_in_detail():
+            return
+        if self._deep_dive_stack:  # deep-dive is read-only (task 12)
+            return
+        if self._stream_worker is not None and (
+            self._stream_worker.state == WorkerState.RUNNING
+        ):
+            await self._breadcrumb("Cannot expand while a response is streaming.")
+            return
+        node = self._get_selected_node()
+        if node is None or node.node_type != "compression":
+            await self._breadcrumb("Not a compression node")
+            return
+        children = self.core.folded_children(node.id)
+        self.core.expand_compression(node.id)
+        await self._rebuild_message_list()
+        if children:
+            self._select_message(children[0].id)
+        else:
+            self._clear_selection()
+        self._refresh_token_ui()
 
     def _open_compression_editor(self) -> None:
         editor = self.query_one(CompressionEditor)
@@ -930,16 +970,6 @@ class ChatApp(App):
             self._handle_include_command()
             return
 
-        if text == "/compress":
-            logger.info("matched /compress")
-            await self._handle_compress_command()
-            return
-
-        if text == "/expand":
-            logger.info("matched /expand")
-            await self._handle_expand_command()
-            return
-
         logger.info("no command matched, sending to model")
 
         user_node, assistant_node = self.core.submit(text)
@@ -1039,45 +1069,6 @@ class ChatApp(App):
         self._refresh_token_ui()
         if self.mode == "insert":
             self._lock_inspector_to_last()
-
-    async def _handle_compress_command(self) -> None:
-        if not self._compression_range():
-            node = self.core.add_system_message("Select a range first: v in Edit mode")
-            await self.query_one(MessageList).add_node(node)
-            self._refresh_token_ui()
-            if self.mode == "insert":
-                self._lock_inspector_to_last()
-            return
-        self._open_compression_editor()
-
-    async def _handle_expand_command(self) -> None:
-        """`/expand` on the selected compression node: restore its folded children.
-
-        Acts on the currently selected node. If it is a compression ``K``, calls
-        ``core.expand_compression`` — the non-destructive inverse of a commit: the
-        folded children return to the line in place, ``K`` is kept as an off-line
-        orphan and an ``E`` expand event is recorded (ADR-0016 A#3). The message
-        list is then rebuilt from the restored view and the selection moves to the
-        first restored child (so the cursor lands where ``K`` was). Any other
-        selection — or none — breadcrumbs "Not a compression node" and mutates
-        nothing. Refused while a turn is streaming (H2)."""
-        if self._stream_worker is not None and (
-            self._stream_worker.state == WorkerState.RUNNING
-        ):
-            await self._breadcrumb("Cannot expand while a response is streaming.")
-            return
-        node = self._get_selected_node()
-        if node is None or node.node_type != "compression":
-            await self._breadcrumb("Not a compression node")
-            return
-        children = self.core.folded_children(node.id)
-        self.core.expand_compression(node.id)
-        await self._rebuild_message_list()
-        if children:
-            self._select_message(children[0].id)
-        else:
-            self._clear_selection()
-        self._refresh_token_ui()
 
     # --- streaming ------------------------------------------------------
 

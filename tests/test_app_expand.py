@@ -1,18 +1,23 @@
-"""Pilot tests for ``/expand`` (PRD Sprint 3, Task 11; ADR-0016 A#3).
+"""Pilot tests for expand — the Edit-mode ``x`` key (PRD Sprint 3, Task 13b;
+originally Task 11; ADR-0016 A#3/A#5).
 
-``/expand`` on a selected compression node ``K`` restores its folded children in
-place (the non-destructive inverse of a commit): the children come back on the
-line, ``K`` leaves the view, the selection lands on the first restored child, and
-the restored view round-trips through storage. A later turn then sees the children
-verbatim — no ``<conversation_summary>`` wrapper. ``/expand`` on any other node
+``x`` on a selected compression node ``K`` restores its folded children in place
+(the non-destructive inverse of a commit): the children come back on the line,
+``K`` leaves the view, the selection lands on the first restored child, and the
+restored view round-trips through storage. A later turn then sees the children
+verbatim — no ``<conversation_summary>`` wrapper. ``x`` on any other node
 breadcrumbs "Not a compression node" and mutates nothing.
 
-The oracle is the Task 11 acceptance criterion, asserted through the public
+Task 13b removed the dead ``/expand`` slash command: expand is a selection-
+dependent action, and a slash command can never carry a selection (entering
+Insert to type it clears the selection). These tests therefore drive the real
+``x`` key with ``pilot.press`` — deliberately NOT the old
+``on_input_bar_submitted("/expand")`` back-door, which was the convention that
+masked the CP4 defect.
+
+The oracle is the acceptance criterion, asserted through the public
 ``describe_state()`` snapshot, ``app.core`` (for the graph), and a recording
-provider (for the next turn's context). Commands are submitted directly via
-``on_input_bar_submitted`` while a node is selected in Edit mode — the established
-convention in this suite (typing a command would require Insert mode, which clears
-the selection).
+provider (for the next turn's context).
 """
 
 from textual.widgets import TextArea
@@ -83,10 +88,10 @@ async def test_expand_restores_children_and_removes_k(repo, workspace):
             1 for n in app.describe_state()["nodes"] if n["node_type"] == "compression"
         ) == 1
 
-        # Re-enter Edit (selects the tip = K), then expand it.
+        # Re-enter Edit (selects the tip = K), then expand it with the key.
         await _select_tip_in_edit(app, pilot)
         assert app._get_selected_node().node_type == "compression"
-        await app.on_input_bar_submitted(InputBar.Submitted("/expand"))
+        await pilot.press("x")
 
         state = app.describe_state()
         # The four children are back and no K survives in the view.
@@ -103,7 +108,7 @@ async def test_expand_survives_restart(repo, workspace):
         conv_id = app.core.conversation_id
         await _compress_full_tip_range(app, pilot, "SUMMARY")
         await _select_tip_in_edit(app, pilot)
-        await app.on_input_bar_submitted(InputBar.Submitted("/expand"))
+        await pilot.press("x")
         assert not any(
             n["node_type"] == "compression" for n in app.describe_state()["nodes"]
         )
@@ -125,7 +130,7 @@ async def test_next_turn_sees_children_verbatim_after_expand(repo, workspace):
         await _two_turns(app)
         await _compress_full_tip_range(app, pilot, "THE SUMMARY TEXT")
         await _select_tip_in_edit(app, pilot)
-        await app.on_input_bar_submitted(InputBar.Submitted("/expand"))
+        await pilot.press("x")
 
         # Next turn: the recording provider must receive the children verbatim
         # and no compression summary wrapper.
@@ -147,7 +152,7 @@ async def test_expand_on_non_compression_breadcrumbs(repo, workspace):
         await pilot.press("escape")  # Edit mode, cursor on the last (assistant) node
         assert app._get_selected_node().node_type != "compression"
 
-        await app.on_input_bar_submitted(InputBar.Submitted("/expand"))
+        await pilot.press("x")
 
         state = app.describe_state()
         last = state["nodes"][-1]

@@ -449,3 +449,19 @@ Still `prev_id` + `compressed_into` + `active_leaf_id` + `created_seq` (A#2) + t
 name and the expand `anchor` ride existing `meta`. The single-slot delete-undo stash is
 in-memory only (no persistence). Append-only holds: the only true row-deletion remains the
 whole-branch hard delete (now with a defined cleanup closure and a session-scoped undo).
+
+## Amendment #5 — selection-dependent actions are Edit-mode keys, not slash commands (2026-07-03)
+The 3a UI shipped `/compress` and `/expand` slash commands alongside the `c` key. The task-13
+end-to-end walk proved these commands are **structurally dead**: a slash command is only typable
+in the InputBar, which requires Insert mode, and entering Insert (`_set_mode("insert")`)
+unconditionally clears the selection. So a command can never act on a selected range or `K` —
+`/compress` always breadcrumbed "Select a range first" and `/expand` always "Not a compression
+node", sending the user in a circle.
+
+**Resolution (user decision):** selection-dependent actions are **Edit-mode keys only; the slash
+commands are removed, not repaired.** `c` opens the compression draft editor on the selection;
+`x` expands the selected `K` (task 13b). `/compress` / `/expand` are deleted from
+`InputBar.COMMANDS` and from `on_input_bar_submitted`. This supersedes the earlier
+":compress/:expand map to slash commands" note. The "entering Insert clears the selection"
+invariant is intentional and unchanged — it is *why* commands can't carry a selection. Future
+selection-dependent verbs (branch, delete, rewind) follow the same rule: bind a key, not a command.

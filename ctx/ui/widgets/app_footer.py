@@ -8,7 +8,10 @@ from textual.widgets import Static
 
 _HINTS = {
     "insert": "Esc Edit  / Commands  ^C Cancel",
-    "edit": "↑↓ Nav  v Select  c Compress  i/Esc Insert  Tab Pane  1/2/3 Splits  ^C Cancel",
+    "edit": (
+        "↑↓ Nav  v Select  c Compress  x Expand  "
+        "i/Esc Insert  Tab Pane  1/2/3 Splits  ^C Cancel"
+    ),
     "browse": "↑↓ Move  Enter Select  1/2/3 Open  Esc Back  Tab Conversation",
     "maximized": "↑↓/PgUp/PgDn Scroll  1/2/3 Switch  Esc Back  Tab Conversation",
     "deep_dive": "↑↓ Nav  ^o/Esc Back  i Exit  Tab Pane  (read-only)",

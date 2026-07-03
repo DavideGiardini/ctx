@@ -2,8 +2,8 @@
 
 The editor is a left-pane 2-split shown in place of the ``DetailInspector``:
 ``c`` in Edit mode opens it on the active selection (prefilled default prompt,
-empty output); ``/compress`` with no selection breadcrumbs instead of opening;
-``Esc`` cancels for free (editor closes, inspector restored, selection kept).
+empty output); ``Esc`` cancels for free (editor closes, inspector restored,
+selection kept).
 
 The oracle is the Task 7 acceptance criterion, asserted through the public
 ``describe_state()`` snapshot (``compression_editor`` = {open, prompt, output})
@@ -62,21 +62,6 @@ async def test_c_on_single_node_opens_editor(repo, workspace):
         await pilot.press("c")  # no anchor → range-of-one on the selected node
 
         assert app.describe_state()["compression_editor"]["open"] is True
-
-
-async def test_compress_command_no_selection_breadcrumbs_editor_closed(repo, workspace):
-    app = _app(repo, workspace)
-    async with app.run_test():
-        await _two_turns(app)  # stays in Insert mode → no selection
-
-        await app.on_input_bar_submitted(InputBar.Submitted("/compress"))
-
-        state = app.describe_state()
-        assert state["compression_editor"]["open"] is False
-        assert app.query_one(CompressionEditor).display is False
-        last = state["nodes"][-1]
-        assert last["role"] == "system"
-        assert last["content"] == "Select a range first: v in Edit mode"
 
 
 async def test_esc_closes_editor_restores_inspector_keeps_selection(repo, workspace):

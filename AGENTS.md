@@ -151,7 +151,8 @@ a left `DetailInspector` and a right `#conversation` pane (the `MessageList` +
   `CompressionEditor` (left-pane 2-split draft editor — editable prompt + summary
   `TextArea`s, no Center; shown in place of the inspector while drafting a
   compression, cancels for free on Esc, ADR-0016 Q4; opened by `c` in Edit mode
-  or `/compress` on an active selection), `AppHeader` (title /
+  on an active selection — `x` expands the selected K, both Edit-mode keys, never
+  slash commands, ADR-0016 A#5, task 13b), `AppHeader` (title /
   logo / context-window gauge — `set_context_pct(pct, approximate)` renders a
   filled bar and a leading `~` when the figure is only an estimate; `--%` when
   the window is unknown),
