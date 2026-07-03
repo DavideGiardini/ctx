@@ -482,7 +482,7 @@ Dependencies noted; every prerequisite sits above its dependent.
       migration runs once (a second `init()` doesn't rewrite). `scripts/check.sh`
       green.
 
-- [ ] **15. Core: event-enumeration resolution (H3)** _(deps: 14)_ — swap
+- [x] **15. Core: event-enumeration resolution (H3)** _(deps: 14)_ — swap
       `current_view()`'s fold step to the A#2/Q14 **now-rule** behind the same
       signature: walk `prev_id` for the raw line `L`; a compression K applies iff
       **no E targets it** (`E.meta["target"] == K.id`) **and** `K.meta["range"]` ⊆

@@ -1535,3 +1535,49 @@ Git history is the source of truth for *what changed*; this file captures the
   Also: `_next_seq` recomputes max each call (O(graph)) rather than keeping a counter —
   chosen so resume/new_conversation need no counter-reset bookkeeping (deletion test:
   a counter field would just scatter reset logic across three methods).
+
+## 2026-07-03 — Task 15: event-enumeration resolution (H3)
+
+- Swapped `current_view()`'s fold mechanism from pointer-following
+  (`compressed_into`) to the ADR-0016 A#2/H3 now-rule, behind the unchanged
+  signature. Two new private helpers in `conversation.py`:
+  - `_expanded_k_ids()` → set of K ids with an `E` targeting them
+    (`E.meta["target"]`); the single event read for "is K deactivated".
+  - `_active_folds(line_ids)` → dict child_id → K: K applies iff `k.id` not in
+    the expanded set AND `K.meta["range"]` ⊆ the line. `current_view` collapses
+    each maximal contiguous run of an applying K's children into K (identity
+    check `folds.get(id) is k`), matching the old maximal-run behavior.
+- **Also converted the other two runtime `compressed_into` reads** (the grep
+  acceptance demanded write-sites-only): `rewind`'s folded-child guard now
+  rejects `target_id in _active_folds(...)` instead of `compressed_into is not
+  None`; `expand_compression`'s liveness check is now `k_id in _expanded_k_ids()`
+  instead of `any(n.compressed_into == k_id)`. `commit`/`expand` still WRITE
+  `compressed_into` (vestigial DB/debug, A#3 §3) and storage still round-trips
+  the column — no resolution/UI path reads it. Verified: `grep -rn
+  compressed_into ctx/` shows only writes + schema/serialization + docstrings.
+- Tests (documented C-numbered additions, per the task note's explicit
+  authorization + the 13g precedent — the scenarios come from the acceptance
+  criteria & ADR A#2, not the impl):
+  - **Adapted C82–C90** to carry `K.meta["range"]` (the enumeration source of
+    truth). Deliberate, recorded change: the fixtures were coupled to the pointer
+    rep (empty `K.meta` + `compressed_into`), which enumeration would not fold.
+    Same observable views — only the range meta + mechanism moved. Spec
+    (`conversation.md`) updated in lockstep with a mechanism note.
+  - **C97** (stale `compressed_into` at a REAL K whose range excludes the node →
+    NOT folded) and **C98** (range set, `compressed_into` left None → folds) are
+    the two discriminators: C97 folds and C98 doesn't under the OLD pointer
+    resolution, so each is RED against pointer code, GREEN under enumeration.
+    Confirmed by logic (not a live red run — the swap was already committed).
+  - **C99** (expand → re-compress overlap: K′ folds, old K never resurrects, K
+    stays in `_graph`) — regression guard; green under both mechanisms but
+    catches a missing E-exclusion in the enumeration.
+- Verification: `scripts/check.sh` green (550 passed; was 547, +3). ruff+mypy
+  clean. NO qa-tester: pure core logic, `current_view` is framework-free and the
+  UI consumes it unchanged — the unit tests + green gate ARE the verification.
+- Gotcha for task 16: `_active_folds` implements the **now-view** (T=present:
+  apply K iff no E targets it at all). Task 16's `context_at_generation` is the
+  general as-of rule (`created_seq(K) < created_seq(T)` and no E with
+  `created_seq(E) < created_seq(T)`); it belongs in the new `reconstruction.py`
+  module, not by extending these now-view helpers. `folded_children` already
+  reads `K.meta["range"]` (confirmed, unchanged). Enumeration scans the whole
+  `_graph` per `current_view()` call (O(all nodes)); fine at conversation scale.
