@@ -408,6 +408,10 @@ class ChatApp(App):
         children = self.core.folded_children(node.id)
         if not children:
             return
+        # A range selection can't survive the view swap: dive widgets render the
+        # folded frame, never the range highlight (`_range_ids` reads core.nodes),
+        # so a lingering anchor would silently swallow the first Esc (13h #1).
+        self._clear_range()
         self._deep_dive_stack.append(
             {"k_id": node.id, "label": f"K…{node.id[-4:]}", "nodes": list(children)}
         )
@@ -615,7 +619,11 @@ class ChatApp(App):
             await self._breadcrumb(str(exc))
             return
         self._close_compression_editor()
-        self._clear_selection()
+        # Route the clear through _select_message(None) so the inspector resets to
+        # its placeholder — the folded node it was showing is gone (13h #3);
+        # _clear_range drops the now-stale anchor (its ids just left the view).
+        self._clear_range()
+        self._select_message(None)
         await self._rebuild_message_list()
         self._refresh_token_ui()
 
@@ -629,10 +637,23 @@ class ChatApp(App):
         for node in self._visible_nodes():
             await message_list.add_node(node)
 
+    async def _mount_node(self, node: Node) -> None:
+        """Mount a freshly-appended core node into the message list — but only
+        while the live view is showing.
+
+        During a deep-dive the pane renders a K's folded originals (read-only), so
+        a node mounted now would land *inside* that frame, unreachable by the
+        cursor. The core still holds it (append happened at the call site) and
+        exit-dive rebuilds from ``_visible_nodes()``, so the node surfaces the
+        moment the live view returns (13h #2)."""
+        if self._deep_dive_stack:
+            return
+        await self.query_one(MessageList).add_node(node)
+
     async def _breadcrumb(self, text: str) -> None:
         """Append a session breadcrumb (system message) to the conversation."""
         node = self.core.add_system_message(text)
-        await self.query_one(MessageList).add_node(node)
+        await self._mount_node(node)
         self._refresh_token_ui()
         if self.mode == "insert":
             self._lock_inspector_to_last()
@@ -1018,9 +1039,8 @@ class ChatApp(App):
         logger.info("no command matched, sending to model")
 
         user_node, assistant_node = self.core.submit(text)
-        message_list = self.query_one(MessageList)
-        await message_list.add_node(user_node)
-        await message_list.add_node(assistant_node)
+        await self._mount_node(user_node)
+        await self._mount_node(assistant_node)
         self.query_one(AppHeader).set_title(self.core.conversation_title)
         self._refresh_token_ui()
         if self.mode == "insert":
@@ -1049,7 +1069,7 @@ class ChatApp(App):
     @work(name="check_connectivity")
     async def _check_connectivity(self, model: str) -> None:
         node = await self.core.check_connectivity(model)
-        await self.query_one(MessageList).add_node(node)
+        await self._mount_node(node)
         if self.mode == "insert":
             self._lock_inspector_to_last()
 
