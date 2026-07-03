@@ -224,7 +224,7 @@ Dependencies noted; every prerequisite sits above its dependent.
       `1`/`2`/`3` maximize still works on the splits. Then qa-tester confirms
       browsing. `scripts/check.sh` green.
 
-- [ ] **11. UI: `/expand`** _(deps: 4, 8)_ — add `/expand` to `InputBar.COMMANDS` +
+- [x] **11. UI: `/expand`** _(deps: 4, 8)_ — add `/expand` to `InputBar.COMMANDS` +
       dispatch (`app.py:542`): acts on the currently selected node; if it's a K →
       `core.expand_compression(k.id)`, rebuild the list (children back in place,
       selection moved to the first restored child — record the choice), else a

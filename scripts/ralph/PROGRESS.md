@@ -1083,3 +1083,41 @@ Git history is the source of truth for *what changed*; this file captures the
   immutable — it still returns the children after expand (expand only clears their
   `compressed_into`), so don't rely on it to tell "active vs expanded". Task 12 (deep-dive)
   will also want `folded_children` for the full-view replacement.
+
+## 2026-07-03 — Task 11 (Sprint 3): UI `/expand`
+- `/expand` command wired: added to `InputBar.COMMANDS` (after `/compress`) + an
+  `on_input_bar_submitted` branch → new `ChatApp._handle_expand_command`. It acts on
+  `_get_selected_node()`: a `node_type=="compression"` K → capture `core.folded_children(K.id)`
+  BEFORE mutating, call `core.expand_compression(K.id)`, `_rebuild_message_list()`, then
+  `_select_message(children[0].id)` (selection lands on the first restored child, where K was);
+  any other node / none → `_breadcrumb("Not a compression node")`, no mutation. Added a
+  defensive H2 stream-worker guard (breadcrumb "Cannot expand while a response is streaming.")
+  so a `/expand` submitted mid-stream can't crash on the core's `ValueError`.
+- Pure UI wiring over already-tested core (`expand_compression`/`folded_children` from tasks 4/10)
+  → NO code-blind test-spec-author flow; the mandatory floor is a Pilot test.
+- Tests: `tests/test_app_expand.py` — 4 Pilot tests (real binding presses + direct
+  `on_input_bar_submitted` calls, the suite convention):
+  (1) compress tip range → `/expand` → 4 children back, no K in view, selection on nodes[0];
+  (2) round-trip — second app on same DB resolves the expanded view (E event + cleared
+  pointers persist); (3) recording provider — next turn's messages contain "first"/"second"
+  verbatim and NO `<conversation_summary>` and not the summary text; (4) `/expand` on a
+  non-K node → "Not a compression node" breadcrumb, nothing mutated.
+- Verification: `scripts/check.sh` green (505 passed, was 501; +4; ruff+mypy clean). NO
+  qa-tester this iteration — the in-process MCP harness caches `ctx.*` at session start so it
+  cannot see this iteration's edits (it would drive STALE code with no `/expand`). The Pilot
+  floor encodes the acceptance; a future fresh session (task 13 E2E) runs qa-tester for
+  compress→expand→re-compress.
+- No footer-hint change: `/expand` is command-only (no key binding per the settled-keys list),
+  discovered via the existing "/ Commands" insert-mode hint + the `/` suggestion overlay.
+- Did NOT commit the pre-existing dirty `CONTEXT.md` / `docs/Sprint Roadmap.md` (dirty at
+  session start; Roadmap edits forbidden by the PRD).
+- GOTCHA (real-world reachability, matters for task 13 qa-tester): commands are submitted from
+  the InputBar, which is only focusable via Insert mode, and entering Insert calls
+  `_clear_selection()`. So typing `/expand` at the keyboard clears the selection FIRST → the
+  handler sees no K → "Not a compression node". This is the SAME gap `/compress`-with-selection
+  already has (task 7 relies on the `c` key for the real path; the `/compress` command only
+  breadcrumbs). The Pilot tests drive `/expand` by calling `on_input_bar_submitted` directly
+  while a K is selected in Edit mode (the established suite convention). If task 13's qa-tester
+  can't reach `/expand` by keyboard, that's a design defect of the whole command-vs-selection
+  model (no `:`/`/` command-line that preserves selection) — file it as a new Phase-3b `- [ ]`
+  task per task-13's rule, don't patch inside task 13.

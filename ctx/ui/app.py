@@ -808,6 +808,11 @@ class ChatApp(App):
             await self._handle_compress_command()
             return
 
+        if text == "/expand":
+            logger.info("matched /expand")
+            await self._handle_expand_command()
+            return
+
         logger.info("no command matched, sending to model")
 
         user_node, assistant_node = self.core.submit(text)
@@ -917,6 +922,35 @@ class ChatApp(App):
                 self._lock_inspector_to_last()
             return
         self._open_compression_editor()
+
+    async def _handle_expand_command(self) -> None:
+        """`/expand` on the selected compression node: restore its folded children.
+
+        Acts on the currently selected node. If it is a compression ``K``, calls
+        ``core.expand_compression`` — the non-destructive inverse of a commit: the
+        folded children return to the line in place, ``K`` is kept as an off-line
+        orphan and an ``E`` expand event is recorded (ADR-0016 A#3). The message
+        list is then rebuilt from the restored view and the selection moves to the
+        first restored child (so the cursor lands where ``K`` was). Any other
+        selection — or none — breadcrumbs "Not a compression node" and mutates
+        nothing. Refused while a turn is streaming (H2)."""
+        if self._stream_worker is not None and (
+            self._stream_worker.state == WorkerState.RUNNING
+        ):
+            await self._breadcrumb("Cannot expand while a response is streaming.")
+            return
+        node = self._get_selected_node()
+        if node is None or node.node_type != "compression":
+            await self._breadcrumb("Not a compression node")
+            return
+        children = self.core.folded_children(node.id)
+        self.core.expand_compression(node.id)
+        await self._rebuild_message_list()
+        if children:
+            self._select_message(children[0].id)
+        else:
+            self._clear_selection()
+        self._refresh_token_ui()
 
     # --- streaming ------------------------------------------------------
 
