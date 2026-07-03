@@ -1626,3 +1626,47 @@ Git history is the source of truth for *what changed*; this file captures the
   the `assistant_node.meta["ctx_hash"] = ...` line go right after build_context in
   stream (conversation.py ~321-323 per PRD, but the build_context call is at 633 in
   the current file — locate it, don't trust the line number).
+
+## 2026-07-03 — Task 17: ctx_hash per-turn tripwire + reconstruction oracle (H4/A#3 §4)
+
+- Added pure `hash_context(messages: list[dict]) -> str` to
+  `ctx/core/reconstruction.py` = `sha256(json.dumps(messages, sort_keys=True,
+  ensure_ascii=False)).hexdigest()`. Content-only, key-order-independent digest.
+- In `ConversationCore.stream` (conversation.py), right after `build_context`,
+  stamp `assistant_node.meta["ctx_hash"] = hash_context(messages)` — written
+  once at the real generation moment, immutable after. Added
+  `from ctx.core.reconstruction import hash_context` (no cycle: reconstruction
+  imports only Node). The stamp line sits before `count_messages`/streaming so
+  it captures the exact `messages` sent, even if the stream later errors/cancels.
+- Tests:
+  - Code-blind (`test-spec-author`): `tests/specs/reconstruction-hash.md` (C1–C8)
+    + `tests/test_reconstruction_hash.py` (9 tests) — determinism, sort_keys
+    key-order independence, content/role/order/count sensitivity, 64-char
+    lowercase-hex shape (+ empty list stable), unicode. Relational oracles, no
+    magic digest constants. Confirmed red-on-NotImplementedError (clean
+    collection) → green.
+  - Oracle (authored directly, NOT blind — it's a *differential* oracle
+    cross-checking two independent derivations, so it can't mirror either impl):
+    `tests/test_ctx_hash_oracle.py` (4 tests). Drives a real `ConversationCore`
+    through turns→tip-compress→turns→expand→turns→re-compress and asserts, for
+    EVERY assistant turn T, `hash_context(build_context(
+    context_at_generation(all, T.id), read_file)) == T.meta["ctx_hash"]`. Also:
+    plain-turns baseline (trivially matches), stamp immutability across a later
+    compression, and pre-/post-compression turns both verify (pre → verbatim
+    prefix, post → K folded in). Uses `core._all_nodes()` + `core.read_file`.
+- Why the oracle holds: at T's generation moment all extant K/E have
+  `created_seq < seq(T)`, so `context_at_generation(all, T.id)` == the
+  now-view-minus-tip that `stream` fed `build_context`. Root-first order matches.
+- No existing node-equality test tripped on the new meta key (gate green as-is);
+  no deliberate test adaptation was needed.
+- Verification: `scripts/check.sh` green (586 passed; was 573, +13). ruff+mypy
+  clean. NO qa-tester: pure core logic (a hasher + a core stamp), no UI/runtime
+  surface — code-blind unit tests + differential oracle + green gate ARE the
+  verification (step 7).
+- Gotcha for task 18 (config): task 18 is deps-7 only (independent of 17) —
+  adds `compression.default_prompt` + `ui.show_context_drift` to
+  `ctx/core/config.py` `_DEFAULTS`. Note `DEFAULT_COMPRESSION_PROMPT` already
+  lives as a constant in conversation.py:24; task 18's config value is the
+  "exact preserve-info text" — reconcile with that existing constant (likely the
+  config value should become the source and conversation.py read it, but check
+  the task 18 wording + ADR before deciding).

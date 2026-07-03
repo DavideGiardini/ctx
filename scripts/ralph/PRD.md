@@ -516,7 +516,7 @@ Dependencies noted; every prerequisite sits above its dependent.
       its seq; a K whose range ⊄ L (abandoned-tail case) never applies; no-event
       conversations never drift. `scripts/check.sh` green.
 
-- [ ] **17. Core: `ctx_hash` (H4)** _(deps: 16)_ — a pure canonical hasher (e.g. in
+- [x] **17. Core: `ctx_hash` (H4)** _(deps: 16)_ — a pure canonical hasher (e.g. in
       the task-16 module): `hash_context(messages) -> str` = sha256 of
       `json.dumps(messages, sort_keys=True, ensure_ascii=False)`. In
       `ConversationCore.stream` (`conversation.py:321-323`), right after
