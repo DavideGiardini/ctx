@@ -60,6 +60,14 @@ Operate as the autonomous engineer described in `AGENTS.md` (NOT professor mode)
    non-zero, losing all progress. If you genuinely need to wait on something
    backgrounded, use the `Monitor` tool, not a hand-rolled polling loop.
 
+   **You are a single headless turn — there is no follow-up turn and nothing will
+   wake you when a backgrounded job finishes.** Never background *any* command (the
+   gate, a script, a subagent) and then end your turn expecting a completion
+   notification: it never arrives, the session simply exits, and the whole iteration
+   is wasted having committed nothing. Anything the iteration must wait on runs in the
+   foreground with an explicit `timeout`, or you block on it *within this same turn*
+   via `Monitor` — never by yielding the turn.
+
    **If `scripts/check.sh` hangs or takes far longer than normal:** don't wait it
    out and don't guess. Kill it and bisect: run each test file individually with a
    short `timeout` (e.g. `timeout 30 uv run pytest -q tests/test_X.py`) to find the
@@ -79,12 +87,23 @@ Operate as the autonomous engineer described in `AGENTS.md` (NOT professor mode)
 6. **Refactor under green.** Clean up while the gate stays green (deep modules,
    framework-free core, reuse existing seams/patterns).
 
-7. **Verify behavior.** For any task affecting UI or runtime behavior, delegate to
-   the `qa-tester` subagent (Task tool) to drive the real app through the
-   `ctx-agent` MCP server and confirm the task's acceptance criterion. Address any
-   FAIL it reports before continuing. (For pure core-logic tasks, the
-   `test-spec-author` tests + the gate are the verification; `qa-tester` is for
-   UI/runtime behavior.) Two harness limits to respect: (a) it runs the app
+7. **Verify behavior — only for tasks with a UI/runtime surface.** **First decide
+   whether `qa-tester` even applies.** If the task is pure core logic (e.g. a
+   `ctx/core/**` function or a `ctx/models/**` type with no UI/runtime surface this
+   iteration), **do NOT spawn `qa-tester` at all** — the `test-spec-author` tests plus
+   the green gate ARE the verification; skip straight to step 8. Only when the task
+   changes UI or runtime behavior, delegate to the `qa-tester` subagent (Task tool) to
+   drive the real app through the `ctx-agent` MCP server and confirm the task's
+   acceptance criterion. Address any FAIL it reports before continuing.
+
+   **Never wait indefinitely on a subagent.** Spawn at most ONE `qa-tester` at a time
+   and let it return before doing anything else. If it does not return within a few
+   minutes it is wedged (the MCP-driven TUI can deadlock, and this headless turn will
+   then block forever waiting on it) — do **NOT** spawn a second one to compensate.
+   Stop, record the wedge as a blocker in `PROGRESS.md`, leave the task unchecked, and
+   end the iteration; a wasted iteration is recoverable, a session-wide deadlock is not.
+
+   Two harness limits to respect: (a) it runs the app
    **in-process** with `ctx.*` cached, so it cannot see code you edited *this*
    iteration — `qa-tester` confirms committed/prior behavior, not your uncommitted
    edit; for a rendering change you just made, rely on unit/Pilot tests, not
