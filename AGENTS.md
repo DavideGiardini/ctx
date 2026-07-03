@@ -167,7 +167,10 @@ a left `DetailInspector` and a right `#conversation` pane (the `MessageList` +
   `weight_pct` and a `context_gauge` `{pct, approximate}`. `_refresh_token_ui`
   pushes the per-node %s onto the mounted `MessageWidget`s and the gauge onto the
   `AppHeader` after every node-list/content change (submit, stream-complete,
-  `/include`, `/resume`, `/new`). `_node_drift()` (parallel to `core.nodes`, read
+  `/include`, `/resume`, `/new`). The single drift predicate is `_turn_has_drift(node, all_nodes)`: `False`
+  for non-assistant roles and for *every* node when `ui.show_context_drift` is
+  off (the flag gates *all* drift UI, task 24). `_node_drift()` (parallel to
+  `core.nodes`, read
   by both `describe_state` and `_refresh_token_ui`) flags each **assistant** turn
   whose generation context has drifted from the now-view — `reconstruction.has_drift`
   over `core.all_nodes()`, gated by `ui.show_context_drift`; other roles/off = `False`.
@@ -175,7 +178,8 @@ a left `DetailInspector` and a right `#conversation` pane (the `MessageList` +
   renders a subtle `Δ` marker (task 19). The `g d` chord (`on_key` → `_drill_selected`)
   drills into the selected node: a `compression` K deep-dives (task 12), a **drifted
   assistant** turn opens the full-pane context diff (`_enter_diff`, task 20) — one
-  navigation family (Q12). Diff state lives in `_diff_view` (mutually exclusive with
+  navigation family (Q12); the diff branch shares `_turn_has_drift`, so with drift
+  display off `g d` is a no-op on a drifted turn while a K still deep-dives (task 24). Diff state lives in `_diff_view` (mutually exclusive with
   the deep-dive stack): `_enter_diff` block-aligns `reconstruction.diff_regions`
   (`context_at_generation` left ⟷ `now_prefix` right) and runs the H4 tripwire
   (`reconstruction.reconstruction_warning`) to toggle the "reconstruction may be

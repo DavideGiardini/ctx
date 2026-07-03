@@ -424,9 +424,7 @@ class ChatApp(App):
             return
         if node.node_type == "compression":
             await self._enter_deep_dive()
-        elif node.role == "assistant" and reconstruction.has_drift(
-            self.core.all_nodes(), node.id
-        ):
+        elif self._turn_has_drift(node, self.core.all_nodes()):
             await self._enter_diff(node)
 
     async def _enter_deep_dive(self) -> None:
@@ -943,6 +941,24 @@ class ChatApp(App):
             tokens.model_window(self.core.model),
         )
 
+    def _turn_has_drift(self, node: Node, all_nodes: list[Node]) -> bool:
+        """Whether the UI should surface ``node`` as a drifted assistant turn.
+
+        The single drift predicate behind both the passive ``Δ`` marker
+        (``_node_drift``) and the active ``g d`` diff drill (``_drill_selected``),
+        so the two cannot disagree: ``ui.show_context_drift`` gates *all* drift
+        UI, not just the marker — with the flag off there is no marker to signal
+        drift, so the diff drill must not open either (task 24). ``False`` for
+        every non-assistant role, for an undrifted turn, and for every node when
+        the flag is off. ``all_nodes`` is passed in so a per-node caller fetches
+        the graph once.
+        """
+        if not get_config()["ui"]["show_context_drift"]:
+            return False
+        return node.role == "assistant" and reconstruction.has_drift(
+            all_nodes, node.id
+        )
+
     def _node_drift(self) -> list[bool]:
         """Per-node context-drift flags parallel to ``self.core.nodes``.
 
@@ -956,10 +972,7 @@ class ChatApp(App):
         if not get_config()["ui"]["show_context_drift"]:
             return [False] * len(self.core.nodes)
         all_nodes = self.core.all_nodes()
-        return [
-            n.role == "assistant" and reconstruction.has_drift(all_nodes, n.id)
-            for n in self.core.nodes
-        ]
+        return [self._turn_has_drift(n, all_nodes) for n in self.core.nodes]
 
     def _node_signature(self) -> tuple:
         """A cheap fingerprint of the current node set's content.

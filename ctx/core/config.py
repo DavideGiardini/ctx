@@ -47,9 +47,12 @@ _DEFAULTS: dict = {
         # "window" expresses it as a share of the model's input window. Any
         # other value is coerced back to "context" in get_config().
         "weight_basis": "context",
-        # Whether the UI marks AI turns whose generation context has since
-        # drifted from the current one (ADR-0016 concern "b"). A non-bool user
-        # value is coerced back to this default in get_config().
+        # Whether the UI surfaces AI turns whose generation context has since
+        # drifted from the current one (ADR-0016 concern "b"): gates *all* drift
+        # UI, both the passive `Δ` marker and the active `g d` diff drill (task
+        # 24) — off means no marker and `g d` is a no-op on a drifted turn (a K
+        # still deep-dives). A non-bool user value is coerced back to this
+        # default in get_config().
         "show_context_drift": True,
     },
 }

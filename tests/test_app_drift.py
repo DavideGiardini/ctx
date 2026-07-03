@@ -94,3 +94,28 @@ async def test_no_drift_marker_when_config_disabled(repo, workspace, monkeypatch
         assert all(n["drift"] is False for n in nodes)
         for node in app.core.nodes:
             assert not app.query_one(f"#msg-{node.id}", MessageWidget).has_class("drifted")
+
+
+async def test_gd_diff_is_noop_on_drifted_turn_when_config_disabled(
+    repo, workspace, monkeypatch, tmp_path
+):
+    """With drift display off, ``g d`` on a drifted assistant turn opens nothing.
+
+    The config flag gates *all* drift UI (task 24): no marker (covered above)
+    and no diff drill either — otherwise the diff would open on a turn the UI
+    otherwise presents as undrifted.
+    """
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps({"ui": {"show_context_drift": False}}))
+    monkeypatch.setattr(ctx.core.config, "CONFIG_PATH", config_path)
+
+    app = _app(repo, workspace)
+    async with app.run_test() as pilot:
+        await _drift_scenario(app, pilot)  # view = [U1, A1, U2, A2], A2 drifted
+
+        # Land the cursor on the drifted assistant turn A2 (the last node).
+        await pilot.press("down", "down", "down")
+        assert app._get_selected_node().id == app.core.nodes[3].id
+
+        await pilot.press("g", "d")
+        assert app.describe_state()["diff_view"]["open"] is False
