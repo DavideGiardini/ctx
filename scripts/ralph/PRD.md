@@ -418,7 +418,7 @@ Dependencies noted; every prerequisite sits above its dependent.
       `rewind(K.id)` / `rewind(E.id)` raise with the graph unmutated.
       `scripts/check.sh` green.
 
-- [ ] **13h. UI: deep-dive/editor interaction hardening (Esc order, seam bypass, stale
+- [x] **13h. UI: deep-dive/editor interaction hardening (Esc order, seam bypass, stale
       inspector)** _(deps: 12; review findings)_ — Three related state bugs. (1) Esc
       while diving with a pre-dive anchor is a DEAD keypress: the range-clear branch
       (`app.py:211-213`) precedes the dive pop (`app.py:216-218`), but dive widgets

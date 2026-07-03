@@ -1434,3 +1434,35 @@ Git history is the source of truth for *what changed*; this file captures the
 - Verification: `scripts/check.sh` green (531 passed; was 525, +6). ruff+mypy clean.
 - NO qa-tester: pure core logic (`conversation.py` + a storage getter), no UI/runtime
   surface this iteration — the unit tests + green gate ARE the verification (step 7).
+
+## 2026-07-03 — Task 13h: deep-dive/editor interaction hardening
+
+- Implemented three related UI state fixes in `ctx/ui/app.py` (behavior change, so
+  Pilot tests warranted; UI/Pilot layer → hand-written, not code-blind test-spec-author,
+  per the write-tests skill's "does NOT cover the Textual UI" carve-out):
+  1. `_enter_deep_dive` now calls `_clear_range()` on entry — a pre-dive anchor can't
+     survive the view swap (dive widgets never render the highlight), so the first Esc
+     used to be dead (swallowed by the range-clear branch before the dive-pop branch).
+  2. New `_mount_node(node)` helper gates the widget mount on `_deep_dive_stack`: the
+     core append still happens at the call site, but the widget only mounts when the
+     live view is showing. Routed `_breadcrumb`, `_check_connectivity` completion, and
+     the `on_input_bar_submitted` submit path (both user+assistant nodes) through it.
+     Exit-dive's `_rebuild_message_list` reads `_visible_nodes()` (= `core.nodes`) so the
+     gated-out node surfaces the moment the live view returns. `MessageList.update_content`
+     already no-ops on a missing widget, so a streamed turn gated out mid-dive is safe.
+  3. Post-commit clear now goes `_clear_range()` + `_select_message(None)` (was
+     `_clear_selection()`), so the inspector resets to its placeholder instead of showing
+     the just-folded node. Kept `_clear_range()` because the anchor's ids just left the
+     view — leaving it set would make a later Esc a dead keypress (same class as #1).
+- Tests: `tests/test_app_deep_dive_hardening.py`, 3 Pilot tests = the acceptance floor
+  (a) single-Esc-pops-dive-when-anchored-before-diving, (b) connectivity node gated out
+  of the dive frame then surfaces on exit, (c) commit resets inspector to `view=="empty"`
+  / `node_index is None`. All assert through `describe_state()` + widget count.
+- Verification: `scripts/check.sh` green (534 passed; was 531, +3). ruff+mypy clean.
+  NO qa-tester: the harness runs the app in-process with `ctx.*` cached (can't see this
+  iteration's edits), and the invariants are queryable state → the Pilot tests driving the
+  real ChatApp are the correct verification layer (step 7 guidance a/b).
+- Gotcha: to reproduce (b) deterministically, call `app._check_connectivity(model)`
+  directly WHILE a dive is active (TestProvider's connectivity returns instantly, so you
+  can't race the real `/model` worker) and assert widget count unchanged, then `ctrl+o`
+  and assert the "✔ Connected to <model>" node is in the rebuilt live view.
