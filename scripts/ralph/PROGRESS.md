@@ -946,3 +946,59 @@ Git history is the source of truth for *what changed*; this file captures the
   switches it to the drafted Top). On commit, `_close_compression_editor()` then clear the
   selection + rebuild the list. `Ctrl+S`/`Ctrl+D` bindings must live on the editor (or be gated to
   when it's open) so they don't fire in normal Edit mode — the editor currently owns no bindings.
+
+## 2026-07-03 — Task 8 (Sprint 3): commit (`Ctrl+S`) + K rendering in the list (Q3/Q9)
+- `ChatApp.action_commit_compression` (`ctx/ui/app.py`, new `ctrl+s` Binding, gated on
+  `CompressionEditor.is_open` → inert in normal Edit mode). Non-empty Bottom →
+  `core.commit_compression(ids[0], ids[-1], summary=editor.output, prompt="")` (`""` =
+  manual, task 9 switches it to the drafted prompt), then `_close_compression_editor()`,
+  `_clear_selection()`, `await _rebuild_message_list()`, `_refresh_token_ui()`. Empty
+  Bottom → `_breadcrumb("Write a summary before committing (Ctrl+S).")`, NO commit,
+  editor STAYS OPEN. Range read from `_compression_range()` (task 7 helper).
+- New helpers: `_rebuild_message_list()` (tear down + re-mount from `core.nodes` — the
+  resume rebuild path generalized) and `_breadcrumb(text)` (append a system message +
+  refresh; used by the empty-summary guard).
+- `ctrl+s` verified to bubble from the focused prompt/summary `TextArea` to the app
+  (TextArea binds `ctrl+d`→delete_right but NOT `ctrl+s`); GOTCHA for task 9: `Ctrl+D`
+  IS a TextArea binding, so the task-9 draft key must be a priority app binding or live
+  on the editor, else it deletes text instead of drafting.
+- K rendering: added `"compression": "#a855f7"` to `_DEFAULTS["colors"]`
+  (`ctx/core/config.py`); added `"compression"` to `_TRUNCATION_KEY` (→ "assistant",
+  2-line cap) and `_SIDE` (→ "assistant" side for pass margins) in `message_list.py`,
+  and introduced a `_TALL_ROLES` constant (user/assistant/context/compression) so a K
+  widget gets the tall/thick left border like a first-class turn. K is Markdown-rendered
+  (not in the system/context Static branch). weight_pct is numeric automatically (K
+  `goes_to_model()`; folded children leave the view, Q9).
+- DELIBERATE test change (recorded per PROMPT step 5): `tests/test_config.py::
+  test_c3_baseline_shape` + `tests/specs/config.md` C3 pinned the color-key set to 4
+  keys; task 8 requires the 5th (`compression`), so I updated both to include it. This
+  is the new-behavior floor, not weakening a check.
+- EXTRA FIX folded into task 8 (qa-tester surfaced it): the editor had NO keyboard path
+  to the Bottom "Summary" split — the app's priority `tab` binding hijacked focus into
+  the hidden inspector, so a real user could not "type a summary in Bottom" (the PRD
+  acceptance). Added `CompressionEditor.focus_next_split()` (prompt↔summary toggle) and
+  gated `action_switch_focus` to route Tab there while the editor is open. Without this
+  the manual-commit acceptance was only satisfiable by a Pilot test reaching in and
+  setting `.text` — hollow. Now `tab` reaches it end-to-end.
+- Tests: `tests/test_app_commit_compression.py` (5 Pilot tests via `pilot.press` = real
+  binding wiring): full-range `c`→type→`Ctrl+S` folds 4 children into one K (numeric
+  weight, `K.meta["prompt"]==""`, `range` len 4); keyboard-only `tab`→type→`Ctrl+S`;
+  empty summary → breadcrumb + editor stays open + no K; `Ctrl+S` inert when editor
+  closed; K round-trips across a second app instance on the same DB (resume shows [K]).
+  UI task → Pilot is the mandatory floor; core `commit_compression` already exists+tested
+  (task 3) so no code-blind flow.
+- Verification: `scripts/check.sh` green (491 passed, was 486; +5 new −0; +1 was already
+  in the 486 baseline for config; ruff+mypy clean). qa-tester (verify-feature) confirmed
+  on the LIVE harness (app NOT stale, task-8 code active): the empty-summary guard passes
+  end-to-end (4→5 nodes, exact breadcrumb, no K, editor open, `textual_check_errors`
+  clean). It could NOT reach the happy path because `textual_query`/`textual_snapshot`
+  were permission-blocked THIS session (env limitation, not a defect) — that path is
+  covered by the two commit Pilot tests. It also noted `tools/agent/snapshot.py::render`
+  does not surface `range_selection`/`compression_editor` in the compact text snapshot
+  (only visual/`describe_state` do) — a headless-QA nicety, not a task-8 defect.
+- Did NOT commit the pre-existing dirty `CONTEXT.md` / `docs/Sprint Roadmap.md` (dirty at
+  session start; Roadmap edits forbidden by the PRD).
+- GOTCHA for task 9 (`Ctrl+D` draft): (1) `Ctrl+D` is a TextArea binding (delete_right) —
+  make the draft key a priority app binding or an editor binding. (2) On `Ctrl+S`, task 9
+  must pass the LAST-DRAFTED prompt as `prompt=` (still `""` if never drafted); currently
+  hard-coded `prompt=""`. (3) Re-draft OVERWRITES Bottom (clear first, Q4).

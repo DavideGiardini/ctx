@@ -179,7 +179,7 @@ Dependencies noted; every prerequisite sits above its dependent.
       `/compress` with no selection → breadcrumb, editor closed; `Esc` restores the
       inspector and keeps the selection. `scripts/check.sh` green.
 
-- [ ] **8. UI: Commit (`Ctrl+S`) + K rendering in the message list** _(deps: 3, 7)_ —
+- [x] **8. UI: Commit (`Ctrl+S`) + K rendering in the message list** _(deps: 3, 7)_ —
       `Ctrl+S` in the editor with non-empty Bottom calls
       `core.commit_compression(start, end, summary=Bottom, prompt="")` (`""` because
       no draft ran yet — task 9 switches it to the last-drafted prompt), closes the
