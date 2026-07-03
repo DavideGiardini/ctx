@@ -110,7 +110,7 @@ Dependencies noted; every prerequisite sits above its dependent.
       provider + task-cancel pattern); `persist` passes the full graph (children
       survive). `scripts/check.sh` green.
 
-- [ ] **4. Core: `expand_compression`** _(deps: 3)_ —
+- [x] **4. Core: `expand_compression`** _(deps: 3)_ —
       `ConversationCore.expand_compression(k_id) -> None`: validate K exists, is
       `node_type=="compression"`, is **active** (some node has `compressed_into ==
       k_id`), and not `self.streaming`. Mutation (H1 + H5 — 3a writes the 3b-shaped

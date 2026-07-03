@@ -397,6 +397,40 @@ class ConversationCore:
         self.persist()
         return k
 
+    def expand_compression(self, k_id: str) -> None:
+        """Expand an active compression ``K`` back to its folded children.
+
+        The non-destructive inverse of ``commit_compression``. Validates that
+        ``k_id`` names a compression node that is currently **active** — some node
+        still carries ``compressed_into == k_id`` — and that no turn is streaming
+        (H2); raises ``ValueError`` otherwise.
+
+        The mutation records the 3b-shaped event even though 3a's own resolution
+        stays pointer-based (ADR-0016 A#3 §1): an ``E`` expand event node
+        (``Node.expand`` with ``meta["target"] = k_id`` and ``meta["anchor"]`` =
+        the current active leaf) is added straight to the graph, and every folded
+        child (read from ``K.meta["range"]``) has its ``compressed_into`` cleared,
+        so ``current_view()`` restores the children in ``K``'s place. ``K`` itself
+        is **kept** in the graph as an off-line orphan (never row-deleted), then
+        the state is persisted.
+        """
+        if self.streaming:
+            raise ValueError("cannot expand while a turn is streaming")
+        k = self._graph.get(k_id)
+        if k is None or k.node_type != "compression":
+            raise ValueError(f"not a compression node: {k_id}")
+        # Active iff some node still folds into it; an already-expanded K has no
+        # child pointing at it (3a resolution is pointer-based).
+        if not any(n.compressed_into == k_id for n in self._graph.values()):
+            raise ValueError(f"compression is not active: {k_id}")
+        e = Node.expand(k_id, self._active_leaf_id, self.conversation_id)
+        self._graph[e.id] = e
+        for child_id in k.meta["range"]:
+            child = self._graph.get(child_id)
+            if child is not None:
+                child.compressed_into = None
+        self.persist()
+
     def _calibrate(self, local_sum: int, usage: Usage) -> None:
         """Adopt a provider ``Usage`` as the gauge calibration anchor, if sane.
 

@@ -43,7 +43,15 @@ reach end users (ADR 0012). See `docs/decisions/` for *why* it's shaped this way
   unchanged (ADR 0016). Commands append via `_append_to_line` (never by mutating
   `nodes`); `persist()` saves the *full* graph (`_all_nodes()`) + tip so a rewind's
   tail survives (append-only). `rewind(target_id)` moves the tip back to a node on
-  the active line (non-destructive; core-only proof op). Takes a `Provider`, a
+  the active line (non-destructive; core-only proof op). The compression lifecycle
+  (ADR-0016, S3) is core-only too: `current_view()` folds each maximal run sharing a
+  `compressed_into = K` into that `K`; `commit_compression(start, end, summary, prompt)`
+  builds `K` (validated by `_validate_compress_range` — no streaming, contiguous view
+  slice, flat, 3a tip guard) and sets the children's `compressed_into`;
+  `expand_compression(k_id)` is its non-destructive inverse — appends an off-line
+  `Node.expand` event `E`, clears the folded children's pointers, and keeps `K` as an
+  orphan (never row-deleted). The read-only `streaming` flag (set for the duration of
+  `stream()`) gates all three (H2). Takes a `Provider`, a
   `StoragePort`, and a `Workspace` by injection (ADR 0001). Exposes a `read_file`
   property — the very loader it hands `build_context` — so the UI's token
   accounting renders nodes exactly as the model sees them without reaching past
@@ -140,12 +148,15 @@ a left `DetailInspector` and a right `#conversation` pane (the `MessageList` +
 carrying append-only graph edges `prev_id` (predecessor on the line; `None` = root;
 shared `prev_id` = branch siblings) and `compressed_into` (the compression node that
 folds it; `None` until S3) — both default `None`, so the factories are unchanged
-(ADR 0016). Factory classmethods (`Node.user`/`.assistant`/`.system`/`.context`/`.compression`)
+(ADR 0016). Factory classmethods (`Node.user`/`.assistant`/`.system`/`.context`/`.compression`/`.expand`)
 are the single source of truth for each kind's `role`/`node_type`/`content`/`meta`/
 `conversation_id` combination — call sites construct via these, not the bare dataclass
 (ADR 0014 #1). `Node.compression(summary, conversation_id, range_ids, prompt="")` builds
 an off-line K node (`role`/`node_type` both `"compression"`, `content=summary`,
-`meta={"prompt", "range": [child ids]}` — canonical H1 keys, ADR-0016 A#2). `Node.system(content, conversation_id="")` takes an optional
+`meta={"prompt", "range": [child ids]}` — canonical H1 keys, ADR-0016 A#2).
+`Node.expand(target_id, anchor_id, conversation_id)` builds the off-line E *event* node
+that undoes a compression (`role`/`node_type` both `"expand"`, empty content, never
+reaches the model, `meta={"target": K.id, "anchor": <leaf at expand time>}` — H5). `Node.system(content, conversation_id="")` takes an optional
 `conversation_id`: a breadcrumb raised inside an active conversation carries it and so
 persists (model-change/connectivity notices reappear on resume — uniform-persistence
 policy, ADR 0006 #6); one raised with no active conversation defaults to `""` and stays

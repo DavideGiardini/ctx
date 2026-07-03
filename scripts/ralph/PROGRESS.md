@@ -771,3 +771,49 @@ Git history is the source of truth for *what changed*; this file captures the
   line from it — keep that line self-contained. `_streaming` is set inside the async-generator
   body, so `streaming` is False until the consumer calls the first `__anext__()`; the streaming
   guard test drives one token through before asserting.
+
+## 2026-07-03 — Task 4 (Sprint 3): expand_compression + Node.expand event node (H1/H5)
+- Continued a previous agent's in-progress work: `ConversationCore.expand_compression` +
+  `Node.expand` + `tests/test_expand_compression.py` + `tests/specs/expand_compression.md`
+  were already on the tree (unstaged). Implementation was correct; the blocker was a
+  deadlocking code-blind test.
+- `ctx/models/nodes.py::Node.expand(target_id, anchor_id, conversation_id)`: off-line E
+  event node (`role`/`node_type` both `"expand"`, empty content, `prev_id=None`,
+  `goes_to_model()` stays False, `meta={"target", "anchor"}` — H5). Factories are the
+  single construction seam (ADR 0014 #1).
+- `ctx/core/conversation.py::expand_compression(k_id) -> None`: non-destructive inverse of
+  commit. Guards (ValueError): streaming (H2) → K exists & is a compression node → K is
+  **active** (some node still carries `compressed_into == k_id`; an already-expanded K
+  has no child pointing at it, so this doubles as the already-expanded guard). Mutation:
+  append E to `_graph`, clear `compressed_into` on each child read from `K.meta["range"]`,
+  `persist()`. K is KEPT as an off-line orphan (never row-deleted, ADR-0016 A#3 §1).
+- HANG BLOCKER (found + fixed): `scripts/check.sh` deadlocked. Bisected → only
+  `tests/test_expand_compression.py` hung, specifically C112
+  `test_expand_rejected_while_streaming`. Root cause = the exact pitfall in memory
+  `write-tests-blocking-provider-reused-in-setup`: the code-blind test built the whole
+  history via `_build_line(core)` (fully drains two streams) against a core constructed
+  with `BlockingProvider`, which yields one token then `await gate.wait()` forever — the
+  first drained stream hangs pytest indefinitely. This is a TEST-INFRA bug (bad test
+  double reuse), not the behavior under test → fixed directly per PROMPT.md carve-out.
+- DELIBERATE TEST FIX #1 (C112 setup): build history with the normal `test_provider`, then
+  swap `core._provider = BlockingProvider(...)` for the live turn only (memory-endorsed
+  pattern; mirrors the working `test_commit_compression.py::test_streaming_guard...` which
+  never `_build_line`s the blocking provider).
+- DELIBERATE TEST FIX #2 (C112 assertion): after fixing the hang, C112's final assertion
+  `_view_ids(core) == [u1,a1,K]` failed — `core.submit("A follow-up question")`
+  unavoidably appends u3/a3 to the active line, so the real view is `[u1,a1,K,u3,a3]`. The
+  original assertion was never validated (it deadlocked before reaching it) and asserts an
+  impossible view. Rewrote it to the true invariant the clause tests — "expand did not
+  fire" → K still in view AND its children (u2,a2) still folded out. Updated spec C112 in
+  lockstep. Both fixes are test-infra/wrong-assertion corrections, NOT weakening the
+  contract.
+- Verification: pure core logic, no UI/runtime surface (the `/expand` UI command is task
+  11), so tests + `scripts/check.sh` (467 passed, was 454; +13; ruff+mypy clean) are the
+  verification; qa-tester not applicable this iteration.
+- Also on the tree from the prior iteration: Ralph-infra hardening (loop.sh adds `Monitor`
+  to ALLOWED_TOOLS; PROMPT.md adds gate-running / hang-bisect guidance) — committed
+  separately as `chore(ralph):` since it is not part of task 4.
+- GOTCHA for task 5 (`draft_compression`): reuse `_validate_compress_range` (streaming +
+  tip + flat guards). For any streaming-guard test, NEVER build history via `_build_line`
+  with a `BlockingProvider` — swap the provider in for the live turn only, else pytest
+  deadlocks (see memory `write-tests-blocking-provider-reused-in-setup`).

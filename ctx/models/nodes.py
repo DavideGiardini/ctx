@@ -90,6 +90,35 @@ class Node:
         )
 
     @classmethod
+    def expand(
+        cls,
+        target_id: str,
+        anchor_id: str | None,
+        conversation_id: str,
+    ) -> Node:
+        """Build an expand event node ``E`` that deactivates a compression ``K``.
+
+        ``E`` records the *event* of expanding ``K`` back to its folded children
+        rather than any conversation content: ``role`` and ``node_type`` are both
+        ``"expand"``, ``content`` is empty, and it never reaches the model
+        (``goes_to_model()`` stays ``False``). Like a compression node it sits
+        **off** the ``prev_id`` line (``prev_id=None``); the core adds it straight
+        to the graph, never via the line-append path.
+
+        ``meta`` carries the canonical keys (H5):
+          - ``meta["target"]`` — the id of the compression ``K`` this expand
+            deactivates.
+          - ``meta["anchor"]`` — the active leaf id at expand time (S4
+            forward-compat for branch-local expand; 3a resolution ignores it).
+        """
+        return cls(
+            role="expand",
+            node_type="expand",
+            conversation_id=conversation_id,
+            meta={"target": target_id, "anchor": anchor_id},
+        )
+
+    @classmethod
     def context(cls, source_path: str, conversation_id: str) -> Node:
         """Build a context-import reference to a workspace file.
 
