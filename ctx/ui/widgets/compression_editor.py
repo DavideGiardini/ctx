@@ -10,8 +10,8 @@ a compression node ``K``:
 
 There is deliberately **no Center split** (Q4): the originals being compressed
 stay highlighted on the *right* pane as the selected range, so the editor never
-needs to re-show them. Drafting (``Ctrl+D``) and committing (``Ctrl+S``) arrive
-in later tasks; this widget only opens, edits, and closes for free on ``Esc``.
+needs to re-show them. Drafting (``Ctrl+D``) streams an AI summary into the
+Bottom split via :meth:`set_output`; committing (``Ctrl+S``) folds the range.
 """
 
 from __future__ import annotations
@@ -74,6 +74,13 @@ class CompressionEditor(Container):
     def output(self) -> str:
         """The current (possibly user-edited) summary/output text."""
         return self.query_one("#compress-output", TextArea).text
+
+    def set_output(self, text: str) -> None:
+        """Replace the Bottom summary split's text.
+
+        A draft (``Ctrl+D``) streams into here by re-setting the accumulated
+        text; re-drafting overwrites rather than appends (Q4)."""
+        self.query_one("#compress-output", TextArea).text = text
 
     def focus_next_split(self) -> None:
         """Cycle focus between the two editable splits (prompt ↔ summary).

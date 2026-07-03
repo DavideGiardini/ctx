@@ -49,6 +49,10 @@ class ChatApp(App):
         Binding("i", "enter_insert", "Insert Mode", show=False),
         Binding("v", "anchor_range", "Select range", show=False),
         Binding("c", "compress", "Compress", show=False),
+        # ``ctrl+d`` must be a priority binding: the focused prompt/summary
+        # ``TextArea`` binds it to delete_right, so the app has to intercept it
+        # first to drive the draft (the action is inert unless the editor is open).
+        Binding("ctrl+d", "draft_compression", "Draft", show=False, priority=True),
         Binding("ctrl+s", "commit_compression", "Commit", show=False),
         Binding("up", "up", "Up", show=False),
         Binding("down", "down", "Down", show=False),
@@ -77,6 +81,11 @@ class ChatApp(App):
             self._repo, provider or LiteLLMProvider(), workspace=self._workspace
         )
         self._stream_worker: Worker | None = None
+        # The in-flight draft worker (``Ctrl+D``) and the prompt of the last
+        # draft that actually ran. ``""`` means no draft ran → a manual commit
+        # (Q4); ``Ctrl+S`` records this prompt on the committed K.
+        self._draft_worker: Worker | None = None
+        self._last_drafted_prompt: str = ""
         self.mode = "insert"
         self._selected_node_id: str | None = None
         # Anchor of a vim-style range selection (Edit mode). ``None`` when no
@@ -164,8 +173,15 @@ class ChatApp(App):
         except Exception:
             pass
         # The draft editor cancels for free: Esc closes it, restores the
-        # inspector, and keeps the selection (Q4). No graph mutation.
+        # inspector, and keeps the selection (Q4). No graph mutation. While a
+        # draft is streaming the first Esc cancels the worker but keeps the
+        # editor open; a second Esc then closes it (task 9).
         if self.query_one(CompressionEditor).is_open:
+            if self._draft_worker is not None and (
+                self._draft_worker.state == WorkerState.RUNNING
+            ):
+                self._draft_worker.cancel()
+                return
             self._close_compression_editor()
             return
         # Inside the detail pane, Esc backs out one level (Maximized→Browse→right pane)
@@ -331,22 +347,61 @@ class ChatApp(App):
         editor = self.query_one(CompressionEditor)
         self.query_one(DetailInspector).display = False
         editor.open(DEFAULT_COMPRESSION_PROMPT)
+        # Fresh editor → no draft has run yet, so a commit now is manual (Q4).
+        self._last_drafted_prompt = ""
         editor.query_one("#compress-prompt", TextArea).focus()
 
     def _close_compression_editor(self) -> None:
         self.query_one(CompressionEditor).close()
+        self._draft_worker = None
         self.query_one(DetailInspector).display = True
         self.query_one(MessageList).focus()
+
+    def action_draft_compression(self) -> None:
+        """`Ctrl+D` in the draft editor: stream an AI summary into the Bottom
+        split (Q4). Inert unless the editor owns the left pane. Re-drafting
+        overwrites the previous output; a further `Ctrl+D` while a draft is
+        already streaming is ignored. Records the prompt used so a subsequent
+        commit stamps it on the K."""
+        editor = self.query_one(CompressionEditor)
+        if not editor.is_open:
+            return
+        if self._draft_worker is not None and self._draft_worker.state == WorkerState.RUNNING:
+            return
+        ids = self._compression_range()
+        if not ids:
+            return
+        prompt = editor.prompt
+        self._last_drafted_prompt = prompt
+        self._draft_worker = self._draft_compression_worker(ids[0], ids[-1], prompt)
+
+    @work(name="draft_compression")
+    async def _draft_compression_worker(self, start_id: str, end_id: str, prompt: str) -> None:
+        editor = self.query_one(CompressionEditor)
+        editor.set_output("")  # clear first — re-draft overwrites (Q4)
+        text = ""
+        try:
+            async for token in self.core.draft_compression(start_id, end_id, prompt=prompt):
+                text += token
+                editor.set_output(text)
+        except asyncio.CancelledError:
+            # A cancelled draft keeps whatever streamed so far; the editor stays
+            # open (the caller cancelled via Esc) and mutates no graph state.
+            raise
+        except Exception as exc:
+            editor.set_output(f"Draft failed: {exc}")
+            logger.error("draft error | error=%s", exc)
 
     async def action_commit_compression(self) -> None:
         """`Ctrl+S` in the draft editor: fold the selected range into a K.
 
-        Commits the editor's summary (Bottom split) as a manual compression via
-        ``core.commit_compression`` (``prompt=""`` — no draft ran yet; task 9
-        switches it to the last-drafted prompt), then closes the editor, clears
-        the selection, rebuilds the list (children out, one K in), and refreshes
-        the token UI. An empty summary breadcrumbs instead of committing. Gated
-        on the editor being open so the binding is inert in normal Edit mode.
+        Commits the editor's summary (Bottom split) as a compression via
+        ``core.commit_compression``, stamping the last-drafted prompt on the K
+        (``""`` when no draft ran → a manual commit, Q4), then closes the
+        editor, clears the selection, rebuilds the list (children out, one K
+        in), and refreshes the token UI. An empty summary breadcrumbs instead
+        of committing. Gated on the editor being open so the binding is inert in
+        normal Edit mode.
         """
         editor = self.query_one(CompressionEditor)
         if not editor.is_open:
@@ -357,7 +412,9 @@ class ChatApp(App):
         ids = self._compression_range()
         if not ids:
             return
-        self.core.commit_compression(ids[0], ids[-1], summary=editor.output, prompt="")
+        self.core.commit_compression(
+            ids[0], ids[-1], summary=editor.output, prompt=self._last_drafted_prompt
+        )
         self._close_compression_editor()
         self._clear_selection()
         await self._rebuild_message_list()
