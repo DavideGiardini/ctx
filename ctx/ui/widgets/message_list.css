@@ -34,6 +34,9 @@ MessageWidget .weight {
 MessageWidget.selected {
     background: $surface-lighten-1;
 }
+MessageWidget.range-selected {
+    background: $primary-darken-2;
+}
 MessageList {
     scrollbar-size: 1 1;
 }

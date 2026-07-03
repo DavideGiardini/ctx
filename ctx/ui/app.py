@@ -46,6 +46,7 @@ class ChatApp(App):
         Binding("ctrl+c", "cancel_stream", "Cancel", show=False),
         Binding("escape", "escape", "Toggle mode", show=False),
         Binding("i", "enter_insert", "Insert Mode", show=False),
+        Binding("v", "anchor_range", "Select range", show=False),
         Binding("up", "up", "Up", show=False),
         Binding("down", "down", "Down", show=False),
         Binding("enter", "detail_enter", "Select split", show=False),
@@ -75,6 +76,10 @@ class ChatApp(App):
         self._stream_worker: Worker | None = None
         self.mode = "insert"
         self._selected_node_id: str | None = None
+        # Anchor of a vim-style range selection (Edit mode). ``None`` when no
+        # range is active; while set, up/down extend the contiguous highlight
+        # between it and the cursor (``_selected_node_id``). See ADR-0016 Q5.
+        self._range_anchor_id: str | None = None
         # Node-set signature captured the last time a streamed turn produced a
         # fresh provider ``usage`` anchor. The header gauge is exact only while
         # the conversation still matches it; any later change makes it stale
@@ -163,6 +168,11 @@ class ChatApp(App):
                     self.query_one(MessageList).focus()
                 self._sync_footer()
                 return
+        # An active range selection swallows the first Esc (clear the anchor but
+        # stay in Edit); a second Esc then toggles the mode as usual (Q5).
+        if self.mode == "edit" and self._range_anchor_id is not None:
+            self._clear_range()
+            return
         self._set_mode("edit" if self.mode == "insert" else "insert")
 
     def action_enter_insert(self) -> None:
@@ -240,6 +250,50 @@ class ChatApp(App):
             except Exception:
                 pass
         self._selected_node_id = None
+        self._clear_range()
+
+    def action_anchor_range(self) -> None:
+        """`v` in Edit mode: anchor a range selection at the current node.
+
+        A fresh press re-anchors at the cursor (range-of-one). Up/Down then
+        extend the contiguous highlight between the anchor and the cursor.
+        """
+        if self.mode != "edit" or self._focus_in_detail():
+            return
+        if self._selected_node_id is None:
+            return
+        self._range_anchor_id = self._selected_node_id
+        self._apply_range_selection()
+
+    def _range_ids(self) -> list[str]:
+        """The ids of the currently selected range, in view order (empty when
+        no anchor is set or the anchor has left the view)."""
+        if self._range_anchor_id is None:
+            return []
+        ids = [n.id for n in self.core.nodes]
+        try:
+            anchor = ids.index(self._range_anchor_id)
+        except ValueError:
+            return []
+        cursor_id = self._selected_node_id or self._range_anchor_id
+        cursor = ids.index(cursor_id) if cursor_id in ids else anchor
+        lo, hi = sorted((anchor, cursor))
+        return ids[lo : hi + 1]
+
+    def _apply_range_selection(self) -> None:
+        selected = set(self._range_ids())
+        for widget in self.query_one(MessageList).query(MessageWidget):
+            widget.set_range_selected(widget.node.id in selected)
+
+    def _clear_range(self) -> None:
+        if self._range_anchor_id is None:
+            return
+        self._range_anchor_id = None
+        try:
+            for widget in self.query_one(MessageList).query(MessageWidget):
+                widget.set_range_selected(False)
+        except Exception:
+            pass
 
     def _focus_in_detail(self) -> bool:
         return self._is_focused_in(self.query_one(DetailInspector))
@@ -255,6 +309,8 @@ class ChatApp(App):
                 inspector.scroll_lines(-1)
             return
         self._select_relative(-1)
+        if self._range_anchor_id is not None:
+            self._apply_range_selection()
 
     def action_down(self) -> None:
         if self.mode != "edit":
@@ -267,6 +323,8 @@ class ChatApp(App):
                 inspector.scroll_lines(1)
             return
         self._select_relative(1)
+        if self._range_anchor_id is not None:
+            self._apply_range_selection()
 
     def _select_relative(self, step: int) -> None:
         if not self.core.nodes:
@@ -493,6 +551,7 @@ class ChatApp(App):
             "focus": self._focus_target(),
             "selected_index": selected_index,
             "selected_role": selected_role,
+            "range_selection": self._range_ids(),
             "layout": {"header": True, "footer": True, "panes": ["detail", "conversation"]},
             "footer": self.query_one(AppFooter).current_hint(),
             "detail": {

@@ -73,6 +73,11 @@ class MessageWidget(Vertical):
             style = "thick" if selected else "tall"
             self.styles.border_left = (style, self._border_color)  # type: ignore[assignment]
 
+    def set_range_selected(self, selected: bool) -> None:
+        """Toggle membership in a vim-style range selection (Q5). Distinct from
+        ``set_selected`` (the single cursor): a range can span many widgets."""
+        self.set_class(selected, "range-selected")
+
     def set_new_pass(self, is_new_pass: bool) -> None:
         self.set_class(is_new_pass, "pass-start")
 
