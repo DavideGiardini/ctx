@@ -52,6 +52,30 @@ Operate as the autonomous engineer described in `AGENTS.md` (NOT professor mode)
    tests to force them green** — if a generated test is genuinely wrong, fix it as a
    deliberate change and record why in `PROGRESS.md`.
 
+   **Running the gate.** Run `scripts/check.sh` directly with Bash and a generous
+   explicit timeout (it should finish in well under a minute; give it several
+   minutes of headroom). **Never background it and poll for completion with
+   `sleep`/`until` loops** — the harness blocks long sleeps, and an agent that hits
+   that block and improvises around it has previously crashed the whole iteration
+   non-zero, losing all progress. If you genuinely need to wait on something
+   backgrounded, use the `Monitor` tool, not a hand-rolled polling loop.
+
+   **If `scripts/check.sh` hangs or takes far longer than normal:** don't wait it
+   out and don't guess. Kill it and bisect: run each test file individually with a
+   short `timeout` (e.g. `timeout 30 uv run pytest -q tests/test_X.py`) to find the
+   hanging file, then run that file with `-v` to find the specific test. Read the
+   test and diagnose *why* it hangs before touching anything:
+   - If the hang is in the **test's own setup** (e.g. a test double reused where it
+     shouldn't be, a fixture that deadlocks, an `asyncio.Event`/gate that's never
+     set on a code path the test didn't intend to block) — that's a bug in code you
+     or this iteration's `test-spec-author` wrote, not in the behavior under test.
+     Fix it directly; this is the same "test infra, not the contract" carve-out as
+     fixing a bad import path, not "weakening a test."
+   - If the hang reproduces because the **implementation under test** genuinely
+     never completes/never raises — that's a real product bug. Stop, do not guess a
+     workaround, and record it as a blocker in `PROGRESS.md` (rule below) instead of
+     committing anything.
+
 6. **Refactor under green.** Clean up while the gate stays green (deep modules,
    framework-free core, reuse existing seams/patterns).
 
