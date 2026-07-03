@@ -457,9 +457,13 @@ class ConversationCore:
         - both ids are in ``current_view()`` and ``start_id`` is at or before
           ``end_id`` (a real, forward, contiguous slice);
         - **no node in the slice is ``node_type == "compression"``** (Q7 flat
-          guard — nested compression is out of scope);
-        - **the slice's last node is the active leaf** (the 3a tip guard; a
-          distinct, deletable check removed in task 22).
+          guard — nested compression is out of scope).
+
+        The old 3a tip guard (slice must end at the active leaf) was deleted in
+        task 22: a middle range is now foldable, and the per-turn reconstruction
+        path (drift marker + diff view) carries the honesty the guard provided
+        (ADR-0016 Q5 — 3b *replaces* the guard with reconstruction, not merely
+        drops it).
 
         Returns the slice as a ``list[Node]`` in view (root-first) order.
         """
@@ -481,10 +485,6 @@ class ConversationCore:
         slice_nodes = view[start : end + 1]
         if any(n.node_type == "compression" for n in slice_nodes):
             raise ValueError("cannot compress a range containing a compression node")
-        # 3a tip guard (distinct + deletable — removed in task 22): the range must
-        # end at the active leaf, so only a suffix ending at the tip is foldable.
-        if slice_nodes[-1].id != self._active_leaf_id:
-            raise ValueError("compression range must end at the active leaf (tip)")
         return slice_nodes
 
     def commit_compression(
@@ -575,8 +575,9 @@ class ConversationCore:
         """Stream an AI-drafted summary of a contiguous range (a meta-operation).
 
         Validates the range via ``_validate_compress_range`` (the same guards as
-        ``commit_compression`` — streaming/H2, contiguous view slice, flat, 3a tip
-        guard), raising ``ValueError`` on any failure **before any provider call**.
+        ``commit_compression`` — streaming/H2, contiguous view slice, flat; the
+        3a tip guard was deleted in task 22 so a middle range drafts too), raising
+        ``ValueError`` on any failure **before any provider call**.
 
         Renders **only the range** through ``build_context`` with the core's own
         file loader, so each node contributes exactly its model-facing form (a raw

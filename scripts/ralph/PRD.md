@@ -588,7 +588,7 @@ Dependencies noted; every prerequisite sits above its dependent.
       on the other; `Ctrl+o` → back at the overview with regions intact. qa-tester
       confirms navigation. `scripts/check.sh` green.
 
-- [ ] **22. Enable middle compression (delete the 3a tip guard)** _(deps: 15, 16,
+- [x] **22. Enable middle compression (delete the 3a tip guard)** _(deps: 15, 16,
       17, 20)_ — remove the last-node-is-active-leaf check from
       `_validate_compress_range` (commit **and** draft; the Q7 no-K-in-range and H2
       streaming guards stay). The reconstruction path now carries the honesty the

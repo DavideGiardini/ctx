@@ -50,7 +50,9 @@ reach end users (ADR 0012). See `docs/decisions/` for *why* it's shaped this way
   `compressed_into` pointers are never read at runtime, A#3 §3, task 15);
   `commit_compression(start, end, summary, prompt)`
   builds `K` (validated by `_validate_compress_range` — no streaming, contiguous view
-  slice, flat, 3a tip guard) and sets the children's `compressed_into`;
+  slice, flat; the 3a tip guard was deleted in task 22 so a middle range folds too,
+  the reconstruction path carrying the honesty the guard provided, Q5) and sets the
+  children's `compressed_into`;
   `expand_compression(k_id)` is its non-destructive inverse — appends an off-line
   `Node.expand` event `E`, clears the folded children's pointers, and keeps `K` as an
   orphan (never row-deleted). `draft_compression(start, end, prompt=None)` is the

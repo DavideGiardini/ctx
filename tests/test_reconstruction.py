@@ -372,6 +372,54 @@ def test_diff_regions_unknown_node_empty():
 
 
 # =====================================================================
+# middle-compression sequence (task 22) — a K folds a mid-line range, so a
+# turn that ran BEFORE it drifts (saw verbatim, now K) while a turn BORN after
+# it does not (its context already folds K). U1,A1,U2,A2 -> compress [U1,A1]
+# -> U3,A3.
+# =====================================================================
+
+def _middle_compress_graph():
+    u1 = msg("U1", None, 1)
+    a1 = msg("A1", "U1", 2, role="assistant")
+    u2 = msg("U2", "A1", 3)
+    a2 = msg("A2", "U2", 4, role="assistant")
+    k = compression("K", ["U1", "A1"], 5, summary="head summary")
+    # folding is recorded on the children too (pointer set at commit)
+    u1.compressed_into = "K"
+    a1.compressed_into = "K"
+    u3 = msg("U3", "A2", 6)
+    a3 = msg("A3", "U3", 7, role="assistant")
+    return [u1, a1, u2, a2, k, u3, a3]
+
+
+# M1 — A2 ran before K (verbatim) but the now-view folds its head into K: drift.
+def test_middle_compress_earlier_turn_drifts():
+    nodes = _middle_compress_graph()
+    assert has_drift(nodes, "A2") is True
+    assert ids(context_at_generation(nodes, "A2")) == ["U1", "A1", "U2"]
+    assert ids(now_prefix(nodes, "A2")) == ["K", "U2"]
+
+
+# M2 — the changed diff region shows what A2 saw (U1,A1) vs. what it folds to (K).
+def test_middle_compress_diff_region_shape():
+    nodes = _middle_compress_graph()
+    changed = _changed(diff_regions(nodes, "A2"))
+    assert len(changed) == 1
+    assert ids(changed[0].left) == ["U1", "A1"]
+    assert ids(changed[0].right) == ["K"]
+
+
+# M3 — A3 was born after K: its generation context already folds K, so no drift
+# and the recorded context carries the summary, never the folded children.
+def test_middle_compress_later_turn_no_drift_reads_summary():
+    nodes = _middle_compress_graph()
+    assert has_drift(nodes, "A3") is False
+    gen = ids(context_at_generation(nodes, "A3"))
+    assert gen == ["K", "U2", "A2", "U3"]
+    assert "U1" not in gen and "A1" not in gen
+
+
+# =====================================================================
 # reconstruction_warning — the ctx_hash H4 tripwire
 # =====================================================================
 

@@ -236,19 +236,22 @@ async def test_reversed_range_raises_before_provider(repo, workspace, test_provi
     assert rec.captured is None
 
 
-# C129 - non-tip range (3a tip guard) raises before any provider call
-async def test_non_tip_range_raises_before_provider(repo, workspace, test_provider):
+# C129 - a middle (non-tip) range now drafts (the 3a tip guard was deleted in
+# task 22): the provider is called with the rendered range and its tokens stream.
+async def test_middle_range_drafts_and_calls_provider(repo, workspace, test_provider):
     core = ConversationCore(repo, test_provider(["ok"]), workspace)
     core.setup()
     u1, a1, _, _ = await _build_line(core)
 
     rec = RecordingProvider(["s1"])
     core._provider = rec
-    with pytest.raises(ValueError):
-        async for _ in core.draft_compression(u1.id, a1.id):
-            pass
-    assert rec.called is False
-    assert rec.captured is None
+    tokens = [t async for t in core.draft_compression(u1.id, a1.id)]
+
+    assert tokens == ["s1"]
+    assert rec.called is True
+    assert rec.captured is not None
+    # The final message carries the instruction (default, no prompt passed).
+    assert rec.captured[-1]["content"] == DEFAULT_COMPRESSION_PROMPT
 
 
 # C130 - streaming/H2 guard: drafting during a live turn raises

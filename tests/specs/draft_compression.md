@@ -88,13 +88,14 @@ C128. **Reversed range (start after end) raises before any provider call**
   - Rationale: a range must be a forward, contiguous view slice; a reversed slice is
     invalid and must fail fast, without spending a provider call.
 
-C129. **Non-tip range (3a tip guard) raises before any provider call**
+C129. **Middle (non-tip) range now drafts (3a tip guard deleted in task 22)**
   - Setup: canonical line `[u1, a1, u2, a2]` (tip = a2); recording provider.
   - Action: iterate `draft_compression(u1.id, a1.id)` — a valid contiguous slice that does
     not end at the active leaf.
-  - Expect: `ValueError`; provider never invoked.
-  - Rationale: the 3a tip guard requires the range to end at the tip; drafting a mid-line
-    slice is rejected identically to `commit_compression`.
+  - Expect: the provider IS invoked with the rendered range plus the trailing instruction
+    (default prompt, since none was passed), and the provider's tokens stream out.
+  - Rationale: task 22 deleted the 3a tip guard; a mid-line slice is now foldable, with the
+    per-turn reconstruction path carrying the honesty the guard provided (ADR-0016 Q5).
 
 C130. **Streaming/H2 guard: drafting during a live turn raises**
   - Setup: fresh core built directly with a blocking provider; one submitted user turn;

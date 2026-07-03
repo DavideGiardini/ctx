@@ -59,6 +59,33 @@ async def _drift_scenario(app, pilot) -> None:
     await pilot.press("down", "down", "down")
 
 
+async def _middle_compress_scenario(app, pilot) -> tuple[str, str]:
+    """U1,A1,U2,A2 → middle-compress [U1,A1] → view [K,U2,A2]; select A2.
+
+    Returns (u1_id, a1_id) — the folded (off-view) children, captured before the
+    compress. This exercises task 22's deleted tip guard: the range [U1,A1] does
+    NOT end at the active leaf (A2), yet now folds.
+    """
+    await _turn(app, "first")  # → U1, A1
+    await _turn(app, "second")  # → U2, A2; view = [U1, A1, U2, A2]
+
+    view0 = app.core.nodes
+    u1, a1 = view0[0].id, view0[1].id
+
+    await pilot.press("escape")  # → Edit
+    await pilot.press("home")  # cursor on U1
+    await pilot.press("v", "down")  # range = [U1, A1] — NOT the tip
+    await pilot.press("c")  # open the draft editor
+    app.query_one("#compress-output", TextArea).text = "SUMMARY"
+    await pilot.press("ctrl+s")  # commit → view = [K, U2, A2]
+
+    if app.mode == "insert":
+        await pilot.press("escape")  # → Edit
+    await pilot.press("home")  # → K
+    await pilot.press("down", "down")  # → U2 → A2 (the drifted turn)
+    return u1, a1
+
+
 def _k_id(app) -> str:
     return str(next(n.id for n in app.core.all_nodes() if n.node_type == "compression"))
 
@@ -197,3 +224,24 @@ async def test_i_from_drill_exits_all_the_way(repo, workspace):
         assert app.describe_state()["diff_view"]["open"] is False
         assert app.mode == "insert"
         assert app.query_one(MessageList).display is True
+
+
+# --- task 22: middle compress makes an earlier turn drift ---------------------
+
+async def test_middle_compress_earlier_turn_drifts(repo, workspace):
+    app = _app(repo, workspace)
+    async with app.run_test() as pilot:
+        u1, a1 = await _middle_compress_scenario(app, pilot)
+        # The selected turn is the drifted A2 (last node of the folded view).
+        assert app._get_selected_node().role == "assistant"
+        k = _k_id(app)
+
+        await pilot.press("g", "d")
+
+        diff = app.describe_state()["diff_view"]
+        assert diff["open"] is True
+        assert diff["warning"] is False
+        # A2 saw [U1, A1] verbatim; the now-view folds them into K.
+        assert diff["regions"] == [{"left": [u1, a1], "right": [k]}]
+        assert app.query_one(DiffView).display is True
+        assert app.query_one(MessageList).display is False

@@ -75,11 +75,14 @@ For every rejection below, additionally: `current_view()` is unchanged (same ids
 and no node in the view has `node_type == "compression"` that wasn't there before
 (no K created), and nothing new is persisted.
 
-### C98. Tip guard — end not at the tip is rejected
+### C98. Middle (non-tip) range commits (tip guard deleted in task 22)
 Given: line `[u1, a1, u2, a2]`, `commit_compression(u1.id, a1.id, ...)` (end = `a1`,
 mid-conversation, not the tip).
-Expect: raises `ValueError`; view still `[u1, a1, u2, a2]`; no compression node exists.
-Rationale: intent — in this phase only a range ending exactly at the tip may compress.
+Expect: a `K` is created folding `[u1, a1]`; view becomes `[K, u2, a2]`; `K.meta["range"]`
+= `[u1.id, a1.id]`.
+Rationale: task 22 deleted the 3a tip guard — a mid-line range is now foldable, with the
+per-turn reconstruction path (drift marker + diff view) carrying the honesty the guard
+provided (ADR-0016 Q5).
 
 ### C99. Flat guard — a compression node inside the range is rejected
 Given: first commit `(u2.id, a2.id, ...)` → view `[u1, a1, K]` (tip = K). Then
@@ -126,10 +129,10 @@ Rationale: intent — start_id must be at or before end_id (a forward slice).
    so "children preserved" is verified via the reload round-trip (C97) — a destructive
    delete could not reproduce the same view after resume. This is the strongest
    interface-level oracle available.
-4. **Reversed-order isolation**: with the tip guard also in force, a reversed slice whose
-   end is not the tip trips two rules at once. The contract only asserts `ValueError` is
-   raised (the intent groups "reversed" under invalid slice); I do not assert *which*
-   guard fired.
+4. **Reversed-order isolation**: a reversed slice is an invalid (non-forward) slice; the
+   contract only asserts `ValueError` is raised (the intent groups "reversed" under invalid
+   slice); I do not assert *which* guard fired. (The 3a tip guard was deleted in task 22, so
+   a reversed slice no longer also trips a tip rule.)
 5. **"no node in the slice is a compression"**: C99 constructs the case by first creating
-   a real K at the tip, then including it in a new range — the only way to get a
-   compression node into a candidate slice given the tip-only rule.
+   a real K, then including it in a new range — a natural way to get a compression node into
+   a candidate slice.

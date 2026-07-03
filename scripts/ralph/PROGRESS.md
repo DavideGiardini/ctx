@@ -1866,3 +1866,48 @@ Git history is the source of truth for *what changed*; this file captures the
   drill are already general over any drifted turn. Task 22's work is removing the
   last-node-is-active-leaf check from `_validate_compress_range` (commit AND draft)
   and extending the task-17 oracle suite with a middle sequence.
+
+## 2026-07-03 — Task 22: Enable middle compression (delete the 3a tip guard, ADR-0016 Q5)
+
+- `ctx/core/conversation.py`: deleted the tip guard from `_validate_compress_range`
+  (the `slice_nodes[-1].id != self._active_leaf_id` check + comment). This enables
+  BOTH `commit_compression` and `draft_compression` (they share the helper) to fold a
+  mid-line range. The remaining guards stay: streaming/H2 and the Q7 flat no-K-in-range.
+  Updated the helper/`draft_compression` docstrings and the AGENTS.md conversation.py
+  bullet to record that reconstruction (drift marker + diff view) now carries the
+  honesty the guard provided (Q5: 3b *replaces* the guard, doesn't merely drop it).
+- Tests — deliberate contract changes for the deleted guard (recorded here per the
+  "fix a genuinely-wrong generated test as a deliberate change" rule; behavior the
+  tests encoded was intentionally removed):
+  - `tests/test_commit_compression.py::test_tip_guard_rejects_mid_range` (C98) →
+    `test_middle_range_commits`: a mid-line commit now SUCCEEDS ([u1,a1,u2,a2] →
+    compress [u1,a1] → [K,u2,a2], K.meta["range"]==[u1,a1]). Updated spec C98 in
+    `tests/specs/commit_compression.md` + assumption notes 4/5.
+  - `tests/test_draft_compression.py::test_non_tip_range_raises_before_provider`
+    (C129) → `test_middle_range_drafts_and_calls_provider`: a mid-line draft now
+    invokes the provider with the rendered range + default instruction and streams.
+    Updated spec C129 in `tests/specs/draft_compression.md`.
+  - `tests/test_app_commit_failures.py`: removed `test_non_tip_commit_...` (the
+    non-tip guard it exercised is gone); updated the module docstring. Streaming +
+    range-containing-K failure triggers still covered.
+- Tests — new (the PRD acceptance floor):
+  - `tests/test_reconstruction.py` (+3, M1/M2/M3): the middle sequence
+    U1,A1,U2,A2 → compress [U1,A1] → U3,A3. A2 drifts (`has_drift` True,
+    gen=[U1,A1,U2] verbatim, now=[K,U2]); the changed diff region is
+    left=[U1,A1]/right=[K]; A3 born-after-K does NOT drift (gen folds K =
+    [K,U2,A2,U3], never U1/A1 — "next turn reads the summary, not the children").
+    (Note: A3's prefix includes its own U3 — the recorded gen is 4 nodes, not 3.)
+  - `tests/test_app_diff_view.py` (+1 Pilot): `test_middle_compress_earlier_turn_drifts`
+    — middle-compress via the real editor (range NOT ending at the tip), then `g d`
+    on A2 shows the single changed region left=[U1,A1]/right=[K], warning False,
+    DiffView shown / MessageList hidden. New `_middle_compress_scenario` helper
+    returns the folded (off-view) child ids captured before the compress.
+- Verification: `scripts/check.sh` green (615 passed; was 612). ruff+mypy clean.
+  NO live qa-tester: task 22's core+UI edits are same-iteration; the MCP harness runs
+  `ctx.*` cached in-process and can't see them (AGENTS.md limit a). The Pilot +
+  reconstruction unit tests are the correct verification (matches tasks 19/20/21).
+  The qa-tester leg of the acceptance is folded into task 23's end-to-end pass.
+- Gotcha for task 23 (final qa-tester verify-feature): middle compress is now a live
+  path — drive a continued conversation, middle-compress an early range, confirm later
+  turns read coherently and the earlier turn's `g d` diff shows what it saw (left=
+  originals, right=K). Drift markers now legitimately appear on non-tip turns.

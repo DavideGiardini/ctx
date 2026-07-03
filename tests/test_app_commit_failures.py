@@ -1,8 +1,9 @@
 """Pilot tests for graceful commit failure (PRD Sprint 3, Task 13a).
 
 A ``Ctrl+S`` commit whose range is rejected by ``_validate_compress_range``
-(non-tip range in 3a, a range containing an existing K, or a live turn
-streaming) must **not** let the ``ValueError`` propagate: propagation soft-locks
+(a range containing an existing K, or a live turn streaming — the non-tip guard
+was deleted in task 22, so a middle range now commits and is covered elsewhere)
+must **not** let the ``ValueError`` propagate: propagation soft-locks
 the editor and the whole app stops processing input (unrecoverable short of a
 restart). Instead the app surfaces the guard message as a system breadcrumb,
 keeps the editor open so the user can adjust, and stays responsive.
@@ -67,29 +68,6 @@ def _has_system_breadcrumb(app, needle: str) -> bool:
         n["role"] == "system" and needle in n["content"].lower()
         for n in app.describe_state()["nodes"]
     )
-
-
-async def test_non_tip_commit_breadcrumbs_and_stays_responsive(repo, workspace):
-    # Trigger (1): a range that does not end at the active leaf (the 3a tip guard).
-    app = _app(repo, workspace)
-    async with app.run_test() as pilot:
-        await _two_turns(app)  # four view nodes; tip is the last
-        await pilot.press("escape")  # → Edit
-        await pilot.press("home")  # cursor on the first node
-        await pilot.press("v", "down")  # range = first two nodes → NOT the tip
-        await pilot.press("c")
-        app.query_one("#compress-output", TextArea).text = "SUMMARY"
-
-        await pilot.press("ctrl+s")
-
-        # No crash, no K, editor still open, guard message surfaced.
-        assert _compression_nodes(app) == []
-        assert app.describe_state()["compression_editor"]["open"] is True
-        assert _has_system_breadcrumb(app, "tip")
-
-        # The app still processes input: Esc closes the editor.
-        await pilot.press("escape")
-        assert app.describe_state()["compression_editor"]["open"] is False
 
 
 async def test_commit_while_streaming_breadcrumbs_and_stays_responsive(repo, workspace):

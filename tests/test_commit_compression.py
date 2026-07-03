@@ -182,17 +182,18 @@ async def test_reload_round_trip(repo, test_provider, workspace):
 
 # --- rejections (all raise ValueError before mutating) ----------------------
 
-async def test_tip_guard_rejects_mid_range(repo, test_provider, workspace):
-    # C98
+async def test_middle_range_commits(repo, test_provider, workspace):
+    # C98 — the 3a tip guard was deleted in task 22: a mid-line range (not ending
+    # at the tip) now folds. View [u1, a1, u2, a2] → compress [u1, a1] → [K, u2, a2].
     core = _make_core(repo, test_provider, workspace)
     u1, a1, u2, a2 = await _build_line(core)
-    before = _ids(core)
 
-    with pytest.raises(ValueError):
-        core.commit_compression(u1.id, a1.id, "Should not apply.")
+    k = core.commit_compression(u1.id, a1.id, "Head folded.")
 
-    assert _ids(core) == before
-    assert not _has_compression(core)
+    assert _ids(core) == [k.id, u2.id, a2.id]
+    assert _types(core) == ["compression", "message", "message"]
+    assert [n.role for n in core.current_view()] == ["compression", "user", "assistant"]
+    assert k.meta["range"] == [u1.id, a1.id]
 
 
 async def test_flat_guard_rejects_compression_in_range(repo, test_provider, workspace):
