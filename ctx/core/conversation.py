@@ -257,6 +257,15 @@ class ConversationCore:
         """
         return list(self._graph.values())
 
+    def all_nodes(self) -> list[Node]:
+        """Read-only view of the whole graph (line + abandoned tails + K/E events).
+
+        The public accessor the UI hands ``reconstruction`` (drift/diff): those
+        oracles resolve as-of and now-view folds over the *entire* graph, not the
+        active line ``nodes`` projects (ADR-0016 A#2/A#3, task 19).
+        """
+        return self._all_nodes()
+
     def _next_seq(self) -> int:
         """The next ``created_seq``: one past the max over the WHOLE graph.
 

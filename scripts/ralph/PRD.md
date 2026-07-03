@@ -543,7 +543,7 @@ Dependencies noted; every prerequisite sits above its dependent.
       coerces to True); Pilot: with a patched user config, the editor opens
       prefilled with the override. `scripts/check.sh` green.
 
-- [ ] **19. UI: drift indicator** _(deps: 16, 18)_ — expose the graph read-only:
+- [x] **19. UI: drift indicator** _(deps: 16, 18)_ — expose the graph read-only:
       `ConversationCore.all_nodes() -> list[Node]` (public accessor over
       `_all_nodes()`). In `_refresh_token_ui()` (`app.py:402-417`) compute, for each
       **assistant** node in the view, `reconstruction.has_drift(...)`, gated by

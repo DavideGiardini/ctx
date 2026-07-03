@@ -67,7 +67,10 @@ reach end users (ADR 0012). See `docs/decisions/` for *why* it's shaped this way
   `StoragePort`, and a `Workspace` by injection (ADR 0001). Exposes a `read_file`
   property — the very loader it hands `build_context` — so the UI's token
   accounting renders nodes exactly as the model sees them without reaching past
-  the core into the workspace. `stream` also anchors the header gauge: it measures
+  the core into the workspace. The read-only `all_nodes()` accessor (over
+  `_all_nodes()`) hands the UI the whole graph the `reconstruction` oracles need
+  (drift/diff resolve as-of and now-view folds over every node, not the active
+  line `nodes` projects). `stream` also anchors the header gauge: it measures
   the local token sum of the context it sends (`tokens.count_messages`) and hands
   the provider an `on_usage` callback; a reported `Usage` that passes a sanity check
   (`prompt_tokens > 0`, positive local sum, within `CALIBRATION_TOLERANCE`× of it)
@@ -151,9 +154,15 @@ a left `DetailInspector` and a right `#conversation` pane (the `MessageList` +
   `weight_pct` and a `context_gauge` `{pct, approximate}`. `_refresh_token_ui`
   pushes the per-node %s onto the mounted `MessageWidget`s and the gauge onto the
   `AppHeader` after every node-list/content change (submit, stream-complete,
-  `/include`, `/resume`, `/new`).
+  `/include`, `/resume`, `/new`). `_node_drift()` (parallel to `core.nodes`, read
+  by both `describe_state` and `_refresh_token_ui`) flags each **assistant** turn
+  whose generation context has drifted from the now-view — `reconstruction.has_drift`
+  over `core.all_nodes()`, gated by `ui.show_context_drift`; other roles/off = `False`.
+  `describe_state()` emits it as each node's `"drift"`, and `MessageWidget.set_drift`
+  renders a subtle `Δ` marker (task 19).
 - `widgets/` — `MessageList`/`MessageWidget` (truncated nodes via per-role
-  `max-height`, right-docked weight slot, conversation-pass margins),
+  `max-height`, right-docked weight slot + subtle drift `Δ` marker
+  (`set_drift`, task 19), conversation-pass margins),
   `DetailInspector` (reactive `show(NodeView)`; standard Markdown view vs. 3-split
   context view, empty splits hidden — a `context` node labels the splits
   Prompt/Content/Output, a `compression` K reuses the same split machinery

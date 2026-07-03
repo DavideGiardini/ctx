@@ -1722,3 +1722,49 @@ Git history is the source of truth for *what changed*; this file captures the
   `ConversationCore.all_nodes()` (new public accessor over `_all_nodes()`) and reads
   `get_config()["ui"]["show_context_drift"]` (now available) in
   `_refresh_token_ui()`; uses `reconstruction.has_drift(...)` from task 16.
+
+## 2026-07-03 — Task 19: UI drift indicator (ADR-0016 concern "b", Q12/A#1)
+
+- `ctx/core/conversation.py`: added public `all_nodes()` accessor over
+  `_all_nodes()` (read-only whole-graph view the UI hands `reconstruction`; the
+  drift/diff oracles fold over every node, not the active-line `nodes` projection).
+- `ctx/ui/widgets/message_list.py`: `MessageWidget.set_drift(bool)` toggles a
+  `drifted` class + updates a new `.drift` `Static` slot with a subtle `Δ` glyph
+  (empty when not drifting). Added a `.drift` slot to `compose` (docked right,
+  left of the weight, `$text-muted`) + CSS in `message_list.css`.
+- `ctx/ui/app.py`:
+  - `from ctx.core import reconstruction, tokens`.
+  - `_node_drift()` — per-node bool list parallel to `core.nodes`: `True` only for
+    an **assistant** node when `reconstruction.has_drift(core.all_nodes(), id)` and
+    `get_config()["ui"]["show_context_drift"]`; all-`False` when the config is off.
+    Single computation read by both `describe_state` and `_refresh_token_ui` (same
+    seam pattern as `_node_weights`), so snapshot and rendered marker can't disagree.
+  - `_refresh_token_ui`: else-branch now zips `_node_drift()` in and calls
+    `widget.set_drift(...)`; deep-dive branch calls `set_drift(False)` (folded
+    originals are off-context, mirroring `set_weight_not_in_context`).
+  - `describe_state`: nodes gain `"drift": bool` (all-`False` in deep-dive).
+- Tests: authored `tests/test_app_drift.py` directly (UI wiring over
+  already-tested core `has_drift`, not a framework-free core module — the
+  test-spec-author/write-tests flow targets core). Two Pilot tests = the PRD
+  acceptance floor:
+  - `test_expanded_turn_drifts_and_prior_turn_does_not`: U1,A1 → compress [U1,A1]
+    (tip range via `c`/editor/`ctrl+s`) → U2,A2 → `home`+`x` expands K → A2
+    `drift: True`, A1 `False`; also asserts the A2 widget has the `drifted` class +
+    a non-empty `.drift` glyph and A1 has neither (marker actually renders).
+  - `test_no_drift_marker_when_config_disabled`: same scenario with a patched
+    `CONFIG_PATH` (`show_context_drift: false`) → all `drift: False`, no `drifted`
+    class anywhere.
+- Verification: `scripts/check.sh` green (597 passed; was 595, +2). ruff+mypy clean.
+  NO live qa-tester: the MCP harness runs `ctx.*` cached in-process and can't see
+  this iteration's app.py/message_list.py edits (AGENTS.md limit a); the marker +
+  drift-state acceptance is covered by the new Pilot tests, the correct
+  verification for a same-iteration UI change.
+- Updated AGENTS.md: conversation.py bullet (all_nodes), app.py bullet
+  (_node_drift + describe_state "drift"), widgets bullet (set_drift Δ marker).
+- Gotcha for task 20 (diff view overview, deps 12/17/19): the `g d` chord in
+  `_handle_chord`/`_enter_deep_dive` (app.py ~380-418) currently only fires on a
+  **compression** node; task 20 extends it to fire on an **assistant node with
+  drift** too (one navigation stack — Q12). It will reuse `reconstruction`'s
+  `context_at_generation`/`now_prefix` (left/right) + `hash_context` vs
+  `T.meta["ctx_hash"]` for the H4 warning banner. `Static.render()` (not
+  `.renderable`) is the way to read a Static's text in tests here.

@@ -103,8 +103,17 @@ class MessageWidget(Vertical):
         context, so its weight slot reads "not in context" rather than a %."""
         self.query_one(".weight", Static).update("not in context")
 
+    def set_drift(self, drifted: bool) -> None:
+        """Toggle a subtle drift marker beside the weight slot (ADR-0016 concern
+        "b", Q12/A#1, task 19): the AI turn's generation context has diverged from
+        the current one. Deliberately quiet — many turns legitimately drift, so it
+        is a single muted glyph, not an alarm."""
+        self.set_class(drifted, "drifted")
+        self.query_one(".drift", Static).update("Δ" if drifted else "")
+
     def compose(self):
         yield Static("--%", classes="weight")
+        yield Static("", classes="drift")
         if self._role in ("system", "context"):
             yield Static(self._content or "", classes="content")
         else:

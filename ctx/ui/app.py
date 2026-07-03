@@ -9,7 +9,7 @@ from textual.containers import Container, Horizontal, Vertical
 from textual.widgets import Input, Static, TextArea
 from textual.worker import Worker, WorkerState
 
-from ctx.core import tokens
+from ctx.core import reconstruction, tokens
 from ctx.core.config import get_config
 from ctx.core.context import build_context
 from ctx.core.conversation import ConversationCore
@@ -817,6 +817,24 @@ class ChatApp(App):
             tokens.model_window(self.core.model),
         )
 
+    def _node_drift(self) -> list[bool]:
+        """Per-node context-drift flags parallel to ``self.core.nodes``.
+
+        ``True`` for an **assistant** turn whose generation context has since
+        drifted from the now-view (``reconstruction.has_drift`` over the whole
+        graph); ``False`` for every other role and for all nodes when
+        ``ui.show_context_drift`` is off. Both ``describe_state`` and
+        ``_refresh_token_ui`` read this so the snapshot and the rendered marker
+        cannot disagree (ADR-0016 concern "b", task 19).
+        """
+        if not get_config()["ui"]["show_context_drift"]:
+            return [False] * len(self.core.nodes)
+        all_nodes = self.core.all_nodes()
+        return [
+            n.role == "assistant" and reconstruction.has_drift(all_nodes, n.id)
+            for n in self.core.nodes
+        ]
+
     def _node_signature(self) -> tuple:
         """A cheap fingerprint of the current node set's content.
 
@@ -862,13 +880,17 @@ class ChatApp(App):
                 except Exception:
                     continue
                 widget.set_weight_not_in_context()
+                widget.set_drift(False)
         else:
-            for node, pct in zip(self.core.nodes, self._node_weights(), strict=True):
+            for node, pct, drifted in zip(
+                self.core.nodes, self._node_weights(), self._node_drift(), strict=True
+            ):
                 try:
                     widget = message_list.query_one(f"#msg-{node.id}", MessageWidget)
                 except Exception:
                     continue
                 widget.set_weight_pct(pct)
+                widget.set_drift(drifted)
         # The header gauge always reflects the live context window, never the
         # browsed originals — deep-dive does not change what the model will see.
         gauge_pct, approximate = self._gauge_state()
@@ -891,6 +913,7 @@ class ChatApp(App):
         truncation = get_config()["ui"]["truncation_lines"]
         # Deep-dive originals are off-context, so no per-node % applies (Q9).
         weights = [None] * len(nodes) if in_deep_dive else self._node_weights()
+        drift = [False] * len(nodes) if in_deep_dive else self._node_drift()
         gauge_pct, gauge_approximate = self._gauge_state()
         selected_index: int | None = None
         selected_role: str | None = None
@@ -907,6 +930,7 @@ class ChatApp(App):
                 "content": node.content,
                 "selected": is_selected,
                 "weight_pct": weights[i],
+                "drift": drift[i],
                 "truncated": self._is_truncated(node, truncation),
             }
             source_path = node.meta.get("source_path")

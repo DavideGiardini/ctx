@@ -31,6 +31,13 @@ MessageWidget .weight {
     height: 1;
     color: $text-muted;
 }
+MessageWidget .drift {
+    dock: right;
+    width: auto;
+    height: 1;
+    margin: 0 1 0 0;
+    color: $text-muted;
+}
 MessageWidget.selected {
     background: $surface-lighten-1;
 }
