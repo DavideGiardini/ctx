@@ -3,7 +3,7 @@ from collections.abc import AsyncIterator, Callable
 from uuid import uuid4
 
 from ctx.core import tokens
-from ctx.core.config import get_config
+from ctx.core.config import DEFAULT_COMPRESSION_PROMPT, get_config
 from ctx.core.context import build_context
 from ctx.core.provider import Provider, Usage
 from ctx.core.reconstruction import hash_context
@@ -19,13 +19,11 @@ CALIBRATION_TOLERANCE = 10.0
 
 MAX_TITLE_LENGTH = 50
 
-# The default instruction handed to the model when drafting a compression and no
-# per-range prompt is supplied (ADR-0016 A#1). In 3b this becomes a read of the
-# ``compression.default_prompt`` config default (task 18).
-DEFAULT_COMPRESSION_PROMPT = (
-    "Preserve the facts, decisions, entities, and open threads needed for the "
-    "conversation to continue coherently."
-)
+# ``DEFAULT_COMPRESSION_PROMPT`` — the preserve-info fallback for the one-keystroke
+# compression path (ADR-0016 A#1) — now lives in ctx.core.config as the single
+# source of the ``compression.default_prompt`` default (task 18); re-exported here
+# so existing importers of ``ConversationCore``'s module keep working.
+__all__ = ["ConversationCore", "DEFAULT_COMPRESSION_PROMPT"]
 
 
 def _derive_title(content: str) -> str:

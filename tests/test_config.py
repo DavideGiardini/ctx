@@ -86,7 +86,15 @@ def test_c2_absent_returns_baseline(config_file):
 def test_c3_baseline_shape(config_file):
     # C3
     defaults = _baseline(config_file)
-    assert set(defaults.keys()) == {"colors", "ui", "model"}
+    assert set(defaults.keys()) == {"colors", "ui", "model", "compression"}
+
+    # C24 — the compression section carries a non-empty default_prompt string.
+    assert isinstance(defaults["compression"], dict)
+    assert isinstance(defaults["compression"]["default_prompt"], str)
+    assert defaults["compression"]["default_prompt"]
+
+    # C25 — ui.show_context_drift defaults on (bool).
+    assert defaults["ui"]["show_context_drift"] is True
 
     # The default model is a non-empty string (ADR 0006 #3 — sourced from config).
     assert isinstance(defaults["model"], str)
@@ -330,4 +338,64 @@ def test_c23_illegal_weight_basis_coerced_to_context(config_file, illegal_value)
     # Illegal value coerced back to the default.
     assert result["ui"]["weight_basis"] == "context"
     # Coercing weight_basis must not disturb the sibling ui default.
+    assert result["ui"]["truncation_lines"] == baseline_truncation
+
+
+# C24
+def test_c24_default_prompt_override_preserved(config_file):
+    # Intent: a user override of compression.default_prompt survives the
+    # per-section merge (the single JSON-only way to change the prompt, task 18).
+    defaults = _baseline(config_file)
+    config_file.write_json({"compression": {"default_prompt": "just the facts"}})
+
+    result = get_config()
+
+    assert result["compression"]["default_prompt"] == "just the facts"
+    # Overriding compression must not disturb other sections.
+    assert result["ui"] == defaults["ui"]
+    assert result["colors"] == defaults["colors"]
+
+
+# C24b
+def test_c24b_wrong_typed_compression_falls_back(config_file):
+    # Intent: a non-mapping compression section falls back to defaults without
+    # raising (mirrors the colors/ui wrong-type guard).
+    defaults = _baseline(config_file)
+    config_file.write_json({"compression": "nope"})
+
+    result = get_config()
+
+    assert result["compression"] == defaults["compression"]
+
+
+# C25
+def test_c25_valid_show_context_drift_false_preserved(config_file):
+    # Intent: a legitimate opt-out (False) survives the ui merge unchanged.
+    config_file.write_json({"ui": {"show_context_drift": False}})
+
+    result = get_config()
+
+    assert result["ui"]["show_context_drift"] is False
+
+
+# C25b
+@pytest.mark.parametrize(
+    "illegal_value",
+    [
+        "yes",  # wrong type (str)
+        1,  # int masquerading as bool
+        0,  # falsy int is still not a bool
+        None,  # null
+        ["x"],  # list
+    ],
+)
+def test_c25b_invalid_show_context_drift_coerced_to_true(config_file, illegal_value):
+    # Intent: any non-bool value is coerced back to the default (True) WITHOUT
+    # raising; sibling ui defaults stay intact.
+    baseline_truncation = _baseline(config_file)["ui"]["truncation_lines"]
+    config_file.write_json({"ui": {"show_context_drift": illegal_value}})
+
+    result = get_config()
+
+    assert result["ui"]["show_context_drift"] is True
     assert result["ui"]["truncation_lines"] == baseline_truncation

@@ -10,8 +10,20 @@ CONFIG_PATH = CONFIG_DIR / "config.json"
 # the other user-settable defaults (ADR 0006 #3).
 DEFAULT_MODEL = "openrouter/google/gemma-4-26b-a4b-it"
 
+# The preserve-info instruction handed to the model when drafting a compression
+# and no per-range prompt is supplied (ADR-0016 A#1). Single source of the text:
+# it seeds _DEFAULTS["compression"]["default_prompt"] and conversation.py
+# re-exports it as DEFAULT_COMPRESSION_PROMPT. Overriding is JSON-only (task 18).
+DEFAULT_COMPRESSION_PROMPT = (
+    "Preserve the facts, decisions, entities, and open threads needed for the "
+    "conversation to continue coherently."
+)
+
 _DEFAULTS: dict = {
     "model": DEFAULT_MODEL,
+    "compression": {
+        "default_prompt": DEFAULT_COMPRESSION_PROMPT,
+    },
     "colors": {
         "user": "#3b82f6",
         "assistant": "#f97316",
@@ -35,6 +47,10 @@ _DEFAULTS: dict = {
         # "window" expresses it as a share of the model's input window. Any
         # other value is coerced back to "context" in get_config().
         "weight_basis": "context",
+        # Whether the UI marks AI turns whose generation context has since
+        # drifted from the current one (ADR-0016 concern "b"). A non-bool user
+        # value is coerced back to this default in get_config().
+        "show_context_drift": True,
     },
 }
 
@@ -64,6 +80,14 @@ def get_config() -> dict:
     else:
         merged["colors"] = copy.deepcopy(_DEFAULTS["colors"])
 
+    if isinstance(user_config.get("compression"), dict):
+        merged["compression"] = {
+            **_DEFAULTS["compression"],
+            **user_config["compression"],
+        }
+    else:
+        merged["compression"] = copy.deepcopy(_DEFAULTS["compression"])
+
     if isinstance(user_config.get("ui"), dict):
         merged["ui"] = {**_DEFAULTS["ui"], **user_config["ui"]}
         if isinstance(user_config["ui"].get("truncation_lines"), dict):
@@ -82,5 +106,10 @@ def get_config() -> dict:
     # the default. The merge above may have carried a user value verbatim.
     if merged["ui"].get("weight_basis") not in _WEIGHT_BASES:
         merged["ui"]["weight_basis"] = _DEFAULTS["ui"]["weight_basis"]
+
+    # Coerce a non-bool show_context_drift (wrong type, incl. int masquerading as
+    # bool) back to the default. A legitimate False (opt-out) survives.
+    if not isinstance(merged["ui"].get("show_context_drift"), bool):
+        merged["ui"]["show_context_drift"] = _DEFAULTS["ui"]["show_context_drift"]
 
     return merged

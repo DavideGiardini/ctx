@@ -124,7 +124,12 @@ reach end users (ADR 0012). See `docs/decisions/` for *why* it's shaped this way
 - `config.py` — `~/.config/ctx/config.json` merged over defaults (`model` — the
   user-overridable default LLM model, read once by `ConversationCore` at
   construction; `colors`; `ui.truncation_lines` — per-role node line caps; `"auto"`
-  disables). `log.py` — file logging to `~/.local/state/ctx/ctx.log`.
+  disables; `ui.weight_basis`; `ui.show_context_drift` — bool, default `True`,
+  non-bool coerced back to the default; `compression.default_prompt` — the
+  preserve-info fallback, the single source of the `DEFAULT_COMPRESSION_PROMPT`
+  constant re-exported by `conversation.py`, the editor's Top prefill reads the
+  user-overridable value, ADR-0016 A#1). `log.py` — file logging to
+  `~/.local/state/ctx/ctx.log`.
 
 **ui/** — dual-pane "conversation IDE" shell (Product Concept §7): docked
 `AppHeader` (top) / `AppFooter` (bottom), a permanent `Horizontal#body` split with

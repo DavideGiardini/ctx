@@ -35,10 +35,12 @@ the baseline defaults `D`; does not raise.
 **C3. Defaults expose the documented structure.** Baseline `D` contains a `"colors"`
 dict whose keys are exactly `{user, assistant, system, context, compression}` (values are
 strings); a `"ui"` dict containing a `"truncation_lines"` dict whose keys are
-exactly `{human, assistant, context, system}` (values are ints); and a top-level
-`"model"` string (non-empty — the user-overridable default model, ADR 0006 #3).
-*(adjudicated A3: the defaults' top level is exactly `{colors, ui, model}` — no
-other top-level keys.)*
+exactly `{human, assistant, context, system}` (values are ints), plus a boolean
+`"show_context_drift"` defaulting to `True`; a top-level `"model"` string (non-empty
+— the user-overridable default model, ADR 0006 #3); and a top-level `"compression"`
+dict with a non-empty `"default_prompt"` string (the preserve-info fallback,
+ADR-0016 A#1, task 18). *(adjudicated A3: the defaults' top level is exactly
+`{colors, ui, model, compression}` — no other top-level keys.)*
 
 **C4. Never crashes on a missing file.** File absent → returns a dict, raises nothing.
 
@@ -144,6 +146,32 @@ and `result["ui"]["weight_basis"] == "context"` (coerced to the default). In eve
 case `result["ui"]["truncation_lines"]` still deep-equals `D["ui"]["truncation_lines"]`,
 proving the coercion of one `ui` key does not disturb sibling `ui` keys.
 
+**C24. A user override of `compression.default_prompt` is preserved.** File =
+`{"compression": {"default_prompt": "just the facts"}}` →
+`result["compression"]["default_prompt"] == "just the facts"`, and both
+`result["ui"]` and `result["colors"]` still deep-equal their defaults. This is the
+sole (JSON-only) way to change the compression prompt (task 18).
+
+**C24b. A wrong-typed `compression` section falls back without raising.** File =
+`{"compression": "nope"}` (valid JSON, wrong shape) → `get_config()` does not raise
+and `result["compression"]` deep-equals `D["compression"]` (mirrors the colors/ui
+wrong-type guard, C18).
+
+**C25. A valid `ui.show_context_drift` of `false` is preserved.** File =
+`{"ui": {"show_context_drift": false}}` → `result["ui"]["show_context_drift"] is
+False` and the call does not raise. `False` is the legitimate opt-out (ADR-0016
+concern "b", config-toggleable) and must survive the per-section `ui` merge.
+
+**C25b. Any non-bool `ui.show_context_drift` is coerced to `True` without raising;
+sibling `ui` defaults are untouched.** File whose `ui.show_context_drift` is not a
+`bool` — covering a wrong string (`"yes"`), ints that masquerade as bools (`1`, `0`),
+`null`, and a list — supplied independently → for every such value `get_config()`
+does not raise and `result["ui"]["show_context_drift"] is True` (coerced to the
+default). In every such case `result["ui"]["truncation_lines"]` still deep-equals
+`D["ui"]["truncation_lines"]`, proving the coercion of one `ui` key does not disturb
+siblings. *(Note `bool` is an `int` subclass, so `1`/`0` are deliberately treated as
+invalid — only a real `True`/`False` counts.)*
+
 ## Contract violations found
 
 Where the code violates this (correct, intended) contract, the test is kept as the
@@ -176,6 +204,12 @@ All other items (C1–C16, C20) pass against the current implementation.
 - **A1 (deep isolation):** resolved as IN contract (C17). Currently a bug.
 - **A2 (unknown `ui` sub-keys):** resolved — `ui` merges, unknown sub-keys added,
   defaults preserved (C12).
+- **A10 (compression section / show_context_drift, task 18):** resolved — top level
+  gains a `compression` dict (`default_prompt`, the preserve-info fallback) and `ui`
+  gains `show_context_drift` (bool, default True). Both merge per-section like
+  colors/ui: a valid override survives, a wrong-typed section/value falls back to the
+  default without raising. `bool` being an `int` subclass, `1`/`0` are treated as
+  invalid `show_context_drift` values (C24, C24b, C25, C25b).
 - **A3 (top-level keys):** resolved — defaults are exactly `{colors, ui, model}`;
   `model` is the lone scalar top-level key (a plain string override, ADR 0006 #3).
 - **A4 (empty file):** resolved — treated as no-overrides, yields `D` (C6).

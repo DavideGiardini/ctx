@@ -1670,3 +1670,55 @@ Git history is the source of truth for *what changed*; this file captures the
   "exact preserve-info text" — reconcile with that existing constant (likely the
   config value should become the source and conversation.py read it, but check
   the task 18 wording + ADR before deciding).
+
+## 2026-07-03 — Task 18: config compression.default_prompt + ui.show_context_drift (Q13)
+
+- `ctx/core/config.py`:
+  - Moved the preserve-info prompt text here as module constant
+    `DEFAULT_COMPRESSION_PROMPT` — now the SINGLE source. Seeds a new top-level
+    `_DEFAULTS["compression"] = {"default_prompt": DEFAULT_COMPRESSION_PROMPT}`.
+  - Added `"show_context_drift": True` under `_DEFAULTS["ui"]`.
+  - Added a `compression` per-section merge-guard mirroring colors/ui (valid
+    override preserved; wrong-typed section → deepcopy of defaults).
+  - Added `show_context_drift` coercion after the weight_basis one: any non-bool
+    (incl. int 1/0, since `bool` is an `int` subclass) coerces back to the default
+    True; a legitimate `False` opt-out survives.
+- `ctx/core/conversation.py`: deleted the local `DEFAULT_COMPRESSION_PROMPT`
+  definition; now `from ctx.core.config import DEFAULT_COMPRESSION_PROMPT` and
+  re-exported via `__all__` (so `from ctx.core.conversation import
+  DEFAULT_COMPRESSION_PROMPT` still works for the many importers/tests). No import
+  cycle: config imports nothing from conversation.
+- `ctx/ui/app.py`: `_open_compression_editor` prefill now reads
+  `get_config()["compression"]["default_prompt"]` (user-overridable) instead of the
+  hard-coded constant; dropped the now-unused import.
+- Tests:
+  - `tests/test_config.py` + `tests/specs/config.md`: updated C3 (top level is now
+    `{colors, ui, model, compression}`; ui gains `show_context_drift`) as a
+    deliberate change. Added C24 (default_prompt override preserved + siblings
+    untouched), C24b (wrong-typed compression falls back), C25 (valid False
+    preserved), C25b (parametrized non-bool → True, siblings untouched). Added
+    adjudication note A10.
+  - `tests/test_app_compression_editor.py`: added Pilot
+    `test_c_prefills_editor_with_config_override` — monkeypatches
+    `ctx.core.config.CONFIG_PATH` to a tmp config overriding default_prompt, opens
+    the editor with `c`, asserts the prefill == the override. (The existing
+    default-prefill test at line 50 still holds: no override → config default ==
+    the constant.)
+- Authored config tests directly (not via test-spec-author): `get_config()`'s
+  interface is unchanged; these are contract-value assertions derived from the PRD
+  acceptance criteria, not implementation mirrors.
+- Verification: `scripts/check.sh` green (595 passed; was 586, +9). ruff+mypy
+  clean. NO live qa-tester: the harness runs `ctx.*` in-process/cached and can't
+  see this iteration's edits (AGENTS.md limit); the editor-prefill acceptance is
+  covered by the new Pilot test, which is the correct verification for a
+  same-iteration UI change.
+- Updated AGENTS.md config.py bullet to list the new keys and the constant's new
+  home.
+- Gotcha: `tests/specs/config.md` still claims "43 mutants, 43 killed" — that count
+  is now STALE (new defaults/coercion add mutants). mutmut is not in check.sh and
+  re-running it was out of scope; don't trust that number until a focused
+  `scripts/mutate.sh run 'ctx.core.config.*'` is re-run.
+- Gotcha for task 19 (drift indicator, deps 16+18): it needs
+  `ConversationCore.all_nodes()` (new public accessor over `_all_nodes()`) and reads
+  `get_config()["ui"]["show_context_drift"]` (now available) in
+  `_refresh_token_ui()`; uses `reconstruction.has_drift(...)` from task 16.

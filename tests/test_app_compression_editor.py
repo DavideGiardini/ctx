@@ -54,6 +54,27 @@ async def test_c_opens_editor_with_default_prompt_and_empty_output(repo, workspa
         assert app.query_one(DetailInspector).display is False
 
 
+async def test_c_prefills_editor_with_config_override(repo, workspace, monkeypatch, tmp_path):
+    # Task 18: the editor's Top prefill reads the user-overridable
+    # get_config()["compression"]["default_prompt"], not the hard-coded constant.
+    import json
+
+    import ctx.core.config
+
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps({"compression": {"default_prompt": "custom override"}}))
+    monkeypatch.setattr(ctx.core.config, "CONFIG_PATH", config_path)
+
+    app = _app(repo, workspace)
+    async with app.run_test() as pilot:
+        await _two_turns(app)
+
+        await pilot.press("escape")  # → Edit mode
+        await pilot.press("c")  # open editor on the selected node
+
+        assert app.describe_state()["compression_editor"]["prompt"] == "custom override"
+
+
 async def test_c_on_single_node_opens_editor(repo, workspace):
     app = _app(repo, workspace)
     async with app.run_test() as pilot:

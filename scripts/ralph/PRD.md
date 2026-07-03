@@ -530,7 +530,7 @@ Dependencies noted; every prerequisite sits above its dependent.
       node-equality test trips on the new meta key, adapt it as a deliberate change
       recorded in PROGRESS.md. `scripts/check.sh` green.
 
-- [ ] **18. Config: `compression.default_prompt` + `ui.show_context_drift` (Q13)**
+- [x] **18. Config: `compression.default_prompt` + `ui.show_context_drift` (Q13)**
       _(deps: 7)_ — `ctx/core/config.py`: new top-level `"compression"` section in
       `_DEFAULTS` with `"default_prompt": <the exact preserve-info text>` plus a
       merge-guard block mirroring the `"ui"`/`"colors"` ones (`config.py:61-83`);

@@ -12,7 +12,7 @@ from textual.worker import Worker, WorkerState
 from ctx.core import tokens
 from ctx.core.config import get_config
 from ctx.core.context import build_context
-from ctx.core.conversation import DEFAULT_COMPRESSION_PROMPT, ConversationCore
+from ctx.core.conversation import ConversationCore
 from ctx.core.log import logger
 from ctx.core.provider import LiteLLMProvider, Provider
 from ctx.core.storage import ConversationRepository, StoragePort
@@ -504,7 +504,7 @@ class ChatApp(App):
     def _open_compression_editor(self) -> None:
         editor = self.query_one(CompressionEditor)
         self.query_one(DetailInspector).display = False
-        editor.open(DEFAULT_COMPRESSION_PROMPT)
+        editor.open(get_config()["compression"]["default_prompt"])
         self.query_one(AppFooter).set_editor(True)
         # Fresh editor → no draft has run yet, so a commit now is manual (Q4).
         self._last_drafted_prompt = ""
