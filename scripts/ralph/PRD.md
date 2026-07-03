@@ -330,7 +330,7 @@ Dependencies noted; every prerequisite sits above its dependent.
       confirms compress→expand→re-compress **purely by keyboard**. `scripts/check.sh`
       green.
 
-- [ ] **13c. Test: a committed K's summary must reach the provider on the next turn**
+- [x] **13c. Test: a committed K's summary must reach the provider on the next turn**
       _(deps: 8; review finding, proven by mutant)_ — Coverage hole: NO test streams a
       turn while a fold is active and inspects the provider payload. The review built a
       scratch mutant of `ConversationCore.stream` that builds context from the raw

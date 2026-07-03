@@ -1271,3 +1271,30 @@ Git history is the source of truth for *what changed*; this file captures the
 - GOTCHA for future tasks: `/compress`/`/expand` no longer match a command branch, so typing that
   literal text now sends it to the model as a normal user turn. The pattern for all future
   selection-dependent verbs (branch, delete, rewind) is: bind a key, never a slash command.
+
+## 2026-07-03 — Task 13c (Sprint 3, Phase 3b): compress-payload coverage hole closed
+- Coverage hole (review finding): NO test streamed a turn while a fold was active and
+  inspected the provider payload. A scratch raw-`prev_id`-walk mutant of `stream`'s
+  context build (children sent, K never sent — compression saves nothing, summary never
+  reaches the model) passed all 511 tests. The expand direction had the test
+  (`test_app_expand.py`'s recording provider); the compress direction — the single
+  user-visible payoff of 3a — did not.
+- CORRECTION TO THE RECORD: Task 13's PROGRESS claim that CP2 ("committed K reaches the
+  model as a summary") was "covered by committed unit/Pilot tests" was WRONG. It is now
+  actually covered by `tests/test_app_compress_payload.py`.
+- Test added: `tests/test_app_compress_payload.py::test_next_turn_sees_summary_not_children_after_compress`
+  — mirror of the expand recording-provider Pilot. Two turns → compress the whole 4-node
+  tip range via the `c` editor (type "THE SUMMARY TEXT" → Ctrl+S) → next turn ("third")
+  with a `_RecordingProvider`. Asserts the captured `last_messages` blob CONTAINS
+  `<conversation_summary>` + the summary text, does NOT contain the folded children
+  ("first"/"second"), and still contains the new turn ("third").
+- Verification (task acceptance floor): verified RED by temporarily replacing
+  `stream`'s `context_nodes = [n for n in self.nodes ...]` (=`current_view()`, folded)
+  with a raw `_active_leaf_id`→`prev_id` walk (no fold) — test failed with
+  `assert '<conversation_summary>' in 'first\nreply\nsecond\nreply\nthird'`. Reverted the
+  mutant (confirmed `git diff ctx/core/conversation.py` empty), test GREEN on real code.
+- NO code change this iteration — pure test addition over already-shipped behavior; the
+  RED/GREEN mutant check IS the verification, so no qa-tester (no UI/runtime surface changed).
+- Verification: `scripts/check.sh` green (514 passed; was 513, +1). ruff+mypy clean.
+- Mutant point for any future regression hunt: `ctx/core/conversation.py` `stream()` line
+  ~527 — the `self.nodes` (folded view) vs raw-walk distinction is exactly what this test guards.
