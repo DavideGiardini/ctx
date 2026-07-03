@@ -1298,3 +1298,44 @@ Git history is the source of truth for *what changed*; this file captures the
 - Verification: `scripts/check.sh` green (514 passed; was 513, +1). ruff+mypy clean.
 - Mutant point for any future regression hunt: `ctx/core/conversation.py` `stream()` line
   ~527 — the `self.nodes` (folded view) vs raw-walk distinction is exactly what this test guards.
+
+## 2026-07-03 — Task 13d (Sprint 3, Phase 3b): draft worker never orphaned
+- Bug (review, High): a live `Ctrl+D` draft worker could be orphaned. (a) `Ctrl+S`
+  mid-draft committed the half-streamed summary as K (`action_commit_compression`
+  never checked `_draft_worker`); (b) `_close_compression_editor` set
+  `_draft_worker = None` WITHOUT `.cancel()`, so the worker kept streaming into the
+  hidden TextArea and could overwrite a re-opened editor's Summary; (c) the
+  `state == WorkerState.RUNNING` guards missed a just-created PENDING worker.
+- Fix (all in `ctx/ui/app.py`):
+  1. `action_commit_compression`: if `_draft_worker` is live → breadcrumb
+     "Draft in progress — Esc cancels it first." + return, NO commit.
+     **Choice: refuse-only** (not cancel-then-refuse) — matches the message and
+     leaves the user in control; Esc is the single cancel path.
+  2. `_close_compression_editor`: cancel a live worker before dropping the ref.
+  3. Replaced ALL 5 `state == WorkerState.RUNNING` liveness checks with
+     `not worker.is_finished` (`is_finished` == state in {SUCCESS,ERROR,CANCELLED},
+     verified in the installed textual). Sites: Esc handler `_draft_worker`,
+     `action_expand` `_stream_worker`, `action_draft_compression` `_draft_worker`
+     (the task's line list missed this one but its intent covers it — a PENDING
+     worker slipping *this* guard is exactly the concurrent-draft bug),
+     `describe_state` streaming flag, `action_cancel_stream`. `WorkerState` import
+     stays (still used in `on_worker_state_changed`).
+- Tests: `tests/test_app_draft_worker_lifecycle.py` (new, 4 Pilot tests, reuses the
+  `_BlockingProvider` swap-provider pattern from `test_app_commit_failures.py`):
+  commit-mid-draft refused (no K, breadcrumb, editor open); Esc cancels a live
+  draft; the CLOSE seam itself cancels a live worker (`app.workers` all finished
+  afterwards); a re-opened editor's Summary stays clean after an orphan attempt.
+  RED/GREEN verified: with both fixes reverted, 3 of the 4 fail (commit-guard,
+  close-cancel, reopened-summary); the 4th (Esc-cancel) guards the pre-existing
+  Esc path whose liveness check I switched to `is_finished`.
+- **Test gotcha for future iterations:** the Esc *handler* already cancels a live
+  draft on the FIRST Esc (task-9 behavior), so an Esc-driven close never reaches
+  `_close_compression_editor` with a live worker. To exercise the close-cancel fix
+  you must call `app._close_compression_editor()` DIRECTLY (as the two close-path
+  tests do) — that is also the exact seam task 13f's conversation-switch reset will
+  reuse. An Esc,Esc sequence would pass even without the fix.
+- Verification: `scripts/check.sh` green (518 passed; was 514, +4). ruff+mypy clean.
+- NO qa-tester: the in-process MCP harness caches `ctx.*` at session start and
+  can't see this iteration's uncommitted edit — it would drive stale code with the
+  old guards. The Pilot tests drive the real keys/seam; task 23 is the committed-code
+  E2E pass (same rationale as tasks 13a/13b/13c).

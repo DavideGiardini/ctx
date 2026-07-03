@@ -347,7 +347,7 @@ Dependencies noted; every prerequisite sits above its dependent.
       a temporary local raw-walk mutation of stream's context build (do not commit the
       mutant), GREEN on real code. `scripts/check.sh` green.
 
-- [ ] **13d. UI: commit/close must not orphan a running draft worker** _(deps: 9;
+- [x] **13d. UI: commit/close must not orphan a running draft worker** _(deps: 9;
       review finding, High)_ — Bug: `action_commit_compression` never checks
       `_draft_worker`, so `Ctrl+S` mid-draft commits the half-streamed summary as K;
       worse, `_close_compression_editor` (`app.py:472-476`) sets `_draft_worker = None`
