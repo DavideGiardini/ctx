@@ -1339,3 +1339,27 @@ Git history is the source of truth for *what changed*; this file captures the
   can't see this iteration's uncommitted edit — it would drive stale code with the
   old guards. The Pilot tests drive the real keys/seam; task 23 is the committed-code
   E2E pass (same rationale as tasks 13a/13b/13c).
+
+## 2026-07-03 — Task 13e (Sprint 3, Phase 3b): range extension clamps, no wrap
+- Bug (review + task-6 gotcha): `_select_relative` wraps modulo, and entering Edit
+  parks the cursor on the LAST node. So `v`,`down` anchored the range at the tip then
+  wrapped the cursor to index 0; `_range_ids` sorts the endpoints → one keystroke
+  range-selected the ENTIRE conversation (and `c`+`Ctrl+S` would fold it all, since the
+  range still ends at the tip so the 3a tip guard passes).
+- Fix (`ctx/ui/app.py`): per the task-6 note, do NOT change `_select_relative` (other
+  callers — plain Edit-mode up/down — rely on wrap). Instead route `action_up`/
+  `action_down` through a new `_move_cursor(step)`: when `_range_anchor_id` is set it
+  calls `_extend_range(step)` which clamps `idx` to `[0, len-1]` (no modulo) and repaints
+  the highlight; otherwise the old `_select_relative(step)` wrap path. `_extend_range`
+  also absorbed the `_apply_range_selection()` repaint that action_up/down did inline.
+- Tests: 3 added to `tests/test_app_range_selection.py`:
+  `test_down_at_bottom_edge_does_not_wrap` (cursor on tip → `v`,`down` → range stays
+  `[tip]`), `test_up_at_top_edge_does_not_wrap` (`home` → `v`,`up` → range stays
+  `[first]`), `test_in_bounds_extension_unchanged` (`home` → `v`,`down`,`down` → 3 ids,
+  regression guard). RED reasoning: pre-fix the wrapping `down` from the last node lands
+  on index 0 and `_range_ids` sorts endpoints → all 4 ids, so `== [view_ids[-1]]` fails.
+  The 3 existing task-6 tests stay green (they `home` first / assert `>= 1`).
+- NO qa-tester: the in-process MCP harness caches `ctx.*` at session start and can't see
+  this iteration's uncommitted edit (it would drive the stale wrapping code). Pilot tests
+  drive the real keys; task 23 is the committed-code E2E pass (same rationale as 13a-13d).
+- Verification: `scripts/check.sh` green (521 passed; was 518, +3). ruff+mypy clean.

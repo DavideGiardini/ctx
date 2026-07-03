@@ -81,3 +81,59 @@ async def test_v_alone_is_range_of_one(repo, workspace):
         state = app.describe_state()
         assert len(state["range_selection"]) == 1
         assert state["range_selection"] == [app.core.nodes[state["selected_index"]].id]
+
+
+async def test_down_at_bottom_edge_does_not_wrap(repo, workspace):
+    """Task 13e: extending down from the last node clamps — it must not wrap to
+    index 0 and swallow the whole conversation."""
+    app = await _four_node_app(repo, workspace)
+    async with app.run_test() as pilot:
+        await app.on_input_bar_submitted(InputBar.Submitted("first"))
+        await app.workers.wait_for_complete()
+        await app.on_input_bar_submitted(InputBar.Submitted("second"))
+        await app.workers.wait_for_complete()
+
+        view_ids = [n.id for n in app.core.nodes]
+        assert len(view_ids) == 4
+
+        await pilot.press("escape")  # → Edit mode, cursor parked on the last node
+        await pilot.press("v", "down")  # anchor at tip, try to extend past the edge
+
+        # Clamped: the range stays a range-of-one at the tip, not the whole list.
+        assert app.describe_state()["range_selection"] == [view_ids[-1]]
+
+
+async def test_up_at_top_edge_does_not_wrap(repo, workspace):
+    """Task 13e: extending up from the first node clamps at index 0."""
+    app = await _four_node_app(repo, workspace)
+    async with app.run_test() as pilot:
+        await app.on_input_bar_submitted(InputBar.Submitted("first"))
+        await app.workers.wait_for_complete()
+        await app.on_input_bar_submitted(InputBar.Submitted("second"))
+        await app.workers.wait_for_complete()
+
+        view_ids = [n.id for n in app.core.nodes]
+
+        await pilot.press("escape")
+        await pilot.press("home")  # cursor on the first node
+        await pilot.press("v", "up")  # anchor at first, try to extend past the top
+
+        assert app.describe_state()["range_selection"] == [view_ids[0]]
+
+
+async def test_in_bounds_extension_unchanged(repo, workspace):
+    """Normal in-bounds extension is unaffected by the clamp."""
+    app = await _four_node_app(repo, workspace)
+    async with app.run_test() as pilot:
+        await app.on_input_bar_submitted(InputBar.Submitted("first"))
+        await app.workers.wait_for_complete()
+        await app.on_input_bar_submitted(InputBar.Submitted("second"))
+        await app.workers.wait_for_complete()
+
+        view_ids = [n.id for n in app.core.nodes]
+
+        await pilot.press("escape")
+        await pilot.press("home")
+        await pilot.press("v", "down", "down")
+
+        assert app.describe_state()["range_selection"] == view_ids[0:3]

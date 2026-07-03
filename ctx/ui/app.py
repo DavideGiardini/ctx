@@ -625,9 +625,7 @@ class ChatApp(App):
             elif inspector.pane_mode == "maximized":
                 inspector.scroll_lines(-1)
             return
-        self._select_relative(-1)
-        if self._range_anchor_id is not None:
-            self._apply_range_selection()
+        self._move_cursor(-1)
 
     def action_down(self) -> None:
         if self.mode != "edit":
@@ -639,9 +637,28 @@ class ChatApp(App):
             elif inspector.pane_mode == "maximized":
                 inspector.scroll_lines(1)
             return
-        self._select_relative(1)
+        self._move_cursor(1)
+
+    def _move_cursor(self, step: int) -> None:
+        # While extending a range the cursor clamps at the list edges (no wrap):
+        # entering Edit parks the cursor on the last node, so a wrapping `v`,`down`
+        # would land on index 0 and range-select the whole conversation (task 13e).
+        # _select_relative keeps wrapping for its non-range callers.
         if self._range_anchor_id is not None:
-            self._apply_range_selection()
+            self._extend_range(step)
+        else:
+            self._select_relative(step)
+
+    def _extend_range(self, step: int) -> None:
+        nodes = self._visible_nodes()
+        if not nodes:
+            return
+        start = next(
+            (i for i, n in enumerate(nodes) if n.id == self._selected_node_id), 0
+        )
+        idx = max(0, min(len(nodes) - 1, start + step))
+        self._select_message(nodes[idx].id)
+        self._apply_range_selection()
 
     def _select_relative(self, step: int) -> None:
         nodes = self._visible_nodes()

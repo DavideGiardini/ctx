@@ -366,7 +366,7 @@ Dependencies noted; every prerequisite sits above its dependent.
       `app.workers`); re-opening the editor on another range shows a clean Summary.
       `scripts/check.sh` green.
 
-- [ ] **13e. UI: range extension must clamp at the list edges, not wrap** _(deps: 6;
+- [x] **13e. UI: range extension must clamp at the list edges, not wrap** _(deps: 6;
       review finding + task-6 PROGRESS gotcha)_ — Bug: `_select_relative` (`app.py:602`)
       wraps modulo, and entering Edit puts the cursor on the LAST node — so `v`,`down`
       wraps the cursor to index 0 and `_range_ids` (`app.py:336-349`) sorts the
