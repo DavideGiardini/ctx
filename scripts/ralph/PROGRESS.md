@@ -1396,3 +1396,41 @@ Git history is the source of truth for *what changed*; this file captures the
   see this iteration's uncommitted edit (would drive stale handlers). Pilot tests drive
   the real seam; task 23 is the committed-code E2E pass (same rationale as 13a-13e).
 - Verification: `scripts/check.sh` green (525 passed; was 521, +4). ruff+mypy clean.
+
+## 2026-07-03 — Task 13g (Sprint 3, Phase 3b): resume title + rewind off-line guard
+- Two `ctx/core/conversation.py` bugs (review findings, ADR-0016 Q1):
+  (1) `resume_conversation` re-derived the title from the first `role=="user"` node
+  of the FOLDED view (`self.nodes`). Compress the whole tip → every user turn folds
+  into a `K` (role `"compression"`) → title silently became `""`, and the next
+  `persist()` overwrote the stored title permanently. (2) `rewind` checked membership
+  against `current_view()`, which contains off-line `K`/`E` nodes; `rewind(K.id)` set
+  the tip to a `prev_id=None` node → view collapsed to `[K]` and the next `submit`
+  chained K onto the line permanently (violates Q1). Latent in 3a (rewind is core-only)
+  but S4 exposes it.
+- Fix: added a `_active_line()` helper (the raw `prev_id` walk, root-first, UNfolded —
+  the single source of truth for "on the line"); refactored `current_view()` to fold
+  ON TOP of it. `resume_conversation` now prefers the STORED title via a new
+  `storage.get_title(cid)` (authoritative; `""`/`None` distinction mirrors `get_model`)
+  and only derives when it is empty — and derives from `_active_line()`, never the view.
+  `rewind` now guards against `_active_line()` AND rejects folded children
+  (`compressed_into is None` clause) — so K (off-line), E (off-line), and folded
+  children all raise, graph unmutated. S4 revisits branching onto a folded turn.
+- Storage: added `get_title` to the `StoragePort` protocol, `ConversationRepository`,
+  and the `SaveCountingStorage` test double (kept in lockstep, per the seed note).
+- Tests: chose DOCUMENTED additions to `tests/test_conversation.py` (task-10 precedent,
+  not code-blind — recorded here), C91–C96. C91 (whole-tip fold → stored title survives
+  a further persist), C92 (empty stored title → derive from raw line), C93 (partly-folded
+  via direct graph injection → derive picks the FIRST raw user, not the folded-view first
+  user "later turn" bug), C94 (`rewind(K.id)` raises, graph/leaf/view unmutated) are
+  genuinely RED before the fix. C95 (rewind folded child) and C96 (`rewind(E.id)`) are
+  guards for the new `compressed_into` clause / off-line E — they already raised under the
+  old view-membership check (E/child not in the folded view), so they're regression
+  guards, not RED. This is the acceptance floor (task lists K.id + E.id explicitly).
+- Gotcha: in 3a the tip guard forbids folding a prefix, so the ONLY reachable way to fold
+  the first user turn is folding the WHOLE view (C91/C92). The "title becomes a later
+  turn's text" variant (C93) needs a prefix fold, which required building the graph
+  directly (S4/task-22 shape). `_active_line()` is now the seam any future "on the line?"
+  question should reuse — don't re-walk `prev_id` inline.
+- Verification: `scripts/check.sh` green (531 passed; was 525, +6). ruff+mypy clean.
+- NO qa-tester: pure core logic (`conversation.py` + a storage getter), no UI/runtime
+  surface this iteration — the unit tests + green gate ARE the verification (step 7).

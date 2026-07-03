@@ -397,7 +397,7 @@ Dependencies noted; every prerequisite sits above its dependent.
       back to the mode hint; editor-open variant → editor closed, no K committed;
       draft-running variant → no live worker afterwards. `scripts/check.sh` green.
 
-- [ ] **13g. Core: resume must not clobber the title; rewind must reject off-line
+- [x] **13g. Core: resume must not clobber the title; rewind must reject off-line
       nodes** _(deps: none; review findings)_ — Two `ctx/core/conversation.py` bugs.
       (1) `resume_conversation` (`conversation.py:302-305`) re-derives the title from
       the first `role=="user"` node of the VIEW: if the first user turn is folded into

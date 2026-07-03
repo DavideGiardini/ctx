@@ -138,6 +138,29 @@ class ConversationCore:
         """
         return self._workspace.read_file
 
+    def _active_line(self) -> list[Node]:
+        """The raw active line: nodes reached by walking ``prev_id`` from the tip.
+
+        Root-first and **unfolded** — the same walk ``current_view()`` performs
+        before it applies compression folding, so it still contains the folded
+        children (their ``prev_id`` chain is intact) and never the off-line
+        ``K``/``E`` nodes (``prev_id=None``, they live off the line). The walk
+        defensively stops on an id missing from the graph or already seen, so a
+        malformed chain can never hang. Single source of truth for "which nodes
+        are on the line": ``current_view`` folds it, resume derives the title
+        from it, and ``rewind`` guards membership against it.
+        """
+        line: list[Node] = []
+        seen: set[str] = set()
+        cur = self._active_leaf_id
+        while cur is not None and cur in self._graph and cur not in seen:
+            seen.add(cur)
+            node = self._graph[cur]
+            line.append(node)
+            cur = node.prev_id
+        line.reverse()
+        return line
+
     def current_view(self) -> list[Node]:
         """Project the active line as the linear ``list[Node]`` the UI consumes.
 
@@ -160,15 +183,7 @@ class ConversationCore:
         nodes from the real ``_active_leaf_id``, so appending after a folded tip
         yields ``[…, K, new]``.
         """
-        view: list[Node] = []
-        seen: set[str] = set()
-        cur = self._active_leaf_id
-        while cur is not None and cur in self._graph and cur not in seen:
-            seen.add(cur)
-            node = self._graph[cur]
-            view.append(node)
-            cur = node.prev_id
-        view.reverse()
+        view = self._active_line()
 
         resolved: list[Node] = []
         i = 0
@@ -299,10 +314,23 @@ class ConversationCore:
         if stored_model:
             # Empty/absent model (e.g. a pre-migration row) keeps the current default.
             self.model = stored_model
-        self.conversation_title = next(
-            (_derive_title(n.content) for n in self.nodes if n.role == "user"),
-            "",
-        )
+        # Prefer the stored title (authoritative); derive only when it is empty.
+        # Derivation walks the raw active line, never the folded view — a first
+        # user turn folded into a K must still title the conversation, and every
+        # user turn being folded must not silently blank the title (which the
+        # next persist() would then overwrite permanently).
+        stored_title = self._storage.get_title(conv_id)
+        if stored_title:
+            self.conversation_title = stored_title
+        else:
+            self.conversation_title = next(
+                (
+                    _derive_title(n.content)
+                    for n in self._active_line()
+                    if n.role == "user"
+                ),
+                "",
+            )
         return self.nodes
 
     def include_files(self, paths: list[str]) -> list[Node]:
@@ -329,9 +357,17 @@ class ConversationCore:
         ``current_view()`` then ends at it. The nodes after it are **not** deleted
         — they stay in the graph and the DB as an abandoned tail (append-only),
         recoverable by rewinding forward or, later, surfaced as a branch (S4).
-        Raises ``ValueError`` if ``target_id`` is not on the active line.
+        Raises ``ValueError`` if ``target_id`` is not on the active line. The
+        line is the raw ``_active_line()``, **not** ``current_view()``: the view
+        contains off-line ``K``/``E`` nodes, and rewinding to a ``K`` (``prev_id
+        =None``) would collapse the view to ``[K]`` and land it on the line on the
+        next ``submit`` (Q1). Folded children are on the raw line but rejected too
+        for now (S4 revisits branching onto a folded turn).
         """
-        if not any(node.id == target_id for node in self.current_view()):
+        if not any(
+            node.id == target_id and node.compressed_into is None
+            for node in self._active_line()
+        ):
             raise ValueError(f"rewind target not on active line: {target_id}")
         self._active_leaf_id = target_id
         self.persist()

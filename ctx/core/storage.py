@@ -20,6 +20,7 @@ class StoragePort(Protocol):
         active_leaf_id: str | None = None,
     ) -> None: ...
     def load(self, conversation_id: str) -> list[Node]: ...
+    def get_title(self, conversation_id: str) -> str | None: ...
     def get_model(self, conversation_id: str) -> str | None: ...
     def get_active_leaf(self, conversation_id: str) -> str | None: ...
     def list(self) -> list[dict]: ...
@@ -219,6 +220,22 @@ class ConversationRepository:
             )
             nodes.append(node)
         return nodes
+
+    def get_title(self, conversation_id: str) -> str | None:
+        """The stored title for a conversation, or ``None`` if it was never saved.
+
+        Symmetric with ``get_model``: an existing row with an empty title returns
+        ``""`` (a real, authoritative value the caller keeps as-is), a row that
+        was never created returns ``None`` (nothing stored, derive instead).
+        """
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT title FROM conversations WHERE id = ?", (conversation_id,)
+            ).fetchone()
+        finally:
+            conn.close()
+        return row[0] if row else None
 
     def get_model(self, conversation_id: str) -> str | None:
         conn = self._connect()

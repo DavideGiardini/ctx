@@ -84,6 +84,9 @@ class SaveCountingStorage:
     def load(self, cid):
         return self._inner.load(cid)
 
+    def get_title(self, cid):
+        return self._inner.get_title(cid)
+
     def get_model(self, cid):
         return self._inner.get_model(cid)
 
@@ -1632,3 +1635,142 @@ def test_c90_root_fold_view_starts_with_k(repo, test_provider, workspace, make_n
     assert [n.id for n in view] == [k.id, c.id]
     assert [n.node_type for n in view] == ["compression", "message"]
     assert view[0].prev_id is None
+
+
+# ---------------------------------------------------------------------------
+# Task 13g: resume must not clobber the title; rewind must reject off-line
+# nodes (ADR-0016 Q1). Documented additions per the task-10 precedent — the
+# scenarios come from the PRD task, not the implementation.
+# ---------------------------------------------------------------------------
+
+
+# C91 — compress the whole tip → save → resume → the stored title survives a
+# further persist (the folded view has no user turn, so the old derive-from-view
+# path blanked it and the next persist() overwrote the stored title for good).
+def test_c91_resume_whole_tip_folded_keeps_stored_title(
+    repo, test_provider, workspace
+):
+    original = "The original opening question"
+    core = ConversationCore(repo, test_provider(["hi"]), workspace)
+    core.setup()
+    core.submit(original)
+    core.submit("A follow-up question")
+    cid = core.conversation_id
+    view = core.current_view()
+    core.commit_compression(view[0].id, view[-1].id, "summary of everything")
+    assert core.conversation_title == original  # commit leaves the title alone
+
+    fresh = ConversationCore(repo, test_provider(["hi"]), workspace)
+    fresh.resume_conversation(cid)
+    assert fresh.conversation_title == original
+    fresh.persist()  # the write that used to clobber the stored title with ""
+
+    fresh2 = ConversationCore(repo, test_provider(["hi"]), workspace)
+    fresh2.resume_conversation(cid)
+    assert fresh2.conversation_title == original
+
+
+# C92 — when the stored title IS empty, resume derives from the raw line, not
+# the folded (user-less) view. Whole conversation folded, stored title blanked.
+def test_c92_resume_empty_stored_title_derives_from_raw_line(
+    repo, test_provider, workspace
+):
+    core = ConversationCore(repo, test_provider(["hi"]), workspace)
+    core.setup()
+    core.submit("Raw line first user turn")
+    core.submit("Second turn")
+    cid = core.conversation_id
+    view = core.current_view()
+    core.commit_compression(view[0].id, view[-1].id, "summary")
+    core.conversation_title = ""  # force resume down the derivation branch
+    core.persist()
+
+    fresh = ConversationCore(repo, test_provider(["hi"]), workspace)
+    fresh.resume_conversation(cid)
+    assert fresh.conversation_title == "Raw line first user turn"
+
+
+# C93 — partly folded, empty stored title: derivation picks the FIRST user turn
+# on the raw line (even though it is folded), never a later turn that happens to
+# be the folded view's first user node. Graph built directly to place a prefix
+# fold the 3a tip guard would otherwise forbid (S4/task 22 territory).
+def test_c93_resume_partly_folded_derives_first_raw_user(
+    repo, test_provider, workspace, make_node
+):
+    cid = "conv-c93"
+    u1 = make_node(role="user", content="Alpha original title", conversation_id=cid)
+    a1 = make_node(role="assistant", content="answer one", conversation_id=cid)
+    u2 = make_node(role="user", content="Beta a later turn", conversation_id=cid)
+    a2 = make_node(role="assistant", content="answer two", conversation_id=cid)
+    _chain(u1, a1, u2, a2)
+    k = make_node(
+        role="compression",
+        content="summary of the head",
+        node_type="compression",
+        conversation_id=cid,
+        meta={"prompt": "", "range": [u1.id, a1.id]},
+    )
+    u1.compressed_into = k.id
+    a1.compressed_into = k.id
+    repo.save(cid, "", [u1, a1, u2, a2, k], active_leaf_id=a2.id)
+
+    core = ConversationCore(repo, test_provider(["hi"]), workspace)
+    core.resume_conversation(cid)
+    # The folded view's first user node is u2 ("Beta…"); the raw line's is u1.
+    assert core.conversation_title == "Alpha original title"
+
+
+# C94 — rewind(K.id) raises and leaves the graph unmutated. K is in the view but
+# off the prev_id line; rewinding to it would collapse the view to [K] and land K
+# on the line on the next submit (Q1).
+def test_c94_rewind_to_compression_node_raises(repo, test_provider, workspace):
+    core = ConversationCore(repo, test_provider(["hi"]), workspace)
+    core.setup()
+    core.submit("First question")
+    core.submit("Second question")
+    view = core.current_view()
+    k = core.commit_compression(view[0].id, view[-1].id, "summary")
+    leaf_before = core._active_leaf_id
+    view_before = [n.id for n in core.current_view()]
+    ids_before = set(core._graph)
+    with pytest.raises(ValueError):
+        core.rewind(k.id)
+    assert core._active_leaf_id == leaf_before
+    assert [n.id for n in core.current_view()] == view_before
+    assert set(core._graph) == ids_before
+
+
+# C95 — rewind to a folded child raises (folded children are on the raw line but
+# rejected for now; guards the compressed_into clause).
+def test_c95_rewind_to_folded_child_raises(repo, test_provider, workspace):
+    core = ConversationCore(repo, test_provider(["hi"]), workspace)
+    core.setup()
+    u1, a1 = core.submit("First question")
+    core.submit("Second question")
+    view = core.current_view()
+    core.commit_compression(view[0].id, view[-1].id, "summary")
+    leaf_before = core._active_leaf_id
+    with pytest.raises(ValueError):
+        core.rewind(u1.id)  # u1 is folded (compressed_into set)
+    assert core._active_leaf_id == leaf_before
+
+
+# C96 — rewind(E.id) raises: an expand event node is off the line (prev_id=None)
+# and never a rewind target.
+def test_c96_rewind_to_expand_event_raises(repo, test_provider, workspace):
+    core = ConversationCore(repo, test_provider(["hi"]), workspace)
+    core.setup()
+    core.submit("First question")
+    core.submit("Second question")
+    view = core.current_view()
+    k = core.commit_compression(view[0].id, view[-1].id, "summary")
+    core.expand_compression(k.id)
+    e_id = next(
+        n.id for n in core._graph.values() if n.node_type == "expand"
+    )
+    leaf_before = core._active_leaf_id
+    view_before = [n.id for n in core.current_view()]
+    with pytest.raises(ValueError):
+        core.rewind(e_id)
+    assert core._active_leaf_id == leaf_before
+    assert [n.id for n in core.current_view()] == view_before
