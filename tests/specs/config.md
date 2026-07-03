@@ -33,7 +33,7 @@ mutation-isolation test runs (C17/C18 mutate returned dicts).
 the baseline defaults `D`; does not raise.
 
 **C3. Defaults expose the documented structure.** Baseline `D` contains a `"colors"`
-dict whose keys are exactly `{user, assistant, system, context}` (values are
+dict whose keys are exactly `{user, assistant, system, context, compression}` (values are
 strings); a `"ui"` dict containing a `"truncation_lines"` dict whose keys are
 exactly `{human, assistant, context, system}` (values are ints); and a top-level
 `"model"` string (non-empty — the user-overridable default model, ADR 0006 #3).

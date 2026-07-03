@@ -49,6 +49,7 @@ class ChatApp(App):
         Binding("i", "enter_insert", "Insert Mode", show=False),
         Binding("v", "anchor_range", "Select range", show=False),
         Binding("c", "compress", "Compress", show=False),
+        Binding("ctrl+s", "commit_compression", "Commit", show=False),
         Binding("up", "up", "Up", show=False),
         Binding("down", "down", "Down", show=False),
         Binding("enter", "detail_enter", "Select split", show=False),
@@ -337,6 +338,49 @@ class ChatApp(App):
         self.query_one(DetailInspector).display = True
         self.query_one(MessageList).focus()
 
+    async def action_commit_compression(self) -> None:
+        """`Ctrl+S` in the draft editor: fold the selected range into a K.
+
+        Commits the editor's summary (Bottom split) as a manual compression via
+        ``core.commit_compression`` (``prompt=""`` — no draft ran yet; task 9
+        switches it to the last-drafted prompt), then closes the editor, clears
+        the selection, rebuilds the list (children out, one K in), and refreshes
+        the token UI. An empty summary breadcrumbs instead of committing. Gated
+        on the editor being open so the binding is inert in normal Edit mode.
+        """
+        editor = self.query_one(CompressionEditor)
+        if not editor.is_open:
+            return
+        if not editor.output.strip():
+            await self._breadcrumb("Write a summary before committing (Ctrl+S).")
+            return
+        ids = self._compression_range()
+        if not ids:
+            return
+        self.core.commit_compression(ids[0], ids[-1], summary=editor.output, prompt="")
+        self._close_compression_editor()
+        self._clear_selection()
+        await self._rebuild_message_list()
+        self._refresh_token_ui()
+
+    async def _rebuild_message_list(self) -> None:
+        """Tear down and re-mount the message list from ``core.nodes`` (the
+        current resolved view). Used after a structural change — e.g. a
+        compression commit folds a range into a single K widget."""
+        message_list = self.query_one(MessageList)
+        for child in list(message_list.children):
+            await child.remove()
+        for node in self.core.nodes:
+            await message_list.add_node(node)
+
+    async def _breadcrumb(self, text: str) -> None:
+        """Append a session breadcrumb (system message) to the conversation."""
+        node = self.core.add_system_message(text)
+        await self.query_one(MessageList).add_node(node)
+        self._refresh_token_ui()
+        if self.mode == "insert":
+            self._lock_inspector_to_last()
+
     def _focus_in_detail(self) -> bool:
         return self._is_focused_in(self.query_one(DetailInspector))
 
@@ -408,6 +452,12 @@ class ChatApp(App):
 
     def action_switch_focus(self) -> None:
         if self.mode != "edit":
+            return
+        # While the draft editor owns the left pane, Tab cycles its two splits
+        # (the inspector behind it is hidden) so the summary is keyboard-reachable.
+        editor = self.query_one(CompressionEditor)
+        if editor.is_open:
+            editor.focus_next_split()
             return
         inspector = self.query_one(DetailInspector)
         message_list = self.query_one(MessageList)

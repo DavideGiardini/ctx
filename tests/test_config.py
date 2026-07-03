@@ -92,7 +92,13 @@ def test_c3_baseline_shape(config_file):
     assert isinstance(defaults["model"], str)
     assert defaults["model"]
 
-    assert set(defaults["colors"].keys()) == {"user", "assistant", "system", "context"}
+    assert set(defaults["colors"].keys()) == {
+        "user",
+        "assistant",
+        "system",
+        "context",
+        "compression",
+    }
     for value in defaults["colors"].values():
         assert isinstance(value, str)
 

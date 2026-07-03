@@ -17,6 +17,7 @@ _DEFAULTS: dict = {
         "assistant": "#f97316",
         "system": "#737373",
         "context": "#22c55e",
+        "compression": "#a855f7",
     },
     "ui": {
         # Max lines a node occupies in the right-pane conversation graph before

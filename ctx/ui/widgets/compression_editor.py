@@ -74,3 +74,13 @@ class CompressionEditor(Container):
     def output(self) -> str:
         """The current (possibly user-edited) summary/output text."""
         return self.query_one("#compress-output", TextArea).text
+
+    def focus_next_split(self) -> None:
+        """Cycle focus between the two editable splits (prompt ↔ summary).
+
+        The 2-split editor has no Center, so ``Tab`` just toggles between the
+        prompt and summary ``TextArea``s — giving a keyboard-only path to the
+        summary the user commits (the app routes its ``Tab`` here while open)."""
+        prompt = self.query_one("#compress-prompt", TextArea)
+        output = self.query_one("#compress-output", TextArea)
+        (prompt if output.has_focus else output).focus()

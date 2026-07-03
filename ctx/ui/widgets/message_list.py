@@ -13,12 +13,26 @@ _TRUNCATION_KEY = {
     "assistant": "assistant",
     "context": "context",
     "system": "system",
+    # A compression summary stands in for a run of turns; truncate it like an
+    # assistant reply (there is no separate "compression" truncation config).
+    "compression": "assistant",
 }
+
+# Roles rendered as first-class turns: a "tall" left border (thick when the
+# cursor selects them). Others (system) get a plain "solid" border.
+_TALL_ROLES = ("user", "assistant", "context", "compression")
 
 # Which "conversation pass" a role belongs to. context imports are always
 # human-invoked (/include), so they take the human side; only system nodes
 # inherit the previous node's side, resolved positionally (see _pass_starts).
-_SIDE = {"user": "human", "assistant": "assistant", "context": "human"}
+_SIDE = {
+    "user": "human",
+    "assistant": "assistant",
+    "context": "human",
+    # A K node folds a range that stood in the assistant's context; treat it as
+    # the assistant side for conversation-pass margins.
+    "compression": "assistant",
+}
 
 
 def _pass_starts(roles: list[str]) -> list[bool]:
@@ -55,7 +69,7 @@ class MessageWidget(Vertical):
         colors = get_config()["colors"]
         color_str = colors.get(self._role, colors["system"])
         self._border_color = Color.parse(color_str)
-        style = "tall" if self._role in ("user", "assistant", "context") else "solid"
+        style = "tall" if self._role in _TALL_ROLES else "solid"
         self.styles.border_left = (style, self._border_color)  # type: ignore[assignment]
         self._apply_truncation()
 
@@ -69,7 +83,7 @@ class MessageWidget(Vertical):
 
     def set_selected(self, selected: bool) -> None:
         self.set_class(selected, "selected")
-        if self._role in ("user", "assistant", "context"):
+        if self._role in _TALL_ROLES:
             style = "thick" if selected else "tall"
             self.styles.border_left = (style, self._border_color)  # type: ignore[assignment]
 
