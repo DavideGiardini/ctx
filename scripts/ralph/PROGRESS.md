@@ -1200,3 +1200,32 @@ Git history is the source of truth for *what changed*; this file captures the
   (`tests/test_app_deep_dive.py`) already asserts the raw field, so this is a QA-session tooling gap,
   not missing coverage.
 - Did NOT commit the pre-existing dirty `CONTEXT.md` / `docs/Sprint Roadmap.md`.
+
+## 2026-07-03 — Task 13a (Sprint 3, Phase 3b): commit failures breadcrumb, no crash/soft-lock
+- Bug: `action_commit_compression` (`ctx/ui/app.py:513`) called `core.commit_compression`
+  with NO try/except, so any `_validate_compress_range` `ValueError` (non-tip range,
+  K-in-range, mid-stream, stale ids) propagated uncaught → editor soft-locks + app stops
+  processing all input (unrecoverable short of restart).
+- Fix: wrapped the call in `try/except ValueError`; on failure log + `await self._breadcrumb(str(exc))`
+  and `return` BEFORE the close/clear/rebuild. **Decision: keep the editor OPEN** (mirrors the
+  graceful `except Exception` in `_draft_compression_worker` and lets the user adjust the range
+  or Esc out). The catch stays valid after task 22 deletes the tip guard — the flat/streaming/
+  stale-id guards still raise `ValueError`.
+- Guard messages the breadcrumb surfaces (from `conversation.py:358-379`): "cannot compress while
+  a turn is streaming", "cannot compress a range containing a compression node", "compression range
+  must end at the active leaf (tip)".
+- Pure UI fix over already-tested core → Pilot floor, NOT the code-blind flow.
+- Tests: `tests/test_app_commit_failures.py` — 3 Pilot tests for the reachable triggers:
+  (1) non-tip range (`home,v,down`); (2) commit during a LIVE stream (local `_BlockingProvider`
+  swapped onto `app.core._provider`, submit a turn, poll `core.streaming` until True — the `c`
+  editor opens fine mid-stream since it has no streaming gate); (3) range containing a committed K
+  (fold last-2 into K first, then select the whole view incl. K). Each asserts: no exception
+  escapes, exactly-zero-new-K, editor still open, a matching system breadcrumb, AND the app still
+  processes a later `escape` (editor closes) — proving no soft-lock. Verified RED without the fix
+  (git stash → all 3 fail), GREEN with it.
+- Verification: `scripts/check.sh` green (514 passed, was 511; +3; ruff+mypy clean).
+- NO qa-tester this iteration: the in-process MCP harness caches `ctx.*` at session start, so it
+  cannot see this iteration's uncommitted `app.py` edit — it would drive STALE (pre-fix) code. The
+  task's qa-tester CP3 repro is covered by task 23's E2E walk against committed code (same rationale
+  as tasks 8/12). The Pilot tests ARE the acceptance floor.
+- Working tree was clean of the old dirty CONTEXT.md/Sprint Roadmap.md this time (nothing extra staged).

@@ -279,7 +279,7 @@ Dependencies noted; every prerequisite sits above its dependent.
 > top of Phase 3b per task 13's rule ("defects become new `- [ ]` tasks at the top
 > of Phase 3b; do not patch inside task 13"). **All of 13a–13i land before task 14.**
 
-- [ ] **13a. UI: commit failures must breadcrumb, not crash + soft-lock** _(deps: 8;
+- [x] **13a. UI: commit failures must breadcrumb, not crash + soft-lock** _(deps: 8;
       found by task 13 CP3, scope extended by the 2026-07-03 review)_ — Bug:
       `action_commit_compression` (`ctx/ui/app.py:513-539`) calls
       `self.core.commit_compression(...)` with **no** `try/except`, so any guard

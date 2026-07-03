@@ -530,9 +530,19 @@ class ChatApp(App):
         ids = self._compression_range()
         if not ids:
             return
-        self.core.commit_compression(
-            ids[0], ids[-1], summary=editor.output, prompt=self._last_drafted_prompt
-        )
+        try:
+            self.core.commit_compression(
+                ids[0], ids[-1], summary=editor.output, prompt=self._last_drafted_prompt
+            )
+        except ValueError as exc:
+            # A guard rejected the range (non-tip in 3a, K-in-range, mid-stream,
+            # or stale ids after the view changed). Surface it and keep the
+            # editor open so the user can adjust the range or Esc out — never let
+            # it propagate uncaught (that soft-locks the app, task 13a). Mirrors
+            # the graceful failure path in _draft_compression_worker.
+            logger.error("commit error | error=%s", exc)
+            await self._breadcrumb(str(exc))
+            return
         self._close_compression_editor()
         self._clear_selection()
         await self._rebuild_message_list()
