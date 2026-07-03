@@ -501,7 +501,7 @@ Dependencies noted; every prerequisite sits above its dependent.
       representation — if this swap breaks them, adapting them is a **deliberate,
       recorded** change (PROGRESS entry + spec in lockstep), not test-fudging.
 
-- [ ] **16. Core: `context_at_generation` + drift predicate** _(deps: 14, 15)_ — new
+- [x] **16. Core: `context_at_generation` + drift predicate** _(deps: 14, 15)_ — new
       framework-free module (e.g. `ctx/core/reconstruction.py`), pure functions over
       a node list (Q11 — read-only, lazy, never on the live pipeline):
       `context_at_generation(all_nodes, node_id) -> list[Node]` — walk `prev_id` for

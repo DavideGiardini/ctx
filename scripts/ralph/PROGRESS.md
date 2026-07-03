@@ -1581,3 +1581,48 @@ Git history is the source of truth for *what changed*; this file captures the
   module, not by extending these now-view helpers. `folded_children` already
   reads `K.meta["range"]` (confirmed, unchanged). Enumeration scans the whole
   `_graph` per `current_view()` call (O(all nodes)); fine at conversation scale.
+
+## 2026-07-03 — Task 16: context_at_generation + drift predicate (Q11)
+
+- New framework-free module `ctx/core/reconstruction.py` (imports only `Node`):
+  three pure functions over an `all_nodes` list, read-only, off the live pipeline.
+  - `context_at_generation(all_nodes, node_id)` — walk `prev_id` for T's STRICT
+    ancestors L (T excluded), then fold via event enumeration under the ADR-0016
+    A#2 as-of rule: K applies iff `created_seq(K) < created_seq(T)` AND
+    `K.meta["range"] ⊆ L` AND no E targeting K with `created_seq(E) < created_seq(T)`.
+    Maximal-contiguous-run fold identical to `current_view`.
+  - `now_prefix(all_nodes, node_id)` — same ancestors, task-15 now-rule (K applies
+    iff no E targets it at all, range ⊆ L).
+  - `has_drift(all_nodes, node_id)` — id-sequences of the two differ.
+- Shared internals: `_strict_ancestors` (defensive prev_id walk, mirrors
+  current_view) and `_fold(all_nodes, line, applies)` (predicate injected; the
+  `range ⊆ line` check stays inside `_fold`, so `applies` is only the event/seq
+  predicate). Reads only K/E event nodes + created_seq — never `compressed_into`
+  (A#3 §3), matching task 15.
+- Design note: I did NOT extend conversation.py's `_active_folds`/`_expanded_k_ids`
+  (they're instance methods over `self._graph`; this module is standalone pure
+  functions over an arbitrary list, and adds the as-of `created_seq` axis the
+  now-view helpers don't have). Some structural duplication of the fold loop is
+  deliberate — the two live in different layers (live core vs read-only recon) and
+  a shared abstraction would couple them; deletion test: extracting a common folder
+  would need both call sites to agree on graph-vs-list + now-vs-asof, not worth it.
+- Tests: `test-spec-author` (code-blind) wrote `tests/specs/reconstruction.md`
+  (C1–C21) + `tests/test_reconstruction.py` (23 tests). Covers the full acceptance
+  floor: before-compression→verbatim (drift A-direction), after→sees K (no drift),
+  saw-K-then-expand→drift reverse direction, expand→re-compress era selection per
+  turn, range⊄L abandoned-tail never applies, no-event never drifts, root/unknown/
+  off-line node_id → []. Plus T-excluded, middle-run fold [a,K,e], two independent
+  Ks [K1,K2]. Confirmed red-on-NotImplementedError (clean collection) → green.
+- Verification: `scripts/check.sh` green (573 passed; was 550, +23). ruff+mypy
+  clean. NO qa-tester: pure core logic, no UI/runtime surface — code-blind unit
+  tests + green gate ARE the verification (step 7).
+- Gotcha for task 17 (`ctx_hash`): the oracle is
+  `hash_context(build_context(context_at_generation(all, T.id), read_file)) ==
+  T.meta["ctx_hash"]`. Note `stream()` builds context from
+  `[n for n in self.nodes if n is not assistant_node]` (conversation.py:632) =
+  current_view minus the streaming tip = exactly `context_at_generation(T)` at T's
+  own generation moment (all extant K/E have seq < seq(T) then). So the recon list
+  order (root-first) already matches what build_context saw. `hash_context` +
+  the `assistant_node.meta["ctx_hash"] = ...` line go right after build_context in
+  stream (conversation.py ~321-323 per PRD, but the build_context call is at 633 in
+  the current file — locate it, don't trust the line number).
