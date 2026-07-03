@@ -35,12 +35,17 @@ diff view exists** — the task order enforces this; do not reorder.
 - **H2 invariant:** `commit_compression` / `expand_compression` / `draft_compression`
   must raise while a turn is streaming (`ConversationCore.streaming`, task 3); the UI
   additionally refuses the actions while `_stream_worker` runs (`ctx/ui/app.py:75`).
-- **Keys (settled):** `v` anchor+extend selection (Edit mode) · `c` or `/compress`
-  opens the draft editor · `Ctrl+D` draft/re-draft · `Ctrl+S` commit · `Esc` cancel ·
-  `/expand` · `g d` deep-dive / diff view · `Ctrl+o` pop one level · `i` exits any
-  full-screen inspection to Insert at the live tip. The roadmap's `:expand`/`:compress`
-  colon notation maps to slash commands (ctx has no colon infrastructure). Update
-  footer hints (`ctx/ui/widgets/app_footer.py:9` `_HINTS`) whenever keys are added.
+- **Keys (settled, revised 2026-07-03):** `v` anchor+extend selection (Edit mode) ·
+  `c` opens the draft editor · `Ctrl+D` draft/re-draft · `Ctrl+S` commit · `Esc`
+  cancel · `x` expands the selected K (Edit mode, task 13b) · `g d` deep-dive / diff
+  view · `Ctrl+o` pop one level · `i` exits any full-screen inspection to Insert at
+  the live tip. **Selection-dependent actions are Edit-mode keys ONLY, never slash
+  commands** (user decision 2026-07-03): the InputBar needs Insert mode and entering
+  Insert clears the selection, so a command can never act on a selected node. The
+  3a-shipped `/compress`/`/expand` commands are removed by task 13b — this supersedes
+  the earlier ":compress/:expand map to slash commands" note (record in ADR-0016).
+  Update footer hints (`ctx/ui/widgets/app_footer.py:9` `_HINTS`) whenever keys are
+  added.
 - **Code-blind test flow** (PROMPT.md step 4) for new/changed core behavior:
   signatures + docstrings + stubs → `test-spec-author` with interface + prose intent →
   red → implement to green. Authored tests are fixed. Reuse `tests/conftest.py`
@@ -268,51 +273,195 @@ Dependencies noted; every prerequisite sits above its dependent.
 
 ### Phase 3b — middle compression + context transparency
 
-> Tasks 13a–13b were filed by the task-13 E2E verification (2026-07-03). They sit
-> at the top of Phase 3b per task 13's rule ("defects become new `- [ ]` tasks at
-> the top of Phase 3b; do not patch inside task 13"). Fix them before task 14.
+> Tasks 13a–13b were filed by the task-13 E2E verification (2026-07-03); tasks
+> 13c–13i by the post-3a review (2026-07-03 — a three-agent audit of core
+> invariants, UI wiring, and test quality; findings recorded here). They sit at the
+> top of Phase 3b per task 13's rule ("defects become new `- [ ]` tasks at the top
+> of Phase 3b; do not patch inside task 13"). **All of 13a–13i land before task 14.**
 
-- [ ] **13a. UI: non-tip commit must breadcrumb, not crash + soft-lock** _(deps: 8;
-      found by task 13 CP3)_ — Bug: `action_commit_compression` (`ctx/ui/app.py:513-539`)
-      calls `self.core.commit_compression(...)` with **no** `try/except`, so the 3a
-      tip-guard `ValueError` ("compression range must end at the active leaf (tip)")
-      from `_validate_compress_range` (`ctx/core/conversation.py:379`) propagates
-      uncaught. After it, the editor is soft-locked open and the app stops processing
-      all keys/text (session unrecoverable short of restart). Repro: 2 turns → Edit →
-      select a non-tip range (`home`,`v`,`down`) → `c` → type any summary → `Ctrl+S`.
-      Fix: wrap the `commit_compression` call in the commit action in `try/except
-      ValueError`, surfacing the message as a `_breadcrumb(...)` (mirror the graceful
-      `except Exception` in `_draft_compression_worker`, `app.py:502-510`), and keep
-      the editor open so the user can adjust the range/selection (or close it — record
-      the choice in PROGRESS). The Q7 no-K-in-range guard raises the same `ValueError`
-      type, so this also covers a nested-range attempt. Note: this UI catch stays valid
-      after task 22 deletes the tip guard — the no-K-in-range/flat guards still raise.
-      _Acceptance:_ Pilot (template `tests/test_app_*`): 2 turns, select a non-tip range,
-      open editor, set a non-empty summary, invoke `action_commit_compression` → NO
-      exception escapes, a system breadcrumb is appended, the app still processes a
-      subsequent `escape`/`i` (assert mode/focus change), and `describe_state` shows the
-      range still un-folded (no K). qa-tester re-runs the CP3 repro and confirms a clean
-      breadcrumb + responsive app (`textual_check_errors` clean). `scripts/check.sh` green.
+- [ ] **13a. UI: commit failures must breadcrumb, not crash + soft-lock** _(deps: 8;
+      found by task 13 CP3, scope extended by the 2026-07-03 review)_ — Bug:
+      `action_commit_compression` (`ctx/ui/app.py:513-539`) calls
+      `self.core.commit_compression(...)` with **no** `try/except`, so any guard
+      `ValueError` from `_validate_compress_range` (`ctx/core/conversation.py:358-380`)
+      propagates uncaught; the editor soft-locks open and the app stops processing all
+      keys/text (session unrecoverable short of restart). **Four reachable triggers**,
+      not just the one CP3 hit: (1) non-tip range (3a tip guard — repro: 2 turns → Edit
+      → `home`,`v`,`down` → `c` → type a summary → `Ctrl+S`); (2) commit while a real
+      turn is streaming — `c` has NO streaming gate, so the editor opens fine mid-stream
+      and `Ctrl+S` then hits the H2 guard; (3) a range containing an existing K (Q7 flat
+      guard); (4) stale range ids after the view changed under an open editor. Fix: wrap
+      the call in `try/except ValueError`, surface `str(e)` via `_breadcrumb(...)`
+      (mirror the graceful `except Exception` in `_draft_compression_worker`,
+      `app.py:502-510`), keep the editor open so the user can adjust (or close it —
+      record the choice in PROGRESS). The catch-all stays valid after task 22 deletes
+      the tip guard — the flat/streaming/stale-id guards still raise. _Acceptance:_
+      Pilot tests (template `tests/test_app_*`) for at least triggers (1), (2)
+      (BlockingProvider live turn, swap-provider pattern), and (3): NO exception
+      escapes, a system breadcrumb is appended, the app still processes a subsequent
+      `escape`/`i` (assert mode/focus change), and `describe_state` shows no new K.
+      qa-tester re-runs the CP3 repro and confirms a clean breadcrumb + responsive app
+      (`textual_check_errors` clean). `scripts/check.sh` green.
 
-- [ ] **13b. UI: make `/expand` (and selection-commands) reachable by keyboard** _(deps:
-      11; found by task 13 CP4)_ — Bug: `/expand` can only be typed into the InputBar,
-      which requires Insert mode, but `_set_mode("insert")` (`ctx/ui/app.py:236-247`)
-      unconditionally `_clear_selection()`s first, so `_handle_expand_command`'s
-      `_get_selected_node()` (`app.py:1059`) is always `None` and it always breadcrumbs
-      "Not a compression node". `/expand` is therefore unreachable through the documented
-      keyboard workflow (same command-vs-selection gap flagged for `/compress` in the
-      task 11/12 PROGRESS notes — `/compress` is saved only by the `c` key; expand has no
-      key alternative). Decide the fix (record rationale in PROGRESS, ref ADR-0016 keys
-      list): the cleanest is a dedicated **Edit-mode key** for expand that acts on the
-      selected K directly (no InputBar round-trip) — e.g. bind `x` or reuse a chord — so
-      it never enters Insert; `/expand` may remain as a discoverability breadcrumb. Do
-      NOT weaken the "Insert clears selection" invariant (other flows depend on it).
-      Update footer `_HINTS` (`ctx/ui/widgets/app_footer.py`) and the ADR-0016 keys note
-      only if a new key is added (that ADR edit is permitted here). _Acceptance:_ Pilot:
-      compress a tip range → in Edit mode select the K → invoke the new expand key →
-      `describe_state` shows children restored, no K, cursor on the first restored child
-      (task 11's semantics); a non-K selection breadcrumbs "Not a compression node". Then
-      qa-tester confirms compress→expand→re-compress **purely by keyboard**.
+- [ ] **13b. UI: expand becomes an Edit-mode key; REMOVE the selection-dependent slash
+      commands** _(deps: 11; found by task 13 CP4 + review; user decision 2026-07-03)_ —
+      Bug: a slash command can never act on a selection — the InputBar requires Insert
+      mode and `_set_mode("insert")` (`ctx/ui/app.py:236-247`) unconditionally
+      `_clear_selection()`s, so `_handle_expand_command` (`app.py:1059`) always sees no
+      selection ("Not a compression node") and `/compress` (`app.py:1033-1041`) always
+      breadcrumbs "Select a range first" — an instruction that sends the user in a
+      circle (going back to Insert to type the command clears the range again). Settled
+      resolution (user, 2026-07-03): **selection-dependent actions are Edit-mode keys
+      only; the slash commands are removed, not repaired.** Fix: (1) add an Edit-mode
+      `x` binding (or another free key — verify no conflict with existing bindings,
+      record in PROGRESS) that expands the selected K via the task-11 handler logic
+      (non-K selection → "Not a compression node" breadcrumb; keep the H2 mid-stream
+      breadcrumb; selection lands on the first restored child); inert while deep-diving
+      (read-only, Q8). (2) REMOVE `/compress` and `/expand` from `InputBar.COMMANDS`
+      and their `on_input_bar_submitted` branches — `c` is the only compress path.
+      (3) Update footer `_HINTS["edit"]` (≤100 cols) and append the key-map correction
+      to ADR-0016 (that ADR edit is permitted here). (4) Rewrite `tests/test_app_expand.py`
+      to drive the new key with REAL presses (drop the `on_input_bar_submitted("/expand")`
+      back-door — it was exactly the convention that masked this defect) and remove the
+      `/compress`-breadcrumb Pilot test in `tests/test_app_compression_editor.py`. Do
+      NOT weaken the "Insert clears selection" invariant. _Acceptance:_ Pilot: compress
+      a tip range → Edit → select the K → press the expand key → children restored, no
+      K, cursor on the first restored child; a non-K selection breadcrumbs. qa-tester
+      confirms compress→expand→re-compress **purely by keyboard**. `scripts/check.sh`
+      green.
+
+- [ ] **13c. Test: a committed K's summary must reach the provider on the next turn**
+      _(deps: 8; review finding, proven by mutant)_ — Coverage hole: NO test streams a
+      turn while a fold is active and inspects the provider payload. The review built a
+      scratch mutant of `ConversationCore.stream` that builds context from the raw
+      un-folded `prev_id` walk (children sent, K never sent — compression saves nothing
+      and the summary never reaches the model): **all 511 tests passed.** The expand
+      direction has exactly the needed test (task 11's recording-provider Pilot in
+      `tests/test_app_expand.py`); the compress direction — the single user-visible
+      payoff of 3a — does not. Task 13's PROGRESS claim that CP2 is "covered by
+      committed unit/Pilot tests" is wrong; correct the record in this task's PROGRESS
+      entry. Fix: add the mirror Pilot test — two turns → compress the tip range (`c` →
+      type summary → `Ctrl+S`) → next turn with a recording provider → the captured
+      messages contain `<conversation_summary>` wrapping the summary text and do NOT
+      contain the children's content. _Acceptance:_ verify the new test goes RED against
+      a temporary local raw-walk mutation of stream's context build (do not commit the
+      mutant), GREEN on real code. `scripts/check.sh` green.
+
+- [ ] **13d. UI: commit/close must not orphan a running draft worker** _(deps: 9;
+      review finding, High)_ — Bug: `action_commit_compression` never checks
+      `_draft_worker`, so `Ctrl+S` mid-draft commits the half-streamed summary as K;
+      worse, `_close_compression_editor` (`app.py:472-476`) sets `_draft_worker = None`
+      WITHOUT `.cancel()` — the orphaned worker keeps streaming into the hidden
+      TextArea, overwrites a re-opened editor's Summary with the old range's draft, and
+      a second `Ctrl+D` (its guard now sees None) starts a concurrent draft interleaving
+      `set_output` calls. Fix: (1) `Ctrl+S` while a draft is live → breadcrumb ("Draft
+      in progress — Esc cancels it first."), no commit (or cancel-then-refuse — record
+      the choice); (2) `_close_compression_editor` cancels a live worker before dropping
+      the reference; (3) replace the `state == WorkerState.RUNNING` liveness checks
+      (`app.py:193-195, 487, 796-798, 1054-1056`) with `not worker.is_finished` — a
+      just-created worker is briefly PENDING and slips every current guard. _Acceptance:_
+      Pilot with a BlockingProvider draft (swap-provider pattern): `Ctrl+D` →
+      `Ctrl+S` mid-stream → NO K committed, breadcrumb shown, editor still open; Esc
+      cancels the draft; the close path leaves no live worker (assert via
+      `app.workers`); re-opening the editor on another range shows a clean Summary.
+      `scripts/check.sh` green.
+
+- [ ] **13e. UI: range extension must clamp at the list edges, not wrap** _(deps: 6;
+      review finding + task-6 PROGRESS gotcha)_ — Bug: `_select_relative` (`app.py:602`)
+      wraps modulo, and entering Edit puts the cursor on the LAST node — so `v`,`down`
+      wraps the cursor to index 0 and `_range_ids` (`app.py:336-349`) sorts the
+      endpoints: **one keystroke range-selects the entire conversation**; `c`+`Ctrl+S`
+      then folds the whole conversation (the range ends at the tip so the tip guard
+      passes), or hits 13a's ValueError if a K exists in history. Fix per the task-6
+      note: when `_range_anchor_id` is set, clamp in `action_up`/`action_down` — do NOT
+      change `_select_relative` (other callers rely on wrap). _Acceptance:_ Pilot:
+      cursor on tip → `v`,`down` → range stays [tip] (range-of-one); `home` → `v`,`up`
+      → range stays [first]; normal in-bounds extension unchanged (existing task-6
+      tests stay green). `scripts/check.sh` green.
+
+- [ ] **13f. UI: `/new` and `/resume` must reset compression UI state** _(deps: 12,
+      13d; review finding)_ — Bug: `_handle_new_command` (`app.py:971-984`) and
+      `_handle_resume_command` (`app.py:986-1010`) clear only selection/range. A mouse
+      click focuses the InputBar WITHOUT entering Insert or clearing state, so these
+      commands can fire while a deep-dive, an open editor, or a running draft stands:
+      the dead dive frame keeps feeding `_visible_nodes()` (describe_state and the next
+      rebuild resurrect the OLD conversation's folded children), the footer keeps the
+      dive hint, the editor stays open over dead range ids (→ 13a's ValueError site),
+      and a live draft worker survives the conversation switch. Fix: both handlers
+      (consider one `_reset_transient_ui()` helper any future conversation-switch path
+      can reuse) must pop the whole `_deep_dive_stack` + reset the footer flag, close
+      the editor without committing, cancel a live draft worker (13d's cancel helper),
+      and clear `_last_drafted_prompt` + `_pending_chord`. _Acceptance:_ Pilot (invoke
+      the handlers directly — the mouse path has no Pilot equivalent): dive into a K →
+      `/new` → `deep_dive.active` False, visible nodes = the new conversation, footer
+      back to the mode hint; editor-open variant → editor closed, no K committed;
+      draft-running variant → no live worker afterwards. `scripts/check.sh` green.
+
+- [ ] **13g. Core: resume must not clobber the title; rewind must reject off-line
+      nodes** _(deps: none; review findings)_ — Two `ctx/core/conversation.py` bugs.
+      (1) `resume_conversation` (`conversation.py:302-305`) re-derives the title from
+      the first `role=="user"` node of the VIEW: if the first user turn is folded into
+      a K, the title silently becomes a later turn's text — or `""` when every user
+      turn is folded — and the next `persist()` overwrites the stored title permanently.
+      Fix: prefer the STORED title on resume (read it via storage; fall back to
+      derivation only when the stored title is empty), and derive from the raw line,
+      never the folded view. (2) `rewind(target_id)` (`conversation.py:334-336`) checks
+      membership against `current_view()`, which CONTAINS off-line K nodes:
+      `rewind(K.id)` sets the active leaf to a `prev_id=None` node, collapsing the view
+      to `[K]`, and the next `submit()` chains `prev_id=K.id` — K lands ON the line
+      permanently, violating Q1. Latent today (rewind is core-only) but S4 exposes it.
+      Fix: reject any target not on the `prev_id` line (ValueError, graph unmutated);
+      keep rejecting folded children for now (record: S4 revisits). _Acceptance:_ unit
+      tests (small documented additions per the task-10 precedent, or code-blind —
+      record the choice): compress-the-whole-tip → save → resume → stored title
+      unchanged after a further persist; partly-folded resume keeps the original title;
+      `rewind(K.id)` / `rewind(E.id)` raise with the graph unmutated.
+      `scripts/check.sh` green.
+
+- [ ] **13h. UI: deep-dive/editor interaction hardening (Esc order, seam bypass, stale
+      inspector)** _(deps: 12; review findings)_ — Three related state bugs. (1) Esc
+      while diving with a pre-dive anchor is a DEAD keypress: the range-clear branch
+      (`app.py:211-213`) precedes the dive pop (`app.py:216-218`), but dive widgets
+      never render the range highlight (`_range_ids` reads `core.nodes` while the list
+      shows frame nodes), so the first Esc visibly does nothing. Fix: clear the anchor
+      on dive entry (`_enter_deep_dive`, `app.py:400-415`) — a selection can't
+      meaningfully survive the view swap. (2) Async node-appenders bypass the
+      `_visible_nodes()` seam: `_breadcrumb` (`app.py:551-557`), `_check_connectivity`'s
+      completion (`app.py:964-969`), and `on_input_bar_submitted`'s submit path
+      (`app.py:893-943`) mount widgets straight into the list — a late "✔ Connected"
+      breadcrumb (repro: `/model x` → dive before the worker finishes) or a whole
+      streamed turn lands INSIDE the read-only dive view, unreachable by the cursor.
+      Fix: keep appending to the core but gate the widget-mount on `_deep_dive_stack`
+      (exit-dive rebuilds from `_visible_nodes()` anyway — record the exact choice).
+      (3) Stale inspector after commit: `_clear_selection` (`app.py:309-319`) never
+      resets the DetailInspector, so after `Ctrl+S` the left pane still shows a node
+      that was just folded away and Tab enters that stale pane. Route the post-commit
+      clear through `_select_message(None)`. _Acceptance:_ Pilot: (a) `v` on a K →
+      `g d` → a SINGLE Esc pops the dive; (b) `/model x` → dive → wait for the
+      connectivity worker → dive widget count unchanged, exit dive → breadcrumb visible
+      in the live view; (c) commit → inspector shows the empty/placeholder state.
+      `scripts/check.sh` green.
+
+- [ ] **13i. Polish: editor footer hints, blank-prompt fallback, `range_selection`
+      indices** _(deps: 7, 9; review findings)_ — Three small fixes. (1) The editor
+      state has NO footer hint — while it is open the footer still shows the Edit hints
+      (`v`/`c`/`i` now type into the TextArea) and the real keys (`Tab` split, `Ctrl+D`
+      draft, `Ctrl+S` commit, `Esc` cancel) are unadvertised: the flagship feature is
+      undiscoverable at the exact moment it's in use. Add an editor entry to `_HINTS`
+      (`app_footer.py:9-15`, ≤100 cols) + a `set_editor(bool)`-style flag with
+      precedence alongside deep_dive in `current_hint`. (2) `draft_compression` treats
+      `""` as a real instruction (`conversation.py:488-489` — only `None` falls back),
+      appending an empty user message several APIs reject; the UI passes `editor.prompt`
+      verbatim and the user can blank the Top split. Fix in core: blank/whitespace
+      prompt → `DEFAULT_COMPRESSION_PROMPT` (extend the draft tests; COMMIT semantics
+      untouched — `K.meta["prompt"] == ""` still means manual). (3)
+      `describe_state()["range_selection"]` returns raw node uuids (`app.py:835`),
+      contradicting the method's own stated index convention (`app.py:764-766`); switch
+      to indices into the reported `nodes` array and update the task-6 Pilot tests (a
+      deliberate, recorded change — the field shipped this sprint, no external
+      consumer). _Acceptance:_ Pilot: editor open → footer shows the editor hint, Esc →
+      Edit hint restored; core test: `draft_compression(prompt="  ")` sends the default
+      instruction to the provider; range Pilot tests assert indices.
       `scripts/check.sh` green.
 
 - [ ] **14. Core: `created_seq` column + migration** _(deps: none in 3b)_ — add
@@ -346,7 +495,11 @@ Dependencies noted; every prerequisite sits above its dependent.
       NOT fold (resolution ignores pointers); after expand + re-compress of an
       overlapping range, K′ folds and the old K never reappears; `grep -rn
       "compressed_into" ctx/` shows write sites only (no reads in
-      resolution/UI paths); full suite green. `scripts/check.sh` green.
+      resolution/UI paths); full suite green. `scripts/check.sh` green. _Note
+      (2026-07-03 review):_ the C81–C90 contract tests build graph state by assigning
+      `core._graph`/`core._active_leaf_id` directly and are coupled to the pointer
+      representation — if this swap breaks them, adapting them is a **deliberate,
+      recorded** change (PROGRESS entry + spec in lockstep), not test-fudging.
 
 - [ ] **16. Core: `context_at_generation` + drift predicate** _(deps: 14, 15)_ — new
       framework-free module (e.g. `ctx/core/reconstruction.py`), pure functions over
@@ -399,7 +552,8 @@ Dependencies noted; every prerequisite sits above its dependent.
       next to the weight `Static` — many turns can legitimately drift, Q12/A#1;
       keep it quiet). `describe_state()` nodes gain `"drift": bool`. _Acceptance:_
       Pilot: U1,A1 → compress `[U1,A1]` (tip range) → U2,A2 (A2 sees K) →
-      `/expand` → A2 has `drift: True`, A1 `False`; with `show_context_drift:
+      expand the K (the 13b Edit-mode key) → A2 has `drift: True`, A1 `False`;
+      with `show_context_drift:
       false` all `False`. qa-tester spot-checks the marker. `scripts/check.sh`
       green.
 
@@ -471,8 +625,13 @@ Dependencies noted; every prerequisite sits above its dependent.
 - **Import snapshots / source-file drift in the diff** (S5) — pre-S5 the diff renders
   imports live on both sides; the `ctx_hash` warning is the only drift signal. Do not
   build snapshot storage.
-- **A colon-command (`:`) input mode** — `:compress`/`:expand` map to slash commands.
+- **A colon-command (`:`) input mode** — the roadmap's `:compress`/`:expand` map to
+  Edit-mode keys (`c` / `x`), NOT slash commands (revised 2026-07-03, task 13b).
 - **In-app config editing** — `compression.default_prompt` is hand-edited JSON.
+- **`Ctrl+C` copies instead of cancelling while a TextArea/Input has focus** (the
+  footer's "^C Cancel" is false there — Textual's TextArea binds ctrl+c to copy).
+  Pre-existing for the InputBar, more visible with the editor; known + deferred to a
+  future keybinding pass (review 2026-07-03).
 - **RAG/semantic anything**; `created_seq` before task 14; edits to
   `docs/Sprint Roadmap.md`; the `mutants/` tree; `main`/`develop`; `uv.lock` by hand;
   committing `.ctx/`/`.env`.

@@ -35,8 +35,20 @@
   snapshot. Re-import is the **import** primitive, **not** compression: it
   reuses S3's draft-with-prompt *engine* but emits an import node, sharing
   nothing with `K` / `compressed_into` / event-enumeration.
-- **Indexed** — an orthogonal per-*conversation* flag: an indexed conversation
-  is searchable/importable by other chats; un-indexing archives it (private).
+- **Indexed** *(deferred — see Future Sprints)* — **automatic-import scope
+  control**: the fence defining what the assistant may draw from *on its own*,
+  as opposed to **manual** import (always allowed for any supported source). It
+  is **access control** (kin to §3.1 Access modes), *not* conversation
+  archiving. Only meaningful once automatic import/retrieval exists (S6+); pulled
+  from S4.
+- **Branch delete** — the whole-branch hard delete (ADR-0016's *one* true
+  row-deletion), reachable as a fast verb on an abandoned tail. Distinct from
+  **rewind** (non-destructive). Backed by **session undo**.
+- **Session undo** — a single-step, session-scoped, this-op-only undo of a branch
+  delete: a one-slot in-memory stash of the last-deleted subgraph, re-inserted on
+  undo. *Not* a general undo stack and *not* durable across restart (that would be
+  the deferred trash/soft-delete). Cheap because the graph is in-memory and
+  `save()` is full-replace.
 
 ## Compression (Sprint 3)
 
