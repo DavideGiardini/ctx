@@ -18,6 +18,14 @@ CALIBRATION_TOLERANCE = 10.0
 
 MAX_TITLE_LENGTH = 50
 
+# The default instruction handed to the model when drafting a compression and no
+# per-range prompt is supplied (ADR-0016 A#1). In 3b this becomes a read of the
+# ``compression.default_prompt`` config default (task 18).
+DEFAULT_COMPRESSION_PROMPT = (
+    "Preserve the facts, decisions, entities, and open threads needed for the "
+    "conversation to continue coherently."
+)
+
 
 def _derive_title(content: str) -> str:
     """Derive a conversation title from a message's content.
@@ -430,6 +438,42 @@ class ConversationCore:
             if child is not None:
                 child.compressed_into = None
         self.persist()
+
+    async def draft_compression(
+        self, start_id: str, end_id: str, prompt: str | None = None
+    ) -> AsyncIterator[str]:
+        """Stream an AI-drafted summary of a contiguous range (a meta-operation).
+
+        Validates the range via ``_validate_compress_range`` (the same guards as
+        ``commit_compression`` — streaming/H2, contiguous view slice, flat, 3a tip
+        guard), raising ``ValueError`` on any failure **before any provider call**.
+
+        Renders **only the range** through ``build_context`` with the core's own
+        file loader, so each node contributes exactly its model-facing form (a raw
+        import → the full file body; an already-summarized node → its summary; never
+        the "Included:" label) — the Q10c invariant that the draft sees what the
+        model sees. One final user message carrying the instruction (``prompt`` when
+        given, else ``DEFAULT_COMPRESSION_PROMPT``) is appended, and the result is
+        streamed via the provider on the active model.
+
+        This is a meta-operation, never a gauge anchor (Q10b): it hands the provider
+        a no-op ``on_usage``, so ``last_usage``/``calibration``/``usage_generation``
+        are untouched no matter what the provider reports. It mutates no conversation
+        state and commits nothing — a cancelled or failed draft leaves the graph
+        exactly as it was (Q3); committing is the separate ``commit_compression``.
+        """
+        range_nodes = self._validate_compress_range(start_id, end_id)
+        messages = build_context(range_nodes, self._workspace.read_file)
+        instruction = prompt if prompt is not None else DEFAULT_COMPRESSION_PROMPT
+        messages.append({"role": "user", "content": instruction})
+
+        # No gauge anchor (Q10b): a no-op on_usage keeps last_usage/calibration/
+        # usage_generation untouched no matter what the provider reports.
+        def _ignore_usage(_usage: Usage) -> None:
+            return None
+
+        async for token in self._provider.stream(messages, self.model, _ignore_usage):
+            yield token
 
     def _calibrate(self, local_sum: int, usage: Usage) -> None:
         """Adopt a provider ``Usage`` as the gauge calibration anchor, if sane.

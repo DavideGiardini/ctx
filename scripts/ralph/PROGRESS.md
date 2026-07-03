@@ -817,3 +817,46 @@ Git history is the source of truth for *what changed*; this file captures the
   tip + flat guards). For any streaming-guard test, NEVER build history via `_build_line`
   with a `BlockingProvider` — swap the provider in for the live turn only, else pytest
   deadlocks (see memory `write-tests-blocking-provider-reused-in-setup`).
+
+## 2026-07-03 — Task 5 (Sprint 3): draft_compression (AI draft stream, Q3/Q10)
+- `ConversationCore.draft_compression(start_id, end_id, prompt=None) -> AsyncIterator[str]`
+  (`ctx/core/conversation.py`): AI-assisted counterpart to the pure `commit_compression`.
+  Reuses `_validate_compress_range` verbatim (streaming/H2 + contiguous-view-slice + flat +
+  3a tip guard) — validation runs on first `__anext__`, BEFORE any provider call. Renders
+  ONLY the range via `build_context(range_nodes, self._workspace.read_file)` (Q10c: each node
+  in model-facing form — import → file body, summary → its summary). Streams via
+  `self._provider.stream(messages, self.model, <no-op on_usage>)`. Mutates no state, commits
+  nothing (cancellation-safe by construction — it only reads + streams).
+- INSTRUCTION FRAMING DECISION (implementer's choice, PRD said record it): the instruction is
+  appended as a single trailing `{"role": "user", "content": <prompt-or-default>}` message
+  after the build_context-rendered range — no extra XML/preamble wrapper. Q2b (no preamble)
+  applies to the *committed K's* `<conversation_summary>` rendering, not to this draft input;
+  the draft is just "here is the range, now summarize it per this instruction".
+- Added `DEFAULT_COMPRESSION_PROMPT` module constant in `conversation.py` with the exact
+  ADR-0016 A#1 text ("Preserve the facts, decisions, entities, and open threads needed for
+  the conversation to continue coherently."). Task 18 later makes this a read of
+  `compression.default_prompt` config — keep it a single named constant so that swap is local.
+- GAUGE UNTOUCHED (Q10b): passes a local no-op `_ignore_usage` to the provider so
+  `_calibrate` is never invoked — `last_usage`/`calibration`/`usage_generation` survive a
+  draft even when the provider reports a sane `Usage` (C122 asserts this).
+- Tests: code-blind `test-spec-author` wrote `tests/specs/draft_compression.md` (C121–C133)
+  + `tests/test_draft_compression.py` (12 tests: token order, gauge-untouched-with-usage,
+  custom prompt reaches provider msgs, default prompt fallback, range content rendered,
+  unknown-start/unknown-end/reversed/non-tip-guard rejections each asserting provider never
+  called, streaming guard via fresh-core+BlockingProvider one live turn, full-draft/cancelled
+  leave view ids unchanged). Author flagged C133 (flat guard) unwritten — intentionally NOT
+  added: it shares `_validate_compress_range` with commit, whose flat guard is already tested
+  (`test_commit_compression.py::test_flat_guard...`); a draft-specific dup fails the deletion
+  test. ruff auto-sorted the test imports.
+- The authored providers alias `stream = generate = complete = astream = _emit` defensively
+  (author was blind to the Protocol method name); harmless — the real `stream` is present and
+  is what the core calls. Left as-is (functional, not a bug).
+- Verification: pure core logic, no UI/runtime surface (the `Ctrl+D` draft UI is task 9), so
+  tests + `scripts/check.sh` (479 passed, was 467; +12; ruff+mypy clean) are the verification;
+  qa-tester not applicable this iteration.
+- Also updated AGENTS.md architecture map (conversation.py bullet) to describe
+  `draft_compression` per the keep-the-map-current rule.
+- GOTCHA for task 9 (`Ctrl+D` UI worker): the UI consumes this async iterator; re-draft must
+  clear Bottom first (Q4). draft is NOT gated by `core.streaming` itself (it doesn't set the
+  flag — meta-op), but the UI additionally refuses actions while `_stream_worker` runs; a
+  draft worker is separate from the turn `_stream_worker`.

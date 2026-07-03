@@ -50,8 +50,14 @@ reach end users (ADR 0012). See `docs/decisions/` for *why* it's shaped this way
   slice, flat, 3a tip guard) and sets the children's `compressed_into`;
   `expand_compression(k_id)` is its non-destructive inverse — appends an off-line
   `Node.expand` event `E`, clears the folded children's pointers, and keeps `K` as an
-  orphan (never row-deleted). The read-only `streaming` flag (set for the duration of
-  `stream()`) gates all three (H2). Takes a `Provider`, a
+  orphan (never row-deleted). `draft_compression(start, end, prompt=None)` is the
+  AI-assisted counterpart to the pure `commit_compression`: same `_validate_compress_range`,
+  then it renders *only the range* via `build_context` (so each node contributes its
+  model-facing form, Q10c), appends one final user message carrying the instruction
+  (`prompt` or the `DEFAULT_COMPRESSION_PROMPT` constant, ADR-0016 A#1), and streams the
+  draft with a **no-op `on_usage`** so the gauge is never anchored (Q10b) — it mutates no
+  state and commits nothing (Q3). The read-only `streaming` flag (set for the duration of
+  `stream()`) gates all three compression ops (H2). Takes a `Provider`, a
   `StoragePort`, and a `Workspace` by injection (ADR 0001). Exposes a `read_file`
   property — the very loader it hands `build_context` — so the UI's token
   accounting renders nodes exactly as the model sees them without reaching past

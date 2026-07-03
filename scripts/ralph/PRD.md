@@ -125,7 +125,7 @@ Dependencies noted; every prerequisite sits above its dependent.
       overlapping range afterwards creates a valid new K′; expanding an already
       expanded/unknown K raises; streaming guard raises. `scripts/check.sh` green.
 
-- [ ] **5. Core: `draft_compression`** _(deps: 1, 3)_ —
+- [x] **5. Core: `draft_compression`** _(deps: 1, 3)_ —
       `ConversationCore.draft_compression(start_id, end_id, prompt=None) ->
       AsyncIterator[str]`: same `_validate_compress_range` (incl. streaming guard);
       render **only the range** via `build_context(range_nodes,
