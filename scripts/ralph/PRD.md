@@ -464,7 +464,7 @@ Dependencies noted; every prerequisite sits above its dependent.
       instruction to the provider; range Pilot tests assert indices.
       `scripts/check.sh` green.
 
-- [ ] **14. Core: `created_seq` column + migration** _(deps: none in 3b)_ — add
+- [x] **14. Core: `created_seq` column + migration** _(deps: none in 3b)_ — add
       `created_seq: int = 0` to `Node` (`ctx/models/nodes.py`); persist it: column in
       `_SCHEMA` + `_migrate` `ADD COLUMN` gated on the column being absent (the S2
       pattern, `storage.py:76-102`), with a one-time backfill assigning sequential

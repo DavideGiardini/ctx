@@ -16,6 +16,9 @@ class Node:
     # shared prev_id = branch siblings). compressed_into wired up in S3.
     prev_id: str | None = None
     compressed_into: str | None = None
+    # Monotonic creation order (ADR-0016 A#2), assigned by ConversationCore when a
+    # node enters the graph and never reassigned; the 3b event-enumeration oracle.
+    created_seq: int = 0
 
     @classmethod
     def user(cls, content: str, conversation_id: str) -> Node:

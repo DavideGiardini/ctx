@@ -1502,3 +1502,36 @@ Git history is the source of truth for *what changed*; this file captures the
   the verification layer (step 7 a/b).
 - Gotcha: `set_mode` resets `_detail` but NOT `_editor` — the editor flag is owned solely by
   open/close (mode never changes while the editor is open), so no reset needed there.
+
+## 2026-07-03 — Task 14: `created_seq` column + migration
+
+- Added `created_seq: int = 0` to `Node` (`models/nodes.py`) — the monotonic
+  creation-order oracle the 3b event-enumeration (task 15+) resolves against
+  (ADR-0016 A#2/H6). Factories unchanged (default 0).
+- `storage.py`: `created_seq INTEGER NOT NULL DEFAULT 0` column in `_SCHEMA`; a
+  once-only `_backfill_created_seq` gated on the column being ABSENT (the pre-3b
+  marker, same pattern as the graph backfill) that assigns per-conversation 1-based
+  seqs in rowid order — valid because in-memory insertion order round-trips through
+  the full-replace save (A#3 §1). `save()`/`load()` carry the value.
+- `conversation.py`: new `_next_seq()` = `max(created_seq over _all _graph nodes) + 1`
+  (whole graph incl. abandoned tails + off-line K/E, NOT the view). `_append_to_line`
+  stamps it on line nodes; new `_add_to_graph(node)` (stamp + insert, no tip advance)
+  is the primitive for the off-line events — commit_compression (K) and
+  expand_compression (E) now route through it. No explicit counter field: resume
+  rebuilds `_graph` from loaded seqs so max+1 naturally continues past the loaded max,
+  and new_conversation clears the graph so the next node restarts at 1. Never reassigned.
+- Tests: code-blind `test-spec-author` → `tests/specs/created_seq.md` +
+  `tests/test_created_seq.py` (11 tests). Covers the full acceptance floor (migration
+  backfills strictly-increasing rowid-order seqs; post-rewind node > abandoned-tail max;
+  K/E get seqs; save→load preserves values; migration runs once) plus fresh-conv-starts-1,
+  two-nodes-per-submit distinct, resume-continues-past-loaded-max, per-conversation
+  independence, new_conversation-resets-to-1. Confirmed red-before/green-after.
+- Verification: `scripts/check.sh` green (547 passed; was 536, +11). ruff+mypy clean.
+  NO qa-tester: pure core logic (models/storage/conversation), no UI/runtime surface —
+  the code-blind unit tests + green gate ARE the verification (step 7).
+- Gotcha: `Node.migration`... none. But note for task 15: `created_seq` is now the
+  single source for ordering K vs turns; E's absolute seq is not observable through the
+  public API (expand_compression returns None), so tests assert relative orderings.
+  Also: `_next_seq` recomputes max each call (O(graph)) rather than keeping a counter —
+  chosen so resume/new_conversation need no counter-reset bookkeeping (deletion test:
+  a counter field would just scatter reset logic across three methods).

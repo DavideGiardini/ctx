@@ -220,13 +220,36 @@ class ConversationCore:
         """
         return list(self._graph.values())
 
+    def _next_seq(self) -> int:
+        """The next ``created_seq``: one past the max over the WHOLE graph.
+
+        Computed over every node in ``_graph`` (active line + abandoned tails +
+        off-line ``K``/``E`` events, H6) — never the view — so a rewind's
+        abandoned tail is still counted and seqs never collide or get reused.
+        Empty graph → ``1``; monotonic and, because it is only ever *assigned* to a
+        fresh node (never reassigned), stable across persistence and resume
+        (``resume_conversation`` rebuilds ``_graph`` from the loaded seqs, so this
+        continues from the loaded max, ADR-0016 A#2).
+        """
+        return max((n.created_seq for n in self._graph.values()), default=0) + 1
+
+    def _add_to_graph(self, node: Node) -> None:
+        """Stamp ``created_seq`` and place an off-line node straight into the graph.
+
+        The single insertion primitive for the off-line event nodes (``K``, ``E``);
+        line nodes go through ``_append_to_line``. Both stamp the seq before insert.
+        """
+        node.created_seq = self._next_seq()
+        self._graph[node.id] = node
+
     def _append_to_line(self, node: Node) -> None:
         """Append a node onto the active line and advance the tip.
 
         Sets ``prev_id`` to the current tip and makes the node the new tip — the
         single graph-mutation primitive behind every command that used to do
-        ``self.nodes.append(...)``.
+        ``self.nodes.append(...)``. Stamps a monotonic ``created_seq`` (A#2).
         """
+        node.created_seq = self._next_seq()
         node.prev_id = self._active_leaf_id
         self._graph[node.id] = node
         self._active_leaf_id = node.id
@@ -435,7 +458,7 @@ class ConversationCore:
             [n.id for n in slice_nodes],
             prompt=prompt,
         )
-        self._graph[k.id] = k
+        self._add_to_graph(k)
         for node in slice_nodes:
             node.compressed_into = k.id
         self.persist()
@@ -468,7 +491,7 @@ class ConversationCore:
         if not any(n.compressed_into == k_id for n in self._graph.values()):
             raise ValueError(f"compression is not active: {k_id}")
         e = Node.expand(k_id, self._active_leaf_id, self.conversation_id)
-        self._graph[e.id] = e
+        self._add_to_graph(e)
         for child_id in k.meta["range"]:
             child = self._graph.get(child_id)
             if child is not None:

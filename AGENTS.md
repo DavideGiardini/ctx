@@ -88,10 +88,13 @@ reach end users (ADR 0012). See `docs/decisions/` for *why* it's shaped this way
 - `storage.py` — `StoragePort` protocol + `ConversationRepository(db_path)`
   encapsulating all SQLite (WAL) schema/serialization (ADR 0003). Persists the
   append-only graph (ADR 0016): `nodes.prev_id`/`nodes.compressed_into` edge columns
-  + `conversations.active_leaf_id`; `save(..., active_leaf_id=)` writes the full node
-  set and the tip; `get_active_leaf(cid)` reads it back (symmetric with `get_model`).
+  + `conversations.active_leaf_id` + `nodes.created_seq` (the A#2 creation-order oracle);
+  `save(..., active_leaf_id=)` writes the full node set (incl. each `created_seq`) and
+  the tip; `get_active_leaf(cid)` reads it back (symmetric with `get_model`).
   `_migrate` chains pre-graph flat DBs into the degenerate single-path case by rowid,
-  once, when the `active_leaf_id` column is first added.
+  once, when the `active_leaf_id` column is first added; a separate once-only
+  `_backfill_created_seq` (gated on the `created_seq` column being absent) assigns
+  per-conversation 1-based `created_seq`s in rowid order.
 - `context.py` — pure `build_context(nodes, load_file)` → litellm message list;
   expands `context` nodes via the injected loader, no I/O of its own (ADR 0004).
   Renders a `compression` node as a user-role `<conversation_summary>` wrapper (no
@@ -165,7 +168,9 @@ a left `DetailInspector` and a right `#conversation` pane (the `MessageList` +
 carrying append-only graph edges `prev_id` (predecessor on the line; `None` = root;
 shared `prev_id` = branch siblings) and `compressed_into` (the compression node that
 folds it; `None` until S3) — both default `None`, so the factories are unchanged
-(ADR 0016). Factory classmethods (`Node.user`/`.assistant`/`.system`/`.context`/`.compression`/`.expand`)
+(ADR 0016). It also carries `created_seq: int = 0`, the monotonic creation order the
+core stamps at graph-insertion time (`_next_seq` = max over the whole graph + 1, never
+reassigned; the 3b event-enumeration oracle, ADR-0016 A#2/H6). Factory classmethods (`Node.user`/`.assistant`/`.system`/`.context`/`.compression`/`.expand`)
 are the single source of truth for each kind's `role`/`node_type`/`content`/`meta`/
 `conversation_id` combination — call sites construct via these, not the bare dataclass
 (ADR 0014 #1). `Node.compression(summary, conversation_id, range_ids, prompt="")` builds

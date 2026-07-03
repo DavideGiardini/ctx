@@ -44,7 +44,8 @@ CREATE TABLE IF NOT EXISTS nodes (
     node_type TEXT NOT NULL DEFAULT 'message',
     meta TEXT NOT NULL DEFAULT '{}',
     prev_id TEXT,
-    compressed_into TEXT
+    compressed_into TEXT,
+    created_seq INTEGER NOT NULL DEFAULT 0
 );
 """
 
@@ -102,6 +103,14 @@ class ConversationRepository:
             conn.execute("ALTER TABLE conversations ADD COLUMN active_leaf_id TEXT")
             self._backfill_graph(conn)
 
+        # Monotonic creation order (ADR-0016 A#2). Gate the one-time backfill on the
+        # COLUMN being absent (the pre-3b marker), like the graph backfill above.
+        if "created_seq" not in node_columns:
+            conn.execute(
+                "ALTER TABLE nodes ADD COLUMN created_seq INTEGER NOT NULL DEFAULT 0"
+            )
+            self._backfill_created_seq(conn)
+
     def _backfill_graph(self, conn: sqlite3.Connection) -> None:
         # Chain each pre-graph conversation's nodes into a prev_id line by rowid
         # and point active_leaf_id at the last node — the degenerate single-path
@@ -130,6 +139,25 @@ class ConversationRepository:
                 conn.execute(
                     "UPDATE conversations SET active_leaf_id = ? WHERE id = ?",
                     (node_ids[-1], conv_id),
+                )
+
+    def _backfill_created_seq(self, conn: sqlite3.Connection) -> None:
+        # Assign per-conversation 1-based seqs in rowid (insertion) order — valid
+        # because in-memory insertion order round-trips through the full-replace
+        # save() (insertion order → rowid → load order), so rowid order == creation
+        # order (ADR-0016 A#3 §1). Matches a fresh conversation's counter (starts 1).
+        conv_ids = [row[0] for row in conn.execute("SELECT id FROM conversations")]
+        for conv_id in conv_ids:
+            node_ids = [
+                row[0]
+                for row in conn.execute(
+                    "SELECT id FROM nodes WHERE conversation_id = ? ORDER BY rowid",
+                    (conv_id,),
+                )
+            ]
+            for seq, node_id in enumerate(node_ids, start=1):
+                conn.execute(
+                    "UPDATE nodes SET created_seq = ? WHERE id = ?", (seq, node_id)
                 )
 
     def save(
@@ -177,8 +205,8 @@ class ConversationRepository:
                 conn.execute(
                     "INSERT INTO nodes "
                     "(id, conversation_id, role, content, node_type, meta, "
-                    "prev_id, compressed_into) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    "prev_id, compressed_into, created_seq) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         node.id,
                         node.conversation_id,
@@ -188,6 +216,7 @@ class ConversationRepository:
                         json.dumps(node.meta),
                         node.prev_id,
                         node.compressed_into,
+                        node.created_seq,
                     ),
                 )
             conn.commit()
@@ -199,7 +228,7 @@ class ConversationRepository:
         try:
             rows = conn.execute(
                 "SELECT id, conversation_id, role, content, node_type, meta, "
-                "prev_id, compressed_into "
+                "prev_id, compressed_into, created_seq "
                 "FROM nodes WHERE conversation_id = ? ORDER BY rowid",
                 (conversation_id,),
             ).fetchall()
@@ -217,6 +246,7 @@ class ConversationRepository:
                 meta=json.loads(row[5]),
                 prev_id=row[6],
                 compressed_into=row[7],
+                created_seq=row[8],
             )
             nodes.append(node)
         return nodes
