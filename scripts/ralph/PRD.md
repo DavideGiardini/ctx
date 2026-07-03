@@ -253,7 +253,7 @@ Dependencies noted; every prerequisite sits above its dependent.
       `i` → Insert mode, live view, input focused. qa-tester walks the flow.
       `scripts/check.sh` green.
 
-- [ ] **13. Phase 3a end-to-end verification (qa-tester, verify-feature)** _(deps:
+- [x] **13. Phase 3a end-to-end verification (qa-tester, verify-feature)** _(deps:
       1–12)_ — no code changes. Drive the harness through: (1) two turns → `v`-select
       a suffix ending at the tip → `c` → `Ctrl+D` (canned draft) → edit Bottom →
       `Ctrl+S` → K visible with numeric weight, children gone; (2) next turn → the
@@ -267,6 +267,53 @@ Dependencies noted; every prerequisite sits above its dependent.
       `- [ ]` tasks at the top of Phase 3b; do not patch inside this task.
 
 ### Phase 3b — middle compression + context transparency
+
+> Tasks 13a–13b were filed by the task-13 E2E verification (2026-07-03). They sit
+> at the top of Phase 3b per task 13's rule ("defects become new `- [ ]` tasks at
+> the top of Phase 3b; do not patch inside task 13"). Fix them before task 14.
+
+- [ ] **13a. UI: non-tip commit must breadcrumb, not crash + soft-lock** _(deps: 8;
+      found by task 13 CP3)_ — Bug: `action_commit_compression` (`ctx/ui/app.py:513-539`)
+      calls `self.core.commit_compression(...)` with **no** `try/except`, so the 3a
+      tip-guard `ValueError` ("compression range must end at the active leaf (tip)")
+      from `_validate_compress_range` (`ctx/core/conversation.py:379`) propagates
+      uncaught. After it, the editor is soft-locked open and the app stops processing
+      all keys/text (session unrecoverable short of restart). Repro: 2 turns → Edit →
+      select a non-tip range (`home`,`v`,`down`) → `c` → type any summary → `Ctrl+S`.
+      Fix: wrap the `commit_compression` call in the commit action in `try/except
+      ValueError`, surfacing the message as a `_breadcrumb(...)` (mirror the graceful
+      `except Exception` in `_draft_compression_worker`, `app.py:502-510`), and keep
+      the editor open so the user can adjust the range/selection (or close it — record
+      the choice in PROGRESS). The Q7 no-K-in-range guard raises the same `ValueError`
+      type, so this also covers a nested-range attempt. Note: this UI catch stays valid
+      after task 22 deletes the tip guard — the no-K-in-range/flat guards still raise.
+      _Acceptance:_ Pilot (template `tests/test_app_*`): 2 turns, select a non-tip range,
+      open editor, set a non-empty summary, invoke `action_commit_compression` → NO
+      exception escapes, a system breadcrumb is appended, the app still processes a
+      subsequent `escape`/`i` (assert mode/focus change), and `describe_state` shows the
+      range still un-folded (no K). qa-tester re-runs the CP3 repro and confirms a clean
+      breadcrumb + responsive app (`textual_check_errors` clean). `scripts/check.sh` green.
+
+- [ ] **13b. UI: make `/expand` (and selection-commands) reachable by keyboard** _(deps:
+      11; found by task 13 CP4)_ — Bug: `/expand` can only be typed into the InputBar,
+      which requires Insert mode, but `_set_mode("insert")` (`ctx/ui/app.py:236-247`)
+      unconditionally `_clear_selection()`s first, so `_handle_expand_command`'s
+      `_get_selected_node()` (`app.py:1059`) is always `None` and it always breadcrumbs
+      "Not a compression node". `/expand` is therefore unreachable through the documented
+      keyboard workflow (same command-vs-selection gap flagged for `/compress` in the
+      task 11/12 PROGRESS notes — `/compress` is saved only by the `c` key; expand has no
+      key alternative). Decide the fix (record rationale in PROGRESS, ref ADR-0016 keys
+      list): the cleanest is a dedicated **Edit-mode key** for expand that acts on the
+      selected K directly (no InputBar round-trip) — e.g. bind `x` or reuse a chord — so
+      it never enters Insert; `/expand` may remain as a discoverability breadcrumb. Do
+      NOT weaken the "Insert clears selection" invariant (other flows depend on it).
+      Update footer `_HINTS` (`ctx/ui/widgets/app_footer.py`) and the ADR-0016 keys note
+      only if a new key is added (that ADR edit is permitted here). _Acceptance:_ Pilot:
+      compress a tip range → in Edit mode select the K → invoke the new expand key →
+      `describe_state` shows children restored, no K, cursor on the first restored child
+      (task 11's semantics); a non-K selection breadcrumbs "Not a compression node". Then
+      qa-tester confirms compress→expand→re-compress **purely by keyboard**.
+      `scripts/check.sh` green.
 
 - [ ] **14. Core: `created_seq` column + migration** _(deps: none in 3b)_ — add
       `created_seq: int = 0` to `Node` (`ctx/models/nodes.py`); persist it: column in

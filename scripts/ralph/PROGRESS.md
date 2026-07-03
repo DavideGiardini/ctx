@@ -1168,3 +1168,35 @@ Git history is the source of truth for *what changed*; this file captures the
   it, that's the same command-vs-selection design gap noted for task 11 — file a new
   Phase-3b `- [ ]`, don't patch inside task 13.
 - Did NOT commit the pre-existing dirty `CONTEXT.md` / `docs/Sprint Roadmap.md`.
+
+## 2026-07-03 — Task 13 (Sprint 3): Phase 3a end-to-end verification (qa-tester)
+- No code changes. Ran ONE qa-tester (verify-feature) against `tools.agent.harness:HarnessApp`
+  driving the real TUI through the 6 CP walk. Committed code (tasks 1–12) was visible to the
+  in-process harness, so this is a genuine E2E confirmation of prior behavior.
+- Results: CP1 (tip-suffix draft→edit→commit) PASS — range folds to one `node_type==compression`
+  K with numeric weight, children gone, check_errors clean. CP2 (next turn sees summary) PASS as
+  a PROXY only — HarnessApp's TestProvider captures no messages, so the raw `<conversation_summary>`
+  payload is unverifiable here (that invariant is covered by committed unit/Pilot tests: task 1
+  context tests + task 11's recording-provider Pilot). CP5 (deep-dive `g d` / `Ctrl+o` / `i`) PASS.
+  CP6 (restart persistence) BLOCKED — HarnessApp mints a fresh temp dir per launch, so a relaunch
+  can't share the DB; harness limitation, not a product fault (persistence is covered by the task
+  3/4/8/11 storage round-trip Pilot/unit tests).
+- TWO REAL DEFECTS FOUND → filed as new Phase-3b tasks 13a/13b at the TOP of Phase 3b (per task 13's
+  rule; did NOT patch inside task 13):
+  - **13a [High]** CP3: non-tip `Ctrl+S` commit raises an UNCAUGHT `ValueError` ("compression range
+    must end at the active leaf (tip)") from `_validate_compress_range` — `action_commit_compression`
+    (`app.py:513-539`) has no try/except (unlike `_draft_compression_worker` which catches). Worse
+    than the exception: the editor soft-locks and the app stops processing ALL further input
+    (unrecoverable short of restart). This is reachable in 3a today (a middle range is selectable).
+  - **13b [High]** CP4: `/expand` is unreachable by keyboard — `_set_mode("insert")` (`app.py:236`)
+    always `_clear_selection()`s, and `/expand` can only be typed in Insert mode, so
+    `_handle_expand_command` always sees no selection → "Not a compression node". Same
+    command-vs-selection gap flagged for `/compress` in the task 11/12 PROGRESS notes; `/compress`
+    survives via the `c` key, expand has no key alternative. 13b proposes a dedicated Edit-mode
+    expand key.
+- GOTCHA for whoever picks up 13a/13b: the qa-tester could NOT get `textual_query`/`textual_snapshot`
+  tool permission this session (repeated "not granted" errors), so CP5's `deep_dive.breadcrumb`
+  field was inferred from footer text + node display rather than read directly. The Pilot suite
+  (`tests/test_app_deep_dive.py`) already asserts the raw field, so this is a QA-session tooling gap,
+  not missing coverage.
+- Did NOT commit the pre-existing dirty `CONTEXT.md` / `docs/Sprint Roadmap.md`.
