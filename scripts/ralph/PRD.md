@@ -379,7 +379,7 @@ Dependencies noted; every prerequisite sits above its dependent.
       → range stays [first]; normal in-bounds extension unchanged (existing task-6
       tests stay green). `scripts/check.sh` green.
 
-- [ ] **13f. UI: `/new` and `/resume` must reset compression UI state** _(deps: 12,
+- [x] **13f. UI: `/new` and `/resume` must reset compression UI state** _(deps: 12,
       13d; review finding)_ — Bug: `_handle_new_command` (`app.py:971-984`) and
       `_handle_resume_command` (`app.py:986-1010`) clear only selection/range. A mouse
       click focuses the InputBar WITHOUT entering Insert or clearing state, so these

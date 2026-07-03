@@ -1363,3 +1363,36 @@ Git history is the source of truth for *what changed*; this file captures the
   this iteration's uncommitted edit (it would drive the stale wrapping code). Pilot tests
   drive the real keys; task 23 is the committed-code E2E pass (same rationale as 13a-13d).
 - Verification: `scripts/check.sh` green (521 passed; was 518, +3). ruff+mypy clean.
+
+## 2026-07-03 — Task 13f (Sprint 3, Phase 3b): reset compression UI on /new + /resume
+- Bug (review finding): `_handle_new_command`/`_handle_resume_command` cleared only the
+  selection via `_clear_selection()`. A mouse click focuses the InputBar WITHOUT
+  entering Insert or clearing state, so these could fire with a deep-dive, an open
+  draft editor, or a running draft worker standing — the dead dive frame keeps feeding
+  `_visible_nodes()` (describe_state/rebuild resurrect the OLD conversation's folded
+  children), the footer keeps the dive hint, the editor sits open over dead range ids
+  (→ 13a ValueError), and a live draft worker survives the switch.
+- Fix (`ctx/ui/app.py`): new shared `_reset_transient_ui()` helper (placed after
+  `_close_compression_editor`) — clears `_deep_dive_stack` + `set_deep_dive(False)`,
+  closes the editor via `_close_compression_editor()` (which cancels a live worker,
+  13d) when open, else cancels a stray live `_draft_worker`, nulls `_draft_worker`,
+  and clears `_last_drafted_prompt`, `_pending_chord`, and the selection. Both handlers
+  now call it in place of `_clear_selection()`. Placed at the same point the old
+  `_clear_selection()` was (after the switch is confirmed, i.e. after resume's modal
+  returns a real id) so a *cancelled* resume leaves state intact.
+- Tests: `tests/test_app_new_resume_reset.py` (new, 4 Pilot tests). Handlers invoked
+  DIRECTLY (the mouse focus-without-mode-switch path has no Pilot key equivalent):
+  dive → `_handle_new_command()` → deep_dive inactive, nodes==[] (fresh conv, not the 4
+  frozen children), footer off the dive hint; dive → `_handle_resume_command()` (resume
+  is `@work`; `monkeypatch.setattr(app, "push_screen_wait", ...)` returns the current
+  persisted conv id, then `await app.workers.wait_for_complete()`) → dive reset, view =
+  the single folded K; editor-open → `/new` → editor closed, no K; blocked draft
+  (`_BlockingProvider`) → `/new` → `_draft_worker is None` and the old worker finished
+  (cancelled). RED/GREEN verified via `git stash`: all 4 fail without the fix.
+- Gotcha: after `/new`, the "Started a new conversation." node is added to the
+  MessageList widget only, NOT to `core._graph` — so `core.nodes` (and thus
+  `describe_state()["nodes"]`) is EMPTY. Assert `nodes == []`, not `== 1`.
+- NO qa-tester: the in-process MCP harness caches `ctx.*` at session start and can't
+  see this iteration's uncommitted edit (would drive stale handlers). Pilot tests drive
+  the real seam; task 23 is the committed-code E2E pass (same rationale as 13a-13e).
+- Verification: `scripts/check.sh` green (525 passed; was 521, +4). ruff+mypy clean.
