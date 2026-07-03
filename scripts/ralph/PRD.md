@@ -144,7 +144,7 @@ Dependencies noted; every prerequisite sits above its dependent.
       "Included:" label); invalid range/streaming raises before any provider call.
       `scripts/check.sh` green.
 
-- [ ] **6. UI: range selection (`v` anchor + extend)** _(deps: none hard)_ — Edit-mode
+- [x] **6. UI: range selection (`v` anchor + extend)** _(deps: none hard)_ — Edit-mode
       vim-style selection (Q5): `v` (new `ChatApp.BINDINGS` entry, `app.py:45-57`)
       anchors at the selected node; existing `action_up`/`action_down`
       (`app.py:247,259`) extend the **contiguous** selection between anchor and

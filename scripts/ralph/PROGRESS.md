@@ -860,3 +860,44 @@ Git history is the source of truth for *what changed*; this file captures the
   clear Bottom first (Q4). draft is NOT gated by `core.streaming` itself (it doesn't set the
   flag — meta-op), but the UI additionally refuses actions while `_stream_worker` runs; a
   draft worker is separate from the turn `_stream_worker`.
+
+## 2026-07-03 — Task 6 (Sprint 3): UI range selection (`v` anchor + extend, Q5)
+- `ChatApp` gains vim-style contiguous range selection (`ctx/ui/app.py`): a `v`
+  Binding → `action_anchor_range` sets `_range_anchor_id = _selected_node_id`;
+  `action_up`/`action_down` call `_apply_range_selection()` after moving the cursor
+  when an anchor is set; `_range_ids()` returns the ordered view-slice ids between
+  anchor and cursor (empty when no anchor / anchor left the view). `action_escape`
+  swallows the FIRST Esc to clear the range (stays in Edit) before the mode toggle;
+  `_clear_selection()` now also clears the range, so `/new`, `/resume`, and entering
+  Insert all drop it uniformly.
+- `MessageWidget.set_range_selected(bool)` toggles a `.range-selected` class
+  (`message_list.py`), styled `background: $primary-darken-2` (`message_list.css`) —
+  distinct from `.selected` (the single cursor; a range spans many widgets, the cursor
+  stays within it).
+- `describe_state()` gains `"range_selection": [<node ids in view order>]` (the Pilot
+  floor); footer `_HINTS["edit"]` gains `v Select` (trimmed `Switch pane`→`Pane` to
+  stay ≤100 cols for ruff E501 — no test pins the edit hint string).
+- DECISION: used node **ids** in `range_selection` (not the index-based convention
+  elsewhere in describe_state) because the PRD task 6 wording + acceptance explicitly
+  say "node ids in view order" / "3 contiguous ids". Pilot maps them via
+  `app.core.nodes`.
+- GOTCHA: `_select_relative` WRAPS (modulo len) at the list ends — so a range extended
+  past the top/bottom edge wraps the cursor and `_range_ids` would then span the whole
+  list. Not exercised by task 6 (acceptance uses Home then v,down,down within bounds);
+  vim also doesn't wrap in visual mode. If task 7+ needs clamped extension, clamp in
+  `action_up/down` when `_range_anchor_id` is set, don't change `_select_relative`
+  (other callers rely on wrap).
+- Tests: `tests/test_app_range_selection.py` — 3 Pilot tests via `pilot.press` (real
+  binding wiring): `v,down,down` → 3 contiguous ids + `.range-selected` on those
+  widgets only; `Esc` empties the range and stays in Edit; `v` alone = range-of-one.
+  This is a UI task → Pilot is the mandatory floor; no core change so no code-blind
+  flow. PRD task 6 does not request qa-tester (unlike tasks 8/10/11/12), and the
+  in-process harness can't see uncommitted edits anyway → qa-tester not applicable.
+- Verification: `scripts/check.sh` green (482 passed, was 479; +3; ruff+mypy clean).
+- Did NOT commit the pre-existing dirty `CONTEXT.md` / `docs/Sprint Roadmap.md` (dirty
+  at session start, not this task's work; Roadmap edits are forbidden by the PRD).
+- GOTCHA for task 7 (`c` / `/compress` draft editor): it "acts on the active range
+  selection" — read it from `_range_ids()` (start = ids[0], end = ids[-1]); no anchor
+  → range-of-one on the selected node (Q5). The selection must survive Esc-closing the
+  editor (task 7 keeps it), so do NOT call `_clear_range()`/`_clear_selection()` on
+  editor cancel.
