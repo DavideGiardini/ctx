@@ -303,7 +303,7 @@ Dependencies noted; every prerequisite sits above its dependent.
       qa-tester re-runs the CP3 repro and confirms a clean breadcrumb + responsive app
       (`textual_check_errors` clean). `scripts/check.sh` green.
 
-- [ ] **13b. UI: expand becomes an Edit-mode key; REMOVE the selection-dependent slash
+- [x] **13b. UI: expand becomes an Edit-mode key; REMOVE the selection-dependent slash
       commands** _(deps: 11; found by task 13 CP4 + review; user decision 2026-07-03)_ —
       Bug: a slash command can never act on a selection — the InputBar requires Insert
       mode and `_set_mode("insert")` (`ctx/ui/app.py:236-247`) unconditionally

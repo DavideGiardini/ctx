@@ -1229,3 +1229,45 @@ Git history is the source of truth for *what changed*; this file captures the
   task's qa-tester CP3 repro is covered by task 23's E2E walk against committed code (same rationale
   as tasks 8/12). The Pilot tests ARE the acceptance floor.
 - Working tree was clean of the old dirty CONTEXT.md/Sprint Roadmap.md this time (nothing extra staged).
+
+## 2026-07-03 — Task 13b (Sprint 3, Phase 3b): expand is an Edit-mode `x` key; slash commands removed
+- Bug (CP4): `/expand` (and `/compress`) were structurally dead — a slash command is only typable
+  in the InputBar, which requires Insert mode, and `_set_mode("insert")` unconditionally
+  `_clear_selection()`s. So `_handle_expand_command` always saw no selection → "Not a compression
+  node" and `/compress` always breadcrumbed "Select a range first" — a circular instruction.
+- Settled resolution (user, 2026-07-03): selection-dependent actions are **Edit-mode keys only;
+  the slash commands are removed, not repaired.**
+- Changes (`ctx/ui/app.py`):
+  - Added `Binding("x", "expand", ...)` + `async action_expand`. It runs the exact task-11 expand
+    logic (H2 mid-stream breadcrumb kept; non-K selection → "Not a compression node"; selection
+    lands on first restored child) with `action_compress`'s guards: `mode=="edit"`, not
+    `_focus_in_detail()`, inert while `_deep_dive_stack` (deep-dive is read-only, Q8).
+  - DELETED `_handle_compress_command` + `_handle_expand_command` and their two
+    `on_input_bar_submitted` branches; removed `/compress`/`/expand` from `InputBar.COMMANDS`.
+  - Updated `action_compress` docstring (no more `/compress` reference).
+- **Key choice: `x`.** Verified no BINDINGS conflict (existing: ctrl+c/esc/i/v/c/ctrl+d/ctrl+s/
+  ctrl+o/up/down/enter/home/1/2/3/tab). `x` is non-priority like `c`, so a focused Input/TextArea
+  (Insert mode, or the open editor) consumes it as a literal char — expand only fires with the
+  message list focused in Edit mode.
+- Footer `_HINTS["edit"]` gained `x Expand` (hint content 87 display cols, ≤100). Had to wrap the
+  source string across two lines via implicit concat: the `↑↓` glyphs pushed the raw source line
+  to 102 chars → ruff E501 (E501 counts source code points, not display cols). Runtime string
+  unchanged.
+- ADR-0016: appended **Amendment #5** recording the key-map correction (this ADR edit is permitted
+  by the task).
+- Tests: this is a behavior-preserving *move* of the expand logic (command handler → keyed action),
+  so no code-blind flow — the Pilot floor. Rewrote `tests/test_app_expand.py` to drive the real
+  `x` key with `pilot.press("x")` (dropped the `on_input_bar_submitted("/expand")` back-door that
+  masked the defect); removed the `/compress`-breadcrumb test from
+  `tests/test_app_compression_editor.py`. The 4 expand Pilot tests still assert: children restored
+  / no K / cursor on nodes[0]; restart round-trip; next-turn sees children verbatim (no
+  `<conversation_summary>`); non-K selection breadcrumbs "Not a compression node".
+- Verification: `scripts/check.sh` green (513 passed; was 514, net −1 for the removed test).
+- NO qa-tester this iteration: the in-process MCP harness caches `ctx.*` at session start, so it
+  cannot see this iteration's uncommitted `x`-binding edit — it would drive STALE code with no `x`
+  key. The Pilot tests drive the REAL `x` key (stronger than the old back-door); task 23's E2E walk
+  covers keyboard-only compress→expand→re-compress against committed code (same rationale as tasks
+  8/11/12/13a).
+- GOTCHA for future tasks: `/compress`/`/expand` no longer match a command branch, so typing that
+  literal text now sends it to the model as a normal user turn. The pattern for all future
+  selection-dependent verbs (branch, delete, rewind) is: bind a key, never a slash command.
