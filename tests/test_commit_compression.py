@@ -61,6 +61,35 @@ def _make_core(repo, test_provider, workspace, tokens=None):
     return core
 
 
+# --- folded_children accessor (Task 10) -------------------------------------
+
+async def test_folded_children_returns_range_in_recorded_order(
+    repo, test_provider, workspace
+):
+    core = _make_core(repo, test_provider, workspace)
+    u1, a1, u2, a2 = await _build_line(core)
+    k = core.commit_compression(u1.id, a2.id, "Summary.")
+
+    # The folded children are gone from the view but reachable via the accessor,
+    # in the exact order K recorded (K.meta["range"]).
+    assert [c.id for c in core.folded_children(k.id)] == [u1.id, a1.id, u2.id, a2.id]
+    assert not any(n.id in {u1.id, a1.id, u2.id, a2.id} for n in core.current_view())
+
+
+def test_folded_children_unknown_id_returns_empty(repo, test_provider, workspace):
+    core = _make_core(repo, test_provider, workspace)
+    assert core.folded_children("no-such-node") == []
+
+
+async def test_folded_children_non_compression_node_returns_empty(
+    repo, test_provider, workspace
+):
+    core = _make_core(repo, test_provider, workspace)
+    _u1, a1, _u2, _a2 = await _build_line(core)
+    # A real node that is not a compression K → not foldable → [].
+    assert core.folded_children(a1.id) == []
+
+
 # --- happy path -------------------------------------------------------------
 
 async def test_tip_commit_folds_suffix(repo, test_provider, workspace):

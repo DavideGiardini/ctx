@@ -21,7 +21,11 @@ from ctx.models.nodes import Node
 from ctx.ui.widgets.app_footer import AppFooter
 from ctx.ui.widgets.app_header import AppHeader
 from ctx.ui.widgets.compression_editor import CompressionEditor
-from ctx.ui.widgets.detail_inspector import DetailInspector, NodeView
+from ctx.ui.widgets.detail_inspector import (
+    _SPLIT_VIEW_TYPES,
+    DetailInspector,
+    NodeView,
+)
 from ctx.ui.widgets.history_screen import HistoryScreen
 from ctx.ui.widgets.include_screen import IncludeScreen
 from ctx.ui.widgets.input_bar import InputBar
@@ -229,6 +233,21 @@ class ChatApp(App):
     # --- selection + inspector ------------------------------------------
 
     def _node_view(self, node: Node) -> NodeView:
+        if node.node_type == "compression":
+            # Committed-K 3-split (task 10): Prompt = the drafting instruction
+            # (hidden when empty — a manual K), Originals = the folded children in
+            # recorded order (they are off-view, reached via the core accessor),
+            # Summary = K's own content.
+            children = self.core.folded_children(node.id)
+            originals = "\n\n".join(f"**{c.role}**\n\n{c.content}" for c in children)
+            return NodeView(
+                node_id=node.id,
+                role=node.role,
+                node_type=node.node_type,
+                content=originals,
+                prompt=node.meta.get("prompt", ""),
+                output=node.content,
+            )
         return NodeView(
             node_id=node.id,
             role=node.role,
@@ -502,7 +521,7 @@ class ChatApp(App):
         if self.mode != "edit":
             return
         node = self._get_selected_node()
-        if not node or node.node_type != "context":
+        if not node or node.node_type not in _SPLIT_VIEW_TYPES:
             return
         if self.query_one(DetailInspector).maximize_named(which):
             self._sync_footer()

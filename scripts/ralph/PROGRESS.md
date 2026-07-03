@@ -1035,3 +1035,51 @@ Git history is the source of truth for *what changed*; this file captures the
 - GOTCHA for task 10 (committed-K inspector 3-split): the drafted prompt now survives onto K via
   `K.meta["prompt"]` — task 10's Top split reads exactly that (empty prompt → hide Top). Add the
   `folded_children(k_id)` core accessor first (children are NOT in `current_view()`).
+
+## 2026-07-03 — Task 10 (Sprint 3): committed-K inspector 3-split (Q4/Q8)
+- Core: added `ConversationCore.folded_children(k_id) -> list[Node]` — resolves a K's
+  folded originals in `K.meta["range"]` order from `_graph`, `[]` for an unknown or
+  non-compression id, skips a range id missing from the graph (defensive). The children
+  are off-view (they left `current_view()` when folded, Q8), so this is the UI's only way
+  to reach them.
+- UI: the committed-K left inspector reuses the existing **3-split context-view
+  machinery** (browse / maximize / `1`/`2`/`3`) rather than a new widget — the task's
+  splits map 1:1 onto prompt(1fr)/content(3fr)/output(1fr): Top=Prompt (`K.meta["prompt"]`,
+  hidden when empty via the existing `display=bool(value)` rule), Center=Originals (the big
+  scrollable box = folded children), Bottom=Summary (`K.content`).
+  - `detail_inspector.py`: new `_SPLIT_VIEW_TYPES = ("context","compression")` +
+    `_SPLIT_LABELS` (per-type split names — a K relabels Content→Originals, Output→Summary).
+    All `node_type == "context"` gates (`view_kind`, `_render_node`, `append_stream`,
+    `maximize_named`, `back`) now test membership in `_SPLIT_VIEW_TYPES`; label Statics
+    gained ids and `_render_context` updates them per node type. `view_kind` still returns
+    `"context"` for a K (both use the split view) — the K/context distinction is available
+    to snapshots via `detail.node_role == "compression"`.
+  - `app.py`: `_node_view` special-cases a compression node → `NodeView(content=<originals
+    joined "**role**\n\ncontent">, prompt=meta["prompt"], output=node.content)`, pulling
+    the originals from `core.folded_children`. `action_maximize_split` guard relaxed to
+    `node_type not in _SPLIT_VIEW_TYPES` (imported from detail_inspector) so `1`/`2`/`3`
+    work on a K.
+- Tests: UI task → Pilot is the mandatory floor (`tests/test_app_committed_k_inspector.py`,
+  3 Pilot tests via real binding presses): drafted K (Ctrl+D→Ctrl+S) → NodeView shows
+  prompt=DEFAULT_COMPRESSION_PROMPT / originals containing both turns' text / summary, and
+  `splits_visible == [prompt,content,output]`; manual K (empty prompt) → prompt split hidden
+  (`splits_visible == [content,output]`); `2`/`3` maximize the Originals/Summary splits.
+  Plus 3 direct unit tests in `test_commit_compression.py` for `folded_children`
+  (range-ordered children + off-view; unknown id → []; non-compression node → []).
+- DECISION on `folded_children` test style: wrote **direct** unit tests, not the code-blind
+  test-spec-author flow. It is a tiny read accessor over already-heavily-tested compression
+  state; the contract (range-ordered / []-for-unknown) is dictated by the PRD spec so the
+  tests assert the spec, not the impl; and the happy path is also covered by the Pilot
+  inspector test. Matches the prior-iteration precedent for small documented core additions.
+- Verification: `scripts/check.sh` green (501 passed, was 495; +6; ruff+mypy clean). NO
+  qa-tester this iteration — the in-process MCP harness caches `ctx.*` at session start so it
+  cannot see this iteration's edits to conversation.py/app.py/detail_inspector.py (it would
+  test STALE code). The Pilot floor encodes the acceptance; a future fresh session should run
+  qa-tester (verify-feature) to "confirm browsing": select a committed K → inspector shows
+  Prompt/Originals/Summary, manual K hides Prompt, `1`/`2`/`3` maximize.
+- Did NOT commit the pre-existing dirty `CONTEXT.md` / `docs/Sprint Roadmap.md` (dirty at
+  session start; Roadmap edits forbidden by the PRD).
+- GOTCHA for task 11 (`/expand`): `folded_children` reads `K.meta["range"]`, which is
+  immutable — it still returns the children after expand (expand only clears their
+  `compressed_into`), so don't rely on it to tell "active vs expanded". Task 12 (deep-dive)
+  will also want `folded_children` for the full-view replacement.

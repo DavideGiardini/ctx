@@ -56,7 +56,10 @@ reach end users (ADR 0012). See `docs/decisions/` for *why* it's shaped this way
   model-facing form, Q10c), appends one final user message carrying the instruction
   (`prompt` or the `DEFAULT_COMPRESSION_PROMPT` constant, ADR-0016 A#1), and streams the
   draft with a **no-op `on_usage`** so the gauge is never anchored (Q10b) — it mutates no
-  state and commits nothing (Q3). The read-only `streaming` flag (set for the duration of
+  state and commits nothing (Q3). `folded_children(k_id)` returns a K's folded originals
+  ordered by `K.meta["range"]` (`[]` for an unknown/non-compression id) — the children are
+  off-view, so this is how the UI reaches them for the committed-K inspector (Q8). The
+  read-only `streaming` flag (set for the duration of
   `stream()`) gates all three compression ops (H2). Takes a `Provider`, a
   `StoragePort`, and a `Workspace` by injection (ADR 0001). Exposes a `read_file`
   property — the very loader it hands `build_context` — so the UI's token
@@ -141,7 +144,10 @@ a left `DetailInspector` and a right `#conversation` pane (the `MessageList` +
 - `widgets/` — `MessageList`/`MessageWidget` (truncated nodes via per-role
   `max-height`, right-docked weight slot, conversation-pass margins),
   `DetailInspector` (reactive `show(NodeView)`; standard Markdown view vs. 3-split
-  Prompt/Content/Output context view, empty splits hidden),
+  context view, empty splits hidden — a `context` node labels the splits
+  Prompt/Content/Output, a `compression` K reuses the same split machinery
+  (browse/maximize/`1`/`2`/`3`) labelled Prompt/Originals/Summary, the app mapping
+  K→NodeView via `core.folded_children`, task 10),
   `CompressionEditor` (left-pane 2-split draft editor — editable prompt + summary
   `TextArea`s, no Center; shown in place of the inspector while drafting a
   compression, cancels for free on Esc, ADR-0016 Q4; opened by `c` in Edit mode

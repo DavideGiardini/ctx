@@ -439,6 +439,27 @@ class ConversationCore:
                 child.compressed_into = None
         self.persist()
 
+    def folded_children(self, k_id: str) -> list[Node]:
+        """Return the nodes folded into compression ``K``, in recorded order.
+
+        Reads ``K.meta["range"]`` — the ordered child ids captured at commit —
+        and resolves each from the graph, preserving that order; a range id
+        missing from the graph is skipped (defensive). Returns ``[]`` when
+        ``k_id`` is unknown or does not name a compression node. The folded
+        children are **not** in ``current_view()`` (they left the view when
+        folded, Q8), so this is how the UI reaches them for the committed-``K``
+        inspector.
+        """
+        k = self._graph.get(k_id)
+        if k is None or k.node_type != "compression":
+            return []
+        children: list[Node] = []
+        for child_id in k.meta["range"]:
+            child = self._graph.get(child_id)
+            if child is not None:
+                children.append(child)
+        return children
+
     async def draft_compression(
         self, start_id: str, end_id: str, prompt: str | None = None
     ) -> AsyncIterator[str]:

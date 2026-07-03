@@ -210,7 +210,7 @@ Dependencies noted; every prerequisite sits above its dependent.
       overwritten; `Ctrl+S` → committed `K.meta["prompt"]` equals the drafted Top
       text. `scripts/check.sh` green.
 
-- [ ] **10. UI: committed-K inspector 3-split** _(deps: 8)_ — first a small core
+- [x] **10. UI: committed-K inspector 3-split** _(deps: 8)_ — first a small core
       accessor: `ConversationCore.folded_children(k_id) -> list[Node]` (ordered per
       `K.meta["range"]`, from `_graph`; `[]` for unknown ids — children are not in
       `current_view()`, Q8). Then: cursor on a K node → the left inspector shows the
