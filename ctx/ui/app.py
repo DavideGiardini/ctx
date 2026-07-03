@@ -2,7 +2,7 @@ import asyncio
 import contextlib
 from pathlib import Path
 
-from textual import work
+from textual import events, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
@@ -58,6 +58,7 @@ class ChatApp(App):
         # first to drive the draft (the action is inert unless the editor is open).
         Binding("ctrl+d", "draft_compression", "Draft", show=False, priority=True),
         Binding("ctrl+s", "commit_compression", "Commit", show=False),
+        Binding("ctrl+o", "pop_deep_dive", "Back out", show=False),
         Binding("up", "up", "Up", show=False),
         Binding("down", "down", "Down", show=False),
         Binding("enter", "detail_enter", "Select split", show=False),
@@ -101,6 +102,14 @@ class ChatApp(App):
         # the conversation still matches it; any later change makes it stale
         # (``~``). ``None`` until the first anchored turn.
         self._gauge_anchor: tuple | None = None
+        # Deep-dive browse stack (Q7/Q8, task 12). Each frame is a folded K's
+        # originals rendered in place of the live conversation. Empty = live
+        # view. Built as a stack so it is nesting-ready (3a depth stays 1).
+        # Ephemeral — never persisted.
+        self._deep_dive_stack: list[dict] = []
+        # One-key chord buffer: ``g`` arms it, the next key completes/cancels
+        # (``g d`` opens a deep-dive). ``None`` when disarmed. See ``on_key``.
+        self._pending_chord: str | None = None
         logger.info("app initialized | default_model=%s", self.core.model)
 
     def compose(self) -> ComposeResult:
@@ -168,7 +177,7 @@ class ChatApp(App):
 
     # --- modes ----------------------------------------------------------
 
-    def action_escape(self) -> None:
+    async def action_escape(self) -> None:
         try:
             suggestions = self.query_one("#command-suggestions", Static)
             if suggestions.display:
@@ -202,13 +211,26 @@ class ChatApp(App):
         if self.mode == "edit" and self._range_anchor_id is not None:
             self._clear_range()
             return
+        # While deep-diving, Esc backs out one level (like Ctrl+o) rather than
+        # toggling the mode, keeping the view and mode consistent (task 12).
+        if self.mode == "edit" and self._deep_dive_stack:
+            await self.action_pop_deep_dive()
+            return
         self._set_mode("edit" if self.mode == "insert" else "insert")
 
-    def action_enter_insert(self) -> None:
+    async def action_enter_insert(self) -> None:
         # Vim-style: `i` returns to Insert mode from anywhere in Edit mode
         # (right pane or inside the detail pane). Switching to Insert re-locks
-        # the inspector to the last node, resetting any detail sub-state.
+        # the inspector to the last node, resetting any detail sub-state. `i`
+        # also exits the *whole* deep-dive stack (task 12): the live list is
+        # restored before dropping into Insert (appends go to the active tip;
+        # deep-dive never moved it).
         if self.mode == "edit":
+            if self._deep_dive_stack:
+                self._deep_dive_stack.clear()
+                await self._rebuild_message_list()
+                self.query_one(AppFooter).set_deep_dive(False)
+                self._refresh_token_ui()
             self._set_mode("insert")
 
     def _set_mode(self, mode: str) -> None:
@@ -304,6 +326,8 @@ class ChatApp(App):
         """
         if self.mode != "edit" or self._focus_in_detail():
             return
+        if self._deep_dive_stack:  # deep-dive is read-only (task 12)
+            return
         if self._selected_node_id is None:
             return
         self._range_anchor_id = self._selected_node_id
@@ -339,6 +363,79 @@ class ChatApp(App):
         except Exception:
             pass
 
+    # --- deep-dive (browse a compression's folded originals) ------------
+
+    def _visible_nodes(self) -> list[Node]:
+        """The node list currently rendered in the message pane.
+
+        Live conversation (``core.nodes``) normally; while a deep-dive is
+        active, the top frame's folded originals instead. The single seam every
+        view-facing method (rendering, cursor navigation, snapshot) reads so the
+        deep-dive replacement stays consistent across all of them (Q8)."""
+        if self._deep_dive_stack:
+            frame_nodes: list[Node] = self._deep_dive_stack[-1]["nodes"]
+            return frame_nodes
+        return self.core.nodes
+
+    async def on_key(self, event: events.Key) -> None:
+        """Minimal ``g``-prefixed key-chord buffer (task 12).
+
+        Only active while the message list holds focus in Edit mode: ``g`` arms
+        the chord, a following ``d`` opens a deep-dive on the selected K, and any
+        other key cancels it (falling through to normal handling). Keys outside
+        that context disarm the chord and are left untouched."""
+        if self.mode != "edit" or self._focus_target() != "messages":
+            self._pending_chord = None
+            return
+        if self._pending_chord == "g":
+            self._pending_chord = None
+            if event.key == "d":
+                event.stop()
+                await self._enter_deep_dive()
+            return
+        if event.key == "g":
+            self._pending_chord = "g"
+            event.stop()
+
+    async def _enter_deep_dive(self) -> None:
+        """Push a deep-dive frame for the selected K and render its originals.
+
+        No-op unless a compression node with folded children is selected. The
+        breadcrumb gains one entry ("Chat › K…"); the cursor lands on the first
+        child."""
+        node = self._get_selected_node()
+        if node is None or node.node_type != "compression":
+            return
+        children = self.core.folded_children(node.id)
+        if not children:
+            return
+        self._deep_dive_stack.append(
+            {"k_id": node.id, "label": f"K…{node.id[-4:]}", "nodes": list(children)}
+        )
+        await self._refresh_deep_dive_view(children[0].id)
+
+    async def action_pop_deep_dive(self) -> None:
+        """``Ctrl+o``: pop one deep-dive level (top pop restores the live view).
+
+        Inert when no deep-dive is active. The cursor lands back on the K that
+        was dived into (or the last node if it is gone)."""
+        if not self._deep_dive_stack:
+            return
+        popped = self._deep_dive_stack.pop()
+        visible = self._visible_nodes()
+        target = popped["k_id"] if any(n.id == popped["k_id"] for n in visible) else (
+            visible[-1].id if visible else None
+        )
+        await self._refresh_deep_dive_view(target)
+
+    async def _refresh_deep_dive_view(self, select_id: str | None) -> None:
+        """Rebuild the message list for the current view, restore the footer's
+        deep-dive hint, land the cursor, and refresh the token surfaces."""
+        await self._rebuild_message_list()
+        self.query_one(AppFooter).set_deep_dive(bool(self._deep_dive_stack))
+        self._select_message(select_id)
+        self._refresh_token_ui()
+
     # --- compression draft editor ---------------------------------------
 
     def _compression_range(self) -> list[str]:
@@ -357,6 +454,8 @@ class ChatApp(App):
         No anchor → range-of-one on the selected node; no selection → no-op
         (the discoverable ``/compress`` command explains how to select)."""
         if self.mode != "edit" or self._focus_in_detail():
+            return
+        if self._deep_dive_stack:  # deep-dive is read-only (task 12)
             return
         if not self._compression_range():
             return
@@ -446,7 +545,7 @@ class ChatApp(App):
         message_list = self.query_one(MessageList)
         for child in list(message_list.children):
             await child.remove()
-        for node in self.core.nodes:
+        for node in self._visible_nodes():
             await message_list.add_node(node)
 
     async def _breadcrumb(self, text: str) -> None:
@@ -489,18 +588,19 @@ class ChatApp(App):
             self._apply_range_selection()
 
     def _select_relative(self, step: int) -> None:
-        if not self.core.nodes:
+        nodes = self._visible_nodes()
+        if not nodes:
             return
-        default = len(self.core.nodes) if step < 0 else -1
+        default = len(nodes) if step < 0 else -1
         if self._selected_node_id is None:
             start = default
         else:
             start = next(
-                (i for i, n in enumerate(self.core.nodes) if n.id == self._selected_node_id),
+                (i for i, n in enumerate(nodes) if n.id == self._selected_node_id),
                 default,
             )
-        idx = (start + step) % len(self.core.nodes)
-        self._select_message(self.core.nodes[idx].id)
+        idx = (start + step) % len(nodes)
+        self._select_message(nodes[idx].id)
 
     def action_detail_enter(self) -> None:
         if self.mode != "edit" or not self._focus_in_detail():
@@ -511,11 +611,11 @@ class ChatApp(App):
             self._sync_footer()
 
     def action_jump_home(self) -> None:
-        if not self.core.nodes:
+        if not self._visible_nodes():
             return
         if self.mode != "edit":
             self._set_mode("edit")
-        self._select_message(self.core.nodes[0].id)
+        self._select_message(self._visible_nodes()[0].id)
 
     def action_maximize_split(self, which: str) -> None:
         if self.mode != "edit":
@@ -553,7 +653,7 @@ class ChatApp(App):
     def _get_selected_node(self) -> Node | None:
         if self._selected_node_id is None:
             return None
-        for node in self.core.nodes:
+        for node in self._visible_nodes():
             if node.id == self._selected_node_id:
                 return node
         return None
@@ -633,12 +733,23 @@ class ChatApp(App):
         node's per-node weight ``--%`` onto its message widget and the
         used-÷-window gauge (with its ``~`` marker) onto the header."""
         message_list = self.query_one(MessageList)
-        for node, pct in zip(self.core.nodes, self._node_weights(), strict=True):
-            try:
-                widget = message_list.query_one(f"#msg-{node.id}", MessageWidget)
-            except Exception:
-                continue
-            widget.set_weight_pct(pct)
+        if self._deep_dive_stack:
+            # Folded originals are off the live context (Q9): no % applies.
+            for node in self._visible_nodes():
+                try:
+                    widget = message_list.query_one(f"#msg-{node.id}", MessageWidget)
+                except Exception:
+                    continue
+                widget.set_weight_not_in_context()
+        else:
+            for node, pct in zip(self.core.nodes, self._node_weights(), strict=True):
+                try:
+                    widget = message_list.query_one(f"#msg-{node.id}", MessageWidget)
+                except Exception:
+                    continue
+                widget.set_weight_pct(pct)
+        # The header gauge always reflects the live context window, never the
+        # browsed originals — deep-dive does not change what the model will see.
         gauge_pct, approximate = self._gauge_state()
         self.query_one(AppHeader).set_context_pct(gauge_pct, approximate)
 
@@ -654,9 +765,11 @@ class ChatApp(App):
         Nodes are reported by stable *index* + role (the random ``Node.id``
         uuids are an implementation detail agents should not depend on).
         """
-        nodes = self.core.nodes
+        in_deep_dive = bool(self._deep_dive_stack)
+        nodes = self._visible_nodes()
         truncation = get_config()["ui"]["truncation_lines"]
-        weights = self._node_weights()
+        # Deep-dive originals are off-context, so no per-node % applies (Q9).
+        weights = [None] * len(nodes) if in_deep_dive else self._node_weights()
         gauge_pct, gauge_approximate = self._gauge_state()
         selected_index: int | None = None
         selected_role: str | None = None
@@ -734,6 +847,10 @@ class ChatApp(App):
                 "locked": self.mode == "insert",
             },
             "context_gauge": {"pct": gauge_pct, "approximate": gauge_approximate},
+            "deep_dive": {
+                "active": in_deep_dive,
+                "breadcrumb": ["Chat", *(f["label"] for f in self._deep_dive_stack)],
+            },
             "truncation": truncation,
             "input": input_bar.value,
             "command_menu": command_menu,

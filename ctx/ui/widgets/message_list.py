@@ -98,6 +98,11 @@ class MessageWidget(Vertical):
     def set_weight_pct(self, pct: int | None) -> None:
         self.query_one(".weight", Static).update("--%" if pct is None else f"{pct}%")
 
+    def set_weight_not_in_context(self) -> None:
+        """Deep-dive rendering (Q9): a folded original is *not* part of the live
+        context, so its weight slot reads "not in context" rather than a %."""
+        self.query_one(".weight", Static).update("not in context")
+
     def compose(self):
         yield Static("--%", classes="weight")
         if self._role in ("system", "context"):

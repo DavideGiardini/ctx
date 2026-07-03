@@ -1121,3 +1121,50 @@ Git history is the source of truth for *what changed*; this file captures the
   can't reach `/expand` by keyboard, that's a design defect of the whole command-vs-selection
   model (no `:`/`/` command-line that preserves selection) — file it as a new Phase-3b `- [ ]`
   task per task-13's rule, don't patch inside task 13.
+
+## 2026-07-03 — Task 12 (Sprint 3): UI deep-dive (`g d` / `Ctrl+o`)
+- Deep-dive browser wired end-to-end (ADR-0016 Q7/Q8/Q9). New app state:
+  `_deep_dive_stack: list[dict]` (each frame `{k_id, label, nodes}`, nesting-ready;
+  3a depth stays 1; ephemeral, never persisted) + `_pending_chord` for the `g`-chord.
+- Chord buffer: new `async def on_key` — only when Edit mode AND focus is in the
+  message list (`_focus_target()=="messages"`, so it's inert in Insert/detail/editor).
+  `g` arms + `event.stop()`; a following `d` opens a deep-dive on the selected K; any
+  other key disarms and falls through. No `on_key` existed before (per the PRD).
+- New `_visible_nodes()` seam: returns the top frame's folded originals while diving,
+  else `core.nodes`. Every view-facing method now reads it instead of `core.nodes`:
+  `_rebuild_message_list`, `_select_relative`, `_get_selected_node`, `action_jump_home`,
+  `describe_state`. The header gauge (`_gauge_state`) deliberately still reads
+  `core.nodes` — deep-dive doesn't change the real context window.
+- `_enter_deep_dive` (K selected → push frame from `core.folded_children`, cursor to
+  first child), `action_pop_deep_dive` (`Ctrl+o`; pops one, lands cursor on the dived K),
+  `action_enter_insert` (`i`, now async; clears the WHOLE stack → live view → Insert,
+  input focused), and `action_escape` (now async; while diving, Esc pops one level like
+  `Ctrl+o` instead of toggling mode — keeps view/mode consistent).
+- Read-only (Q9): `action_anchor_range` (`v`) and `action_compress` (`c`) early-return
+  while diving; `_refresh_token_ui` + `describe_state` render each child "not in context"
+  (new `MessageWidget.set_weight_not_in_context`; describe_state `weight_pct=None`).
+- Footer: new `AppFooter.set_deep_dive(bool)` + a `deep_dive` hint; `current_hint`
+  precedence = detail-substate > deep_dive > mode (inspector browse/maximize still shows
+  its own hint while diving). `describe_state` gains `"deep_dive": {active, breadcrumb}`
+  (breadcrumb = `["Chat", *frame labels]`).
+- Pure UI over already-tested core (`folded_children`/`expand_compression` from tasks 4/10)
+  → NO code-blind test-spec-author flow; the Pilot floor is the acceptance.
+- Tests: `tests/test_app_deep_dive.py` — 6 Pilot tests (real key presses via the suite's
+  select-K-in-Edit convention): (1) `g d` → active, breadcrumb len 2, 4 children visible,
+  cursor on first, each child weight widget reads "not in context"; (2) `Ctrl+o` → live
+  (1 K); (3) Esc pops one level (stays Edit); (4) `i` → Insert + live + input focused;
+  (5) read-only — `v`/`c` inert, still diving; (6) `g d` on a non-K node → nothing.
+- Verification: `scripts/check.sh` green (511 passed, was 505; +6; ruff+mypy clean).
+  mypy gotcha: `_deep_dive_stack[-1]["nodes"]` is `Any` → assign to a typed local
+  `frame_nodes: list[Node]` before returning to satisfy `no-any-return`.
+- NO qa-tester this iteration — the in-process MCP harness caches `ctx.*` at session
+  start, so it cannot see this iteration's app.py edits (it would drive STALE code with
+  no `on_key`/deep-dive). Task 13 (E2E, verify-feature) runs the qa-tester walk incl.
+  `g d` → children + breadcrumb, `Ctrl+o` back, `i` exits to Insert.
+- GOTCHA for task 13 qa-tester (real-world reachability): `g d` needs the message list
+  focused with a K selected (Edit mode). Same selection-vs-Insert gap as `/compress`:
+  entering Insert clears selection. The dive itself is keyboard-reachable (unlike the
+  `/compress` command path) since `g d` runs in Edit mode. If the qa-tester can't reach
+  it, that's the same command-vs-selection design gap noted for task 11 — file a new
+  Phase-3b `- [ ]`, don't patch inside task 13.
+- Did NOT commit the pre-existing dirty `CONTEXT.md` / `docs/Sprint Roadmap.md`.

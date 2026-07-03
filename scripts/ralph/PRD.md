@@ -235,7 +235,7 @@ Dependencies noted; every prerequisite sits above its dependent.
       `<conversation_summary>`. qa-tester confirms compress→expand→re-compress.
       `scripts/check.sh` green.
 
-- [ ] **12. UI: deep-dive (`g d` / `Ctrl+o`)** _(deps: 10)_ — implement a minimal
+- [x] **12. UI: deep-dive (`g d` / `Ctrl+o`)** _(deps: 10)_ — implement a minimal
       key-chord buffer (no `on_key` exists in `app.py` yet): in Edit mode, `g` arms a
       pending chord, `d` completes it (anything else cancels). On a K node: replace
       the right-pane message list content with the folded children (**full-view
