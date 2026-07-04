@@ -1987,3 +1987,27 @@ Git history is the source of truth for *what changed*; this file captures the
   NO qa-tester: same-iteration UI edit, MCP harness runs `ctx.*` cached in-process
   and can't see it (AGENTS.md limit a) — Pilot test is the verification (as tasks
   19–22). Remaining Phase 3c tasks: 25 (Δ vs weight-% layout), 26 (snapshot.py render).
+
+## 2026-07-04 — Task 25: drift `Δ` vs weight-% layout (CONFIRMED REAL + fixed)
+
+- CONFIRMED the overlap is real (not a character-grid artifact). Investigated via
+  computed regions in a Pilot app: `.weight` "20%" occupied cols x=76,77,78 while
+  `.drift` "Δ" landed at x=77 — squarely inside the % text, so the coarse grid
+  rendered "2Δ%" (Δ overwrites the 0). Root cause: `.weight` and `.drift` were each
+  `dock: right`, and Textual stacks multiple same-edge docks *on top of each other*,
+  not side-by-side; the `.drift` `margin: 0 1 0 0` only nudged Δ one cell left
+  (x=77), still inside `20%`.
+- Fix: wrap both `Static`s in a single right-docked `.meta-slot` Horizontal row
+  (`layout: horizontal`) so they flow left→right within it — drift first (left),
+  weight second (right), the `.drift` right-margin giving a 1-cell gap. Removed
+  `dock: right` from `.weight`/`.drift`. After: Δ at x=74 (right=75), weight at
+  x=76 → no overlap for any weight width (verified "20%" and "100%").
+- Test: new `tests/test_message_list_meta_layout.py` — mounts a `MessageWidget`,
+  sets drift + weight, asserts `drift.region.right <= weight.region.x` (no column
+  overlap, Δ left of %) for a 2-char and a 4-char weight value. This is the layout
+  invariant AGENTS.md limit (b) says must live in a unit test, not qa-tester.
+- Verification: `scripts/check.sh` green (618 passed; was 616). ruff+mypy clean.
+  NO qa-tester: (a) same-iteration UI edit is invisible to the cached in-process
+  MCP harness, and (b) the harness can't judge layout anyway — the region test IS
+  the verification (same rationale as tasks 19-24).
+- Remaining Phase 3c: task 26 (snapshot.py::render surfacing Sprint 3 fields).

@@ -636,7 +636,7 @@ become new `- [ ]` tasks" instruction. Not blockers for the Sprint 3 feature set
       the current behavior. _Acceptance:_ decision recorded; behavior + test + docs agree;
       `scripts/check.sh` green.
 
-- [ ] **25. Confirm/fix drift `Δ` marker vs. weight-% layout** _(deps: 19)_ — the
+- [x] **25. Confirm/fix drift `Δ` marker vs. weight-% layout** _(deps: 19)_ — the
       qa-tester repeatedly observed (character-grid screenshots) the `Δ` marker appearing
       to overlap a weight-% digit (e.g. `2Δ%` where `20%` was expected). Both `.weight`
       and `.drift` use `dock: right` (`ctx/ui/widgets/message_list.css:28-40`), `.drift`
