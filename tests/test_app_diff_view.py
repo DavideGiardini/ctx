@@ -321,3 +321,89 @@ async def test_c_then_commit_in_diff_commits_nothing(repo, workspace):
         await pilot.press("escape")
         assert app.describe_state()["diff_view"]["open"] is False
         assert app.query_one(MessageList).display is True
+
+
+async def _double_compress_and_dive(app, pilot) -> None:
+    """U1,A1,U2,A2 → compress [U1,A1]=K1 → compress [U2,A2]=K2 → dive K2, then
+    move the cursor onto the drifted frame node A2.
+
+    A2 was generated seeing [U1,A1,U2] but its now-view folds [U1,A1] into K1,
+    so A2 drifts — the `g d` diff branch is genuinely reachable on it (the test
+    asserts the drift, so it can only pass because the dive gate blocks it, not
+    because the turn happens to be undrifted)."""
+    await _turn(app, "first")  # → U1, A1
+    await _turn(app, "second")  # → U2, A2
+
+    # compress [U1, A1] → K1
+    await pilot.press("escape")
+    await pilot.press("home")
+    await pilot.press("v", "down")
+    await pilot.press("c")
+    app.query_one("#compress-output", TextArea).text = "K1"
+    await pilot.press("ctrl+s")
+
+    # compress [U2, A2] → K2 (view is [K1, U2, A2]; select U2..A2)
+    if app.mode == "insert":
+        await pilot.press("escape")
+    await pilot.press("home")
+    await pilot.press("down")  # U2
+    await pilot.press("v", "down")  # [U2, A2]
+    await pilot.press("c")
+    app.query_one("#compress-output", TextArea).text = "K2"
+    await pilot.press("ctrl+s")
+
+    # dive into K2 (view [K1, K2]); land on the frame's second child A2
+    if app.mode == "insert":
+        await pilot.press("escape")
+    await pilot.press("home")
+    await pilot.press("down")  # K2
+    await pilot.press("g", "d")  # deep-dive → originals [U2, A2]
+    await pilot.press("down")  # A2
+
+
+async def test_diff_does_not_open_inside_deep_dive(repo, workspace):
+    """Task 30 decision: diff and deep-dive are mutually exclusive. `g d` on a
+    drifted *frame* assistant turn while diving must NOT open a diff inside the
+    dive — the dive stays active and its breadcrumb gains no "Diff" entry."""
+    app = _app(repo, workspace)
+    async with app.run_test() as pilot:
+        await _double_compress_and_dive(app, pilot)
+
+        selected = app._get_selected_node()
+        assert selected.role == "assistant"
+        # Discriminating precondition: this frame turn really would drift, so the
+        # only reason the diff stays shut is the dive gate.
+        assert app._turn_has_drift(selected, app.core.all_nodes()) is True
+
+        await pilot.press("g", "d")  # forbidden: diff inside a dive
+
+        st = app.describe_state()
+        assert st["diff_view"]["open"] is False
+        assert st["deep_dive"]["active"] is True
+        assert not any(bc.startswith("Diff") for bc in st["deep_dive"]["breadcrumb"])
+        assert app.query_one(DiffView).display is False
+
+
+async def test_ctrl_o_from_diff_restores_cursor_and_inspector(repo, workspace):
+    """Task 30 (2): `Ctrl+o` from a diff opened in the live view restores the
+    pre-diff cursor *and* the inspector's node, not just the pane display."""
+    app = _app(repo, workspace)
+    async with app.run_test() as pilot:
+        await _drift_scenario(app, pilot)  # cursor on the drifted turn A2
+        before = app.describe_state()
+        sel_index = before["selected_index"]
+        assert sel_index is not None
+        assert before["selected_role"] == "assistant"
+
+        await pilot.press("g", "d")
+        assert app.describe_state()["diff_view"]["open"] is True
+
+        await pilot.press("ctrl+o")
+
+        after = app.describe_state()
+        assert after["diff_view"]["open"] is False
+        assert after["selected_index"] == sel_index
+        assert after["selected_role"] == "assistant"
+        # Inspector points back at the restored node (not blanked).
+        assert after["detail"]["node_index"] == sel_index
+        assert after["detail"]["node_role"] == "assistant"

@@ -436,6 +436,12 @@ class ChatApp(App):
         if node.node_type == "compression":
             await self._enter_deep_dive()
         elif self._turn_has_drift(node, self.core.all_nodes()):
+            # Diff and deep-dive are mutually exclusive (see _diff_view, task 30):
+            # a folded *frame* assistant turn can drift, but opening its diff here
+            # would nest a diff inside the dive. Inert, like the read-only v/c/x
+            # gates (task 27) — exit the dive (Ctrl+o) to reach the diff.
+            if self._deep_dive_stack:
+                return
             await self._enter_diff(node)
 
     async def _enter_deep_dive(self) -> None:
@@ -528,8 +534,11 @@ class ChatApp(App):
         self.query_one(MessageList).display = True
         self.query_one(AppFooter).set_deep_dive(bool(self._deep_dive_stack))
         self.query_one(MessageList).focus()
+        # Restore against the view actually rendered now (symmetric with
+        # action_pop_deep_dive); with the diff/dive exclusivity gate this equals
+        # core.nodes, but _visible_nodes() stays correct if that ever changes.
         self._select_message(
-            target if any(n.id == target for n in self.core.nodes) else None
+            target if any(n.id == target for n in self._visible_nodes()) else None
         )
         self._refresh_token_ui()
 
