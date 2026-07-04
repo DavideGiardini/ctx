@@ -87,14 +87,37 @@ Operate as the autonomous engineer described in `AGENTS.md` (NOT professor mode)
 6. **Refactor under green.** Clean up while the gate stays green (deep modules,
    framework-free core, reuse existing seams/patterns).
 
-7. **Verify behavior — only for tasks with a UI/runtime surface.** **First decide
-   whether `qa-tester` even applies.** If the task is pure core logic (e.g. a
-   `ctx/core/**` function or a `ctx/models/**` type with no UI/runtime surface this
-   iteration), **do NOT spawn `qa-tester` at all** — the `test-spec-author` tests plus
-   the green gate ARE the verification; skip straight to step 8. Only when the task
-   changes UI or runtime behavior, delegate to the `qa-tester` subagent (Task tool) to
-   drive the real app through the `ctx-agent` MCP server and confirm the task's
-   acceptance criterion. Address any FAIL it reports before continuing.
+7. **Verify behavior — decide your verification strategy** (symmetric to step 3).
+   **First decide whether verification even applies.** If the task is pure core logic
+   (e.g. a `ctx/core/**` function or a `ctx/models/**` type with no UI/runtime surface
+   this iteration), **do NOT spawn `qa-tester` and do NOT render anything** — the
+   `test-spec-author` tests plus the green gate ARE the verification; skip to step 8.
+
+   For a task that changes UI or runtime behavior, pick the right tool(s):
+
+   - **Behavioral acceptance** (does the flow *do* the right thing: state changes,
+     navigation, commands, no crashes) → delegate to the **`qa-tester`** subagent
+     (Task tool) to drive the real app through the `ctx-agent` MCP server and confirm
+     the task's acceptance criterion. Address any FAIL it reports.
+   - **Visual acceptance** (does it *look* right: color, layout, spacing, alignment,
+     "reads as one block") → **`qa-tester` cannot judge this** — it drives the app but
+     cannot perceive spacing/margins/pixel layout. Ask whether a queryable assertion
+     truly captures the acceptance or whether you must **look at the rendered result**.
+     If you must look, render it yourself with the visual driver and `Read` the PNG:
+
+     ```
+     uv run --with cairosvg python -m tools.agent.visual state <name> /tmp/x.png
+     # states: fresh, committed-K, k-after-assistant, drift-diff (see tools/agent/visual.py)
+     ```
+
+     Judge the PNG against the task's one-line visual intent. **Verify both
+     directions on a known good/bad pair** before trusting your own eye — force the
+     defect and the fix with `--variant` (e.g. `k-violet` vs `k-green`); a judge that
+     only ever says "pass" is worthless. **Always keep a deterministic assertion as
+     the floor** (a unit/Pilot test on the queryable proxy — CSS class, `colors:`
+     line, snapshot field) even when you also look; the picture is the check, the
+     assertion is the regression net. New known-missed visual bugs go into the
+     standing fixture — see `scripts/ralph/VISUAL-FIXTURE.md`.
 
    **Never wait indefinitely on a subagent.** Spawn at most ONE `qa-tester` at a time
    and let it return before doing anything else. If it does not return within a few
@@ -103,13 +126,15 @@ Operate as the autonomous engineer described in `AGENTS.md` (NOT professor mode)
    Stop, record the wedge as a blocker in `PROGRESS.md`, leave the task unchecked, and
    end the iteration; a wasted iteration is recoverable, a session-wide deadlock is not.
 
-   Two harness limits to respect: (a) it runs the app
-   **in-process** with `ctx.*` cached, so it cannot see code you edited *this*
-   iteration — `qa-tester` confirms committed/prior behavior, not your uncommitted
-   edit; for a rendering change you just made, rely on unit/Pilot tests, not
-   `qa-tester`. (b) It **cannot perceive vertical spacing/margins/layout**, so put any
-   spacing or layout invariant in a unit test and have `qa-tester` assert on queryable
-   state (CSS classes, content, snapshot fields) instead.
+   **The visual driver sees current code by construction.** Each `uv run …` is a fresh
+   process that imports `ctx.*` from disk, so it reflects your just-edited source (it
+   is not committed yet, but it *is* on disk). `qa-tester`, by contrast, drives the app
+   in-process through the MCP server, which imports `ctx.*` lazily on the *first*
+   launch of that process — so a single launch per iteration sees current code, but a
+   *second* in-process launch after you edit would be stale. Policy: **leave app
+   launches to `qa-tester`** (so its launch is the first), and if stale behavior is
+   ever suspected the fix is a **server restart, not another relaunch**. For a pure
+   rendering change, prefer the visual driver (always current) over `qa-tester`.
 
 8. **Commit only on green.** Once the gate passes and `qa-tester` confirms (where
    applicable), make ONE conventional-commit (`feat:`/`fix:`/`refactor:` …)

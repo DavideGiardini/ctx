@@ -14,10 +14,15 @@ Keep it out of version control if it's throwaway; commit it if the plan is share
 Each task must be **right-sized for a single fresh session** (one component,
 function, widget, or migration). Order them top-to-bottom by priority — the loop
 always picks the topmost unchecked one. Give each a concrete **acceptance
-criterion** the `qa-tester` subagent (or the test gate) can check.
+criterion** the `qa-tester` subagent (or the test gate) can check. For **visual**
+UI tasks (color, layout, spacing, alignment), state the **visible outcome** as a
+VLM-checkable sentence — `qa-tester` can't see appearance; the agent renders it via
+`tools/agent/visual.py` and looks (PROMPT.md step 7). Always name a deterministic
+floor (snapshot field / CSS class / unit test) under the picture.
 
-- [ ] **<Task 1 title>** — <what to do>. _Acceptance:_ <observable result;
-      for UI tasks, the snapshot/state the qa-tester should see>.
+- [ ] **<Task 1 title>** — <what to do>. _Acceptance:_ <observable result; for a
+      behavioral UI task, the snapshot/state qa-tester should see; for a *visual*
+      task, the visible outcome to look at + the deterministic floor>.
 - [ ] **<Task 2 title>** — <what to do>. _Acceptance:_ <…>.
 - [ ] **<Task 3 title>** — <what to do>. _Acceptance:_ <…>.
 

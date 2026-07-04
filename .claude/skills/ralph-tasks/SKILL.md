@@ -30,6 +30,18 @@ Hold every task to all five rules:
    For UI/behavior tasks, write the criterion as the snapshot/state qa-tester
    should observe (e.g. "after `/export`, snapshot shows a system message
    'Exported to …'"). No acceptance criterion → not a task yet.
+
+   **For *visual* UI tasks (color, layout, spacing, alignment, "reads as one
+   block"), the acceptance MUST state the visible outcome** as a VLM-checkable
+   sentence (a reference widget, a mock, or a one-line description of what the
+   rendered result should look like) — because `qa-tester` **cannot perceive
+   appearance**, only queryable proxies. Deciding *what right looks like* is the
+   spec's job (yours, here); deciding *how to check it* is the implementing agent's
+   job (it renders the app with `tools/agent/visual.py` and looks — see PROMPT.md
+   step 7). This split is the guard against the loop's original blind spot: an agent
+   that both implements *and* picks its own success proxy will pick one it passes.
+   Still name a deterministic floor (a snapshot field / CSS class / unit test) so
+   the check has a regression net under the picture.
 5. **Respects the architecture.** Follow the "Designing new modules" guidance in
    `AGENTS.md` (deep modules, core stays framework-free, seams only on a second
    real implementation). New domain logic lands in `ctx/core/*`; the UI is a thin
