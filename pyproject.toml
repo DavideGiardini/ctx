@@ -30,6 +30,7 @@ dev = [
     "pre-commit>=4.6.0",
     "pytest>=8",
     "pytest-asyncio>=1.4.0",
+    "pytest-xdist>=3.8.0",
     "ruff>=0.15.16",
     "textual-mcp-server>=1.0.0",
 ]

@@ -19,8 +19,12 @@ echo "==> pytest"
 # (Pilot smoke tests driving HarnessApp via TestProvider) is the required next
 # step — until it lands, treat "no tests" as a pass so the slot exists now and
 # the gate tightens automatically once tests are added.
+#
+# `-n auto` (pytest-xdist) runs the suite across one worker per logical CPU. The
+# tests are isolated (per-test temp DB + temp workspace, see tests/conftest.py),
+# so this is safe; it cuts the mostly startup/IO-bound Pilot suite ~4x (~97s->~25s).
 set +e
-uv run pytest -q
+uv run pytest -q -n auto
 code=$?
 set -e
 if [ "$code" -eq 5 ]; then
