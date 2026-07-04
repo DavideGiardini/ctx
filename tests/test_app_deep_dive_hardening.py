@@ -102,6 +102,36 @@ async def test_connectivity_node_gated_out_of_dive_then_surfaces(repo, workspace
         assert any("Connected to some/model" in c for c in contents)
 
 
+async def test_model_command_gated_out_of_dive_then_surfaces(repo, workspace):
+    """(b, task 31) `/model x` issued mid-dive must not mount its reply widget into
+    the read-only dive frame; exiting the dive surfaces the switch breadcrumb in the
+    live view. Completes 13h#2 — the command handler appended directly, bypassing the
+    dive gate."""
+    app = _app(repo, workspace)
+    async with app.run_test() as pilot:
+        await _two_turns(app)
+        await _compress_full_tip_range(app, pilot, "SUMMARY")
+        await _select_k_in_edit(app, pilot)
+        await pilot.press("g", "d")
+        await pilot.pause()
+        assert app.describe_state()["deep_dive"]["active"] is True
+
+        count_before = len(app.query(MessageWidget))
+        await app._handle_model_command("/model gpt-test")
+        await app.workers.wait_for_complete()  # drain the connectivity worker too
+        await pilot.pause()
+
+        # Dive frame unchanged: neither the switch node nor the connectivity node
+        # mounted here.
+        assert len(app.query(MessageWidget)) == count_before
+        assert app.describe_state()["deep_dive"]["active"] is True
+
+        await pilot.press("ctrl+o")  # exit the dive → live view rebuilds
+        await pilot.pause()
+        contents = [n["content"] for n in app.describe_state()["nodes"]]
+        assert any("Model set to: gpt-test" in c for c in contents)
+
+
 async def test_commit_resets_inspector_to_placeholder(repo, workspace):
     """(c) After Ctrl+S the inspector shows the empty/placeholder state, not the
     node that was just folded away."""

@@ -1291,7 +1291,7 @@ class ChatApp(App):
             self._update_model_label()
             logger.info("model switched | new_model=%s", new_model)
             self._check_connectivity(new_model)
-        await self.query_one(MessageList).add_node(node)
+        await self._mount_node(node)
         if self.mode == "insert":
             self._lock_inspector_to_last()
 
@@ -1322,7 +1322,7 @@ class ChatApp(App):
         conversations = self._repo.list()
         if not conversations:
             node = self.core.add_system_message("No past conversations found.")
-            await self.query_one(MessageList).add_node(node)
+            await self._mount_node(node)
             if self.mode == "insert":
                 self._lock_inspector_to_last()
             return
@@ -1348,7 +1348,7 @@ class ChatApp(App):
         files = self._workspace.list_files()
         if not files:
             node = self.core.add_system_message("No files in .ctx/context/ to include.")
-            await self.query_one(MessageList).add_node(node)
+            await self._mount_node(node)
             if self.mode == "insert":
                 self._lock_inspector_to_last()
             return
@@ -1356,9 +1356,8 @@ class ChatApp(App):
         if not result:
             return
         nodes = self.core.include_files(result)
-        message_list = self.query_one(MessageList)
         for node in nodes:
-            await message_list.add_node(node)
+            await self._mount_node(node)
             logger.info("context included | path=%s", node.meta.get("source_path", ""))
         self._refresh_token_ui()
         if self.mode == "insert":
