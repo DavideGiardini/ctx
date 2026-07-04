@@ -1,7 +1,7 @@
 from textual.actions import SkipAction
 from textual.binding import Binding
 from textual.color import Color
-from textual.containers import Vertical, VerticalScroll
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Markdown, Static
 
 from ctx.core.config import get_config
@@ -112,8 +112,9 @@ class MessageWidget(Vertical):
         self.query_one(".drift", Static).update("Δ" if drifted else "")
 
     def compose(self):
-        yield Static("--%", classes="weight")
-        yield Static("", classes="drift")
+        with Horizontal(classes="meta-slot"):
+            yield Static("", classes="drift")
+            yield Static("--%", classes="weight")
         if self._role in ("system", "context"):
             yield Static(self._content or "", classes="content")
         else:

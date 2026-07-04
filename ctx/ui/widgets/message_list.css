@@ -25,14 +25,21 @@ MessageWidget Markdown {
 MessageWidget Markdown > MarkdownParagraph {
     margin: 0;
 }
-MessageWidget .weight {
+/* The drift glyph and weight % share one right-docked row so they flow
+   side-by-side (Δ left of %) instead of both docking to the same edge and
+   overlapping into "2Δ%" (task 25). */
+MessageWidget .meta-slot {
     dock: right;
+    width: auto;
+    height: 1;
+    layout: horizontal;
+}
+MessageWidget .weight {
     width: auto;
     height: 1;
     color: $text-muted;
 }
 MessageWidget .drift {
-    dock: right;
     width: auto;
     height: 1;
     margin: 0 1 0 0;
