@@ -40,6 +40,15 @@ Operate as the autonomous engineer described in `AGENTS.md` (NOT professor mode)
      (signatures + docstrings) and a **prose statement of intent derived from the PRD
      task and its `docs/decisions` note** — never the implementation. It writes the
      behavioral contract (`tests/specs/<module>.md`) and the pytest tests.
+   - **Give it a scope budget proportional to the change.** Tell it roughly how many
+     lines of product code this task adds/changes and instruct it to write the
+     **fewest tests that would catch a realistic regression** — a handful (often 1–3)
+     for a small or mechanical change (a CSS tweak, a getter, a guard clause), a
+     focused suite only for genuinely new behavior with real invariants. This is a
+     *loop* task, not full-module coverage (that's the `/write-tests` skill's job).
+     When it returns, **apply the deletion test to each test and prune**: if removing
+     a test loses no meaningful coverage, delete it. A 13-line change must not ship a
+     60-line suite; a bloated suite of shallow tests is a defect, not safety (step 3).
    - Run the tests. They must **fail because the behavior is unimplemented (red),
      while collecting cleanly**. If they error on *collection* (import error, missing
      symbol), your interface stubs are incomplete — fix the stubs, not the tests.
@@ -137,11 +146,7 @@ Operate as the autonomous engineer described in `AGENTS.md` (NOT professor mode)
    ever suspected the fix is a **server restart, not another relaunch**. For a pure
    rendering change, prefer the visual driver (always current) over `qa-tester`.
 
-8. **Commit only on green.** Once the gate passes and `qa-tester` confirms (where
-   applicable), make ONE conventional-commit (`feat:`/`fix:`/`refactor:` …)
-   describing the task. Never commit a red tree.
-
-9. **Record progress.**
+8. **Record progress — *before* you commit, so it lands in the same commit.**
    - Mark the task done in the PRD: change its `- [ ]` to `- [x]`.
    - Append a short dated entry to `scripts/ralph/PROGRESS.md`: what you did, what
      tests you added (or why none were warranted), the verification you ran, key
@@ -151,6 +156,14 @@ Operate as the autonomous engineer described in `AGENTS.md` (NOT professor mode)
      "rendered `committed-K`, judged K bar green — PASS"). This makes the visual
      gate auditable after the fact; a visual task with no recorded verdict reads as
      skipped.
+
+9. **Commit once — everything together, only on green.** Once the gate passes and
+   `qa-tester` confirms (where applicable), stage the code changes **and** the PRD +
+   PROGRESS updates from step 8 and make **exactly ONE** conventional-commit
+   (`feat:`/`fix:`/`refactor:` …) describing the task. The PRD/PROGRESS bookkeeping
+   is part of the task — it goes *in* this commit. **Never** leave it for a separate
+   follow-up `docs: mark … done` commit (that doubles the history and is the #1
+   log-pollution defect). Never commit a red tree.
 
 10. **If — and only if — every task in the PRD is now `- [x]`**, print the exact
     line `RALPH_COMPLETE` on its own line as the last thing you do.
