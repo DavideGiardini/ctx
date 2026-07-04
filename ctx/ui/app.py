@@ -724,6 +724,12 @@ class ChatApp(App):
             # would fold a half-streamed summary. Refuse; Esc cancels it (13d).
             await self._breadcrumb("Draft in progress — Esc cancels it first.")
             return
+        if self._stream_worker is not None and not self._stream_worker.is_finished:
+            # H2: a live turn is in flight (its ctx_hash isn't stamped until the
+            # first tick). Refuse at the UI layer — mirrors action_expand — rather
+            # than relying on the core ValueError catch below (task 28).
+            await self._breadcrumb("Cannot commit while a response is streaming.")
+            return
         if not editor.output.strip():
             await self._breadcrumb("Write a summary before committing (Ctrl+S).")
             return

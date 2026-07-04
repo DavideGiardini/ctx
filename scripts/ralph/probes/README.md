@@ -19,11 +19,12 @@ Contents and their contract:
 - `test_adversarial_core.py` — 15 core probes documenting **current** behavior
   (all green). Most pin invariants that already hold (oracle round-trips, seq
   counting, migration idempotence, rewind guards …) and can be mined for extra
-  `tests/` coverage. Two of them pin **bugs** and must be INVERTED when fixed:
-  - `test_h2_window_between_submit_and_first_tick` (task 28) — asserts the
-    submit→first-tick window currently ACCEPTS events; the fix makes it raise.
+  `tests/` coverage. One of them pins a **bug** and must be INVERTED when fixed:
   - `test_dangling_active_leaf_fallback_can_put_k_on_tip` (parking lot, no task) —
     documents the corrupt-DB fallback hazard in `resume_conversation`.
+  (Task 28's `test_h2_window_between_submit_and_first_tick` was inverted into
+  `tests/test_commit_compression.py::test_events_rejected_in_submit_to_first_tick_window`
+  on 2026-07-04 and removed from here.)
 - `bench_drift.py` — micro-benchmark behind task 32's numbers (1.6 ms @ 50 turns,
   23 ms @ 200, 151 ms @ 500 per `_node_drift`-style pass). Run directly with
   `uv run python scripts/ralph/probes/bench_drift.py`.

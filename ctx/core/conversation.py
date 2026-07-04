@@ -74,18 +74,22 @@ class ConversationCore:
         self._last_usage: Usage | None = None
         self._calibration: float | None = None
         self._usage_generation: int = 0
-        # True only while a turn is actively streaming (see stream()); the
-        # compression commands (H2) refuse to mutate the graph while it is set.
+        # True while a turn is in flight — from submit() (which stamps the
+        # assistant seq) through stream() completing. The compression commands
+        # (H2) refuse to mutate the graph while it is set (ADR-0016 A#3 §2).
         self._streaming: bool = False
 
     @property
     def streaming(self) -> bool:
-        """Whether a turn is currently streaming through ``stream()``.
+        """Whether a turn is currently in flight.
 
-        ``True`` from the moment the stream begins yielding until the stream
-        completes, errors, or is cancelled (cleared in a ``finally``). The
-        compression commands read it to enforce the H2 invariant: no
-        commit/expand/draft may mutate the graph mid-turn.
+        ``True`` from ``submit()`` (which stamps the assistant node's
+        ``created_seq`` but does not yet build its context) until the turn's
+        ``stream()`` completes, errors, or is cancelled (cleared in a
+        ``finally``). The compression commands read it to enforce the H2
+        invariant: no commit/expand/draft may mutate the graph mid-turn, so no
+        event can land in the ``submit()``→first-tick window and fold into what
+        the model actually saw while reconstruction says it didn't (A#3 §2).
         """
         return self._streaming
 
@@ -334,6 +338,13 @@ class ConversationCore:
 
         assistant_node = Node.assistant(self.conversation_id)
         self._append_to_line(assistant_node)
+        # AIDEV-NOTE: the turn is in flight from here — its created_seq is stamped
+        # but its context/ctx_hash isn't built until stream()'s first tick. Flag it
+        # now so no compression event can land in that window (else it folds into
+        # what was actually sent while seq-based reconstruction says it didn't —
+        # ADR-0016 A#3 §2, task 28). stream()'s finally clears it; new/resume reset
+        # it for the tests-only "submit never followed by stream()" path.
+        self._streaming = True
         return user_node, assistant_node
 
     def set_model(self, model: str) -> Node:
@@ -364,6 +375,7 @@ class ConversationCore:
         self.conversation_id = ""
         self.conversation_title = ""
         self.model = self._default_model
+        self._streaming = False  # a fresh conversation abandons any in-flight turn
         return Node.system("Started a new conversation.")
 
     def resume_conversation(self, conv_id: str) -> list[Node]:
@@ -375,6 +387,7 @@ class ConversationCore:
         # falling back to the last node by load order if it's absent/dangling
         # (a pre-migration row the backfill left NULL).
         self._graph = {node.id: node for node in loaded}
+        self._streaming = False  # a resumed conversation has no turn in flight
         self._active_leaf_id = self._storage.get_active_leaf(conv_id)
         if self._active_leaf_id is None or self._active_leaf_id not in self._graph:
             self._active_leaf_id = loaded[-1].id

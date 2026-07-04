@@ -229,6 +229,43 @@ async def test_streaming_guard_rejects_during_live_stream(repo, test_provider, w
     assert not _has_compression(core)
 
 
+async def test_events_rejected_in_submit_to_first_tick_window(
+    repo, test_provider, workspace
+):
+    # Task 28 / ADR-0016 A#3 §2: the turn is in flight from submit(), before the
+    # first stream tick builds its context. commit/expand/draft must all raise in
+    # that window — else the event folds into what the model actually saw while
+    # seq-based reconstruction says it didn't, poisoning the ctx_hash oracle.
+    core = _make_core(repo, test_provider, workspace)
+    u1, a1, u2, a2 = await _build_line(core)
+    k = core.commit_compression(u1.id, a1.id, "First turn summary.")
+    assert core.streaming is False  # drained turns + a pure commit: not in flight
+
+    # Open the window: submit a new turn but never tick its stream.
+    _u3, a3 = core.submit("A third question.")
+    assert core.streaming is True
+
+    view_before = _ids(core)
+    with pytest.raises(ValueError):
+        core.commit_compression(u2.id, a2.id, "Blocked in the window.")
+    with pytest.raises(ValueError):
+        core.expand_compression(k.id)  # K is active — only the window blocks it
+    with pytest.raises(ValueError):
+        [t async for t in core.draft_compression(u2.id, a2.id)]
+
+    # Nothing mutated: same view, still exactly one K, no E appended.
+    assert _ids(core) == view_before
+    assert sum(1 for n in core.current_view() if n.node_type == "compression") == 1
+    assert all(n.node_type != "expand" for n in core.all_nodes())
+
+    # Draining the turn closes the window: the same commit now succeeds.
+    async for _ in core.stream(a3):
+        pass
+    assert core.streaming is False
+    core.commit_compression(u2.id, a2.id, "Now allowed.")
+    assert sum(1 for n in core.current_view() if n.node_type == "compression") == 2
+
+
 async def test_unknown_start_id_rejected(repo, test_provider, workspace):
     # C101
     core = _make_core(repo, test_provider, workspace)

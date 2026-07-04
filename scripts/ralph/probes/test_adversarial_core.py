@@ -256,33 +256,6 @@ def test_h2_guards_raise_while_streaming(tmp_path):
     asyncio.run(scenario())
 
 
-def test_h2_window_between_submit_and_first_tick(tmp_path):
-    """Document the submit()->first-tick window: core.streaming is False."""
-
-    async def scenario():
-        core, _ = _core(tmp_path)
-        core._provider = TestProvider(["ok"])
-        a1 = await _turn(core, "one")
-        u2, a2 = core.submit("two")
-        # generator created but NOT ticked: the H2 flag is still down
-        agen = core.stream(a2)
-        assert core.streaming is False
-        view_u1 = core.current_view()[0]
-        k = core.commit_compression(view_u1.id, a1.id, "s")  # accepted!
-        assert k.created_seq > a2.created_seq
-        # first tick builds context WITH K folded (now-view)...
-        async for _ in agen:
-            pass
-        # ...but reconstruction says K did not apply to a2 -> oracle mismatch
-        recon = context_at_generation(core.all_nodes(), a2.id)
-        got = hash_context(build_context(recon, core.read_file))
-        assert got != a2.meta["ctx_hash"], (
-            "if equal, the window closed at core level (good)"
-        )
-
-    asyncio.run(scenario())
-
-
 def test_migration_backfill_per_conversation_rowid(tmp_path):
     import sqlite3
 

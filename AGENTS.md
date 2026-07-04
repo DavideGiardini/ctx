@@ -64,8 +64,10 @@ reach end users (ADR 0012). See `docs/decisions/` for *why* it's shaped this way
   state and commits nothing (Q3). `folded_children(k_id)` returns a K's folded originals
   ordered by `K.meta["range"]` (`[]` for an unknown/non-compression id) — the children are
   off-view, so this is how the UI reaches them for the committed-K inspector (Q8). The
-  read-only `streaming` flag (set for the duration of
-  `stream()`) gates all three compression ops (H2). Takes a `Provider`, a
+  read-only `streaming` flag (set in `submit()` when the turn's `created_seq` is
+  stamped, cleared in `stream()`'s `finally`; reset on `new`/`resume`) gates all
+  three compression ops across the whole in-flight window, closing the
+  submit→first-tick gap (H2, ADR-0016 A#3 §2, task 28). Takes a `Provider`, a
   `StoragePort`, and a `Workspace` by injection (ADR 0001). Exposes a `read_file`
   property — the very loader it hands `build_context` — so the UI's token
   accounting renders nodes exactly as the model sees them without reaching past

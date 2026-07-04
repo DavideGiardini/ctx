@@ -95,7 +95,9 @@ async def test_commit_while_streaming_breadcrumbs_and_stays_responsive(repo, wor
 
         assert _compression_nodes(app) == []
         assert app.describe_state()["compression_editor"]["open"] is True
-        assert _has_system_breadcrumb(app, "stream")
+        # The refusal comes from the explicit UI-layer stream guard (task 28),
+        # not the core ValueError catch — assert its exact message.
+        assert _has_system_breadcrumb(app, "cannot commit while a response is streaming")
 
         # Let the blocked stream finish so teardown does not hang.
         gate.set()

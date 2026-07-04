@@ -1735,11 +1735,13 @@ def test_c98_range_only_folds_without_pointer(
 
 # C99 — expand + re-compress an overlapping range: K′ folds, the expanded K
 # never reappears (its E deactivates it) and stays in the graph (never deleted).
-def test_c99_expand_then_recompress_overlap(repo, test_provider, workspace):
+async def test_c99_expand_then_recompress_overlap(repo, test_provider, workspace):
     core = ConversationCore(repo, test_provider(["hi"]), workspace)
     core.setup()
-    core.submit("First question")
+    _u1, a1 = core.submit("First question")
+    await _collect(core.stream(a1))
     u2, a2 = core.submit("Second question")
+    await _collect(core.stream(a2))
     view = core.current_view()
     k = core.commit_compression(view[0].id, view[-1].id, "whole summary")
     core.expand_compression(k.id)
@@ -1763,14 +1765,16 @@ def test_c99_expand_then_recompress_overlap(repo, test_provider, workspace):
 # C91 — compress the whole tip → save → resume → the stored title survives a
 # further persist (the folded view has no user turn, so the old derive-from-view
 # path blanked it and the next persist() overwrote the stored title for good).
-def test_c91_resume_whole_tip_folded_keeps_stored_title(
+async def test_c91_resume_whole_tip_folded_keeps_stored_title(
     repo, test_provider, workspace
 ):
     original = "The original opening question"
     core = ConversationCore(repo, test_provider(["hi"]), workspace)
     core.setup()
-    core.submit(original)
-    core.submit("A follow-up question")
+    _u1, a1 = core.submit(original)
+    await _collect(core.stream(a1))
+    _u2, a2 = core.submit("A follow-up question")
+    await _collect(core.stream(a2))
     cid = core.conversation_id
     view = core.current_view()
     core.commit_compression(view[0].id, view[-1].id, "summary of everything")
@@ -1788,13 +1792,15 @@ def test_c91_resume_whole_tip_folded_keeps_stored_title(
 
 # C92 — when the stored title IS empty, resume derives from the raw line, not
 # the folded (user-less) view. Whole conversation folded, stored title blanked.
-def test_c92_resume_empty_stored_title_derives_from_raw_line(
+async def test_c92_resume_empty_stored_title_derives_from_raw_line(
     repo, test_provider, workspace
 ):
     core = ConversationCore(repo, test_provider(["hi"]), workspace)
     core.setup()
-    core.submit("Raw line first user turn")
-    core.submit("Second turn")
+    _u1, a1 = core.submit("Raw line first user turn")
+    await _collect(core.stream(a1))
+    _u2, a2 = core.submit("Second turn")
+    await _collect(core.stream(a2))
     cid = core.conversation_id
     view = core.current_view()
     core.commit_compression(view[0].id, view[-1].id, "summary")
@@ -1839,11 +1845,13 @@ def test_c93_resume_partly_folded_derives_first_raw_user(
 # C94 — rewind(K.id) raises and leaves the graph unmutated. K is in the view but
 # off the prev_id line; rewinding to it would collapse the view to [K] and land K
 # on the line on the next submit (Q1).
-def test_c94_rewind_to_compression_node_raises(repo, test_provider, workspace):
+async def test_c94_rewind_to_compression_node_raises(repo, test_provider, workspace):
     core = ConversationCore(repo, test_provider(["hi"]), workspace)
     core.setup()
-    core.submit("First question")
-    core.submit("Second question")
+    _u1, a1 = core.submit("First question")
+    await _collect(core.stream(a1))
+    _u2, a2 = core.submit("Second question")
+    await _collect(core.stream(a2))
     view = core.current_view()
     k = core.commit_compression(view[0].id, view[-1].id, "summary")
     leaf_before = core._active_leaf_id
@@ -1858,11 +1866,13 @@ def test_c94_rewind_to_compression_node_raises(repo, test_provider, workspace):
 
 # C95 — rewind to a folded child raises (folded children are on the raw line but
 # rejected for now; guards the enumeration fold clause in rewind).
-def test_c95_rewind_to_folded_child_raises(repo, test_provider, workspace):
+async def test_c95_rewind_to_folded_child_raises(repo, test_provider, workspace):
     core = ConversationCore(repo, test_provider(["hi"]), workspace)
     core.setup()
     u1, a1 = core.submit("First question")
-    core.submit("Second question")
+    await _collect(core.stream(a1))
+    _u2, a2 = core.submit("Second question")
+    await _collect(core.stream(a2))
     view = core.current_view()
     core.commit_compression(view[0].id, view[-1].id, "summary")
     leaf_before = core._active_leaf_id
@@ -1873,11 +1883,13 @@ def test_c95_rewind_to_folded_child_raises(repo, test_provider, workspace):
 
 # C96 — rewind(E.id) raises: an expand event node is off the line (prev_id=None)
 # and never a rewind target.
-def test_c96_rewind_to_expand_event_raises(repo, test_provider, workspace):
+async def test_c96_rewind_to_expand_event_raises(repo, test_provider, workspace):
     core = ConversationCore(repo, test_provider(["hi"]), workspace)
     core.setup()
-    core.submit("First question")
-    core.submit("Second question")
+    _u1, a1 = core.submit("First question")
+    await _collect(core.stream(a1))
+    _u2, a2 = core.submit("Second question")
+    await _collect(core.stream(a2))
     view = core.current_view()
     k = core.commit_compression(view[0].id, view[-1].id, "summary")
     core.expand_compression(k.id)

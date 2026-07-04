@@ -291,6 +291,16 @@ node (its content is not yet immutable). This is the single-user analogue of Dat
 serialized transactor: the monotonic counter buys correctness only if events and turns are
 totally ordered against each other.
 
+*Implementation (task 28):* the "in flight" window is realized by setting the core's
+`_streaming` flag in `submit()` — the moment the assistant node's `created_seq` is stamped —
+not at the first stream tick (which lags `submit()` by an unbounded event-loop gap). The
+flag clears in `stream()`'s `finally`; `new_conversation()`/`resume_conversation()` reset it
+so a `submit()` never followed by a `stream()` (a tests-only path) can't leak a stuck flag
+into the next conversation. `commit`/`expand`/`draft` all consult it, so all three are
+rejected across the whole window. The UI adds a parallel `_stream_worker`-liveness refusal in
+`action_commit_compression` so `Ctrl+S` mid-turn breadcrumbs instead of relying on the core
+`ValueError` catch.
+
 ### 3. Resolution reads events only; `compressed_into` is never read at runtime
 Amendment #2 kept child pointers as a "fast now-view convenience." That leaves two
 bookkeeping systems answering "is B folded?" — pointers and events — which every mutation
