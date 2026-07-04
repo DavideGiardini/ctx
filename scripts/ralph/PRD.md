@@ -766,7 +766,7 @@ become new `- [ ]` tasks" instruction. Not blockers for the Sprint 3 feature set
       decision; `Ctrl+o` from a diff restores the pre-diff cursor + inspector in
       every reachable context. `scripts/check.sh` green.
 
-- [ ] **31. UI: gate the remaining direct `add_node` appenders (13h#2 completion)**
+- [x] **31. UI: gate the remaining direct `add_node` appenders (13h#2 completion)**
       _(deps: 12; review finding, LOW-MEDIUM — probe-confirmed)_ — 13h#2 gated
       `_mount_node` for breadcrumb/connectivity/submit, but three command handlers
       still call `MessageList.add_node` directly: `_handle_model_command`

@@ -2224,3 +2224,36 @@ Git history is the source of truth for *what changed*; this file captures the
   (AGENTS.md limit a), so the new Pilot tests are the UI acceptance floor.
 - Gotcha: the review probe file `scripts/ralph/probes/test_review_hazards.py` is
   KEPT — task 31 still needs its `test_model_command_mounts_into_dive_frame`.
+
+## 2026-07-04 — Task 31: gate the remaining direct add_node appenders (13h#2 completion)
+
+- Fix: routed the three command handlers that still appended widgets directly
+  through the dive-gated `_mount_node` (which is a no-op while `_deep_dive_stack`
+  is non-empty and lets exit-dive rebuild self-heal):
+  * `_handle_model_command` (both query + switch forms) — was `add_node`.
+  * `_handle_resume_command`'s no-conversations branch — was `add_node`.
+  * `_handle_include_command` (no-files node + the per-file loop) — was `add_node`;
+    dropped the now-unused local `message_list`.
+- Sweep `grep -n add_node ctx/ui/app.py` now shows only 4 sites, all gated:
+  `_rebuild_message_list` (778, clear-then-rebuild from `_visible_nodes()`),
+  `_mount_node` itself (791, the gate), `_handle_new_command` (1312) and
+  `_handle_resume_command`'s full path (1337) — the latter two both call
+  `_reset_transient_ui()` (which `.clear()`s the dive stack, app.py:670) before
+  clearing children and rebuilding, so no mount lands in a live dive frame.
+- Test (Pilot, authored directly — UI layer): promoted the throwaway probe
+  `test_model_command_mounts_into_dive_frame` into
+  `tests/test_app_deep_dive_hardening.py::test_model_command_gated_out_of_dive_then_surfaces`.
+  Per the acceptance it uses the **switch** form `/model gpt-test` (not the probe's
+  query form), drains the connectivity worker too, asserts the dive `MessageWidget`
+  count is unchanged mid-dive, then asserts the "Model set to: gpt-test" breadcrumb
+  is visible in the live view after `ctrl+o`.
+- Deleted the throwaway `scripts/ralph/probes/test_review_hazards.py`: both its
+  probes are now promoted (`test_diff_can_open_inside_deep_dive` → task 30's
+  `test_diff_does_not_open_inside_deep_dive`; the model one → this task). The
+  probes dir is NOT in pytest `testpaths` (["tests"]), so it was never collected.
+  `bench_drift.py` and `test_adversarial_core.py` remain (bench_drift feeds task 32).
+- Verification: `bash scripts/check.sh` green (ruff + mypy + 651 pytest, was 650).
+  No qa-tester: the in-process MCP harness can't see this iteration's app.py edits
+  (AGENTS.md limit a), so the new Pilot test is the UI acceptance floor.
+- Gotcha: `_mount_node` re-queries `MessageList` per call, so the include loop now
+  does one query per file (was hoisted). Negligible; kept for a single gated seam.
