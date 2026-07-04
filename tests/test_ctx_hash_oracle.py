@@ -21,7 +21,7 @@ after (append-only graph).
 
 from ctx.core.context import build_context
 from ctx.core.conversation import ConversationCore
-from ctx.core.reconstruction import context_at_generation, hash_context
+from ctx.core.reconstruction import context_at_generation, has_drift, hash_context
 
 
 def _make_core(repo, test_provider, workspace, tokens=None):
@@ -154,3 +154,62 @@ async def test_pre_and_post_compression_turns_both_verify(
     recon3 = context_at_generation(all_nodes, a3.id)
     assert any(n.node_type == "compression" for n in recon3)
     assert hash_context(build_context(recon3, read_file)) == a3.meta["ctx_hash"]
+
+
+# ---------------------------------------------------------------------------
+# Middle compression (task 22 enabled it; task 29 extends the oracle to it).
+#
+# The tip-compression cases above are *non-discriminating* against a bug where
+# ``context_at_generation`` returns the now-prefix: for every checked turn there,
+# its gen-view already equals its now-view (a tip K folds only material at or
+# after the pre-K turns, never inside an earlier checked turn's strict-ancestor
+# prefix). A MIDDLE compression is the discriminating case: K folds a range that
+# lies strictly inside a *later already-generated* turn's ancestor prefix, so
+# that turn's gen-view (verbatim, K did not exist yet) differs from its now-view
+# (folded). Only a correct as-of reconstruction hashes back to the stamp.
+# ---------------------------------------------------------------------------
+
+async def test_oracle_holds_for_middle_compression(repo, test_provider, workspace):
+    core = _make_core(repo, test_provider, workspace)
+    a1 = await _turn(core, "one")
+    a2 = await _turn(core, "two")
+    # Compress the MIDDLE range [u1, a1] — not the tip a2 — into K.
+    core.commit_compression(a1.prev_id, a1.id, "one summary")
+    await _turn(core, "three")  # generated on top of the folded view
+    _check_oracle(core)
+
+    # a2 is the discriminating turn: it was generated verbatim ([u1,a1,u2]) before
+    # K existed, yet its now-view folds [u1,a1] into K ([K,u2]). gen-view != now.
+    all_nodes = core._all_nodes()
+    assert has_drift(all_nodes, a2.id)
+    recon2 = context_at_generation(all_nodes, a2.id)
+    assert not any(n.node_type == "compression" for n in recon2)
+
+
+async def test_oracle_holds_through_middle_expand_recompress(
+    repo, test_provider, workspace
+):
+    core = _make_core(repo, test_provider, workspace)
+    a1 = await _turn(core, "one")
+    a2 = await _turn(core, "two")
+
+    # 1. compress the middle range [u1, a1] into K
+    k = core.commit_compression(a1.prev_id, a1.id, "one summary")
+    assert any(n.node_type == "compression" for n in core.current_view())
+    _check_oracle(core)
+
+    # 2. expand K (non-destructive undo via an E event) — view is verbatim again
+    core.expand_compression(k.id)
+    assert not any(n.node_type == "compression" for n in core.current_view())
+    _check_oracle(core)
+
+    # 3. re-compress the same middle range into a fresh K'
+    core.commit_compression(a1.prev_id, a1.id, "one summary v2")
+    a3 = await _turn(core, "three")
+    _check_oracle(core)
+
+    # a2 still discriminates after the expand->re-compress churn: gen-view verbatim,
+    # now-view folded under K' (K is expanded, K' applies).
+    all_nodes = core._all_nodes()
+    assert has_drift(all_nodes, a2.id)
+    assert len({a1.id, a2.id, a3.id}) == 3

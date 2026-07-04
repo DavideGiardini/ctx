@@ -723,7 +723,7 @@ become new `- [ ]` tasks" instruction. Not blockers for the Sprint 3 feature set
       during a live turn breadcrumbs via the UI-layer guard (not the exception
       path). `scripts/check.sh` green.
 
-- [ ] **29. Test: extend the ctx_hash oracle to middle compression (and correct the
+- [x] **29. Test: extend the ctx_hash oracle to middle compression (and correct the
       task-22 record)** _(deps: 17, 22; review finding — the one PROGRESS claim
       that did not survive audit)_ — Task 22's acceptance ("extend the task-17
       oracle suite with a middle sequence … extended oracle green") is checked but

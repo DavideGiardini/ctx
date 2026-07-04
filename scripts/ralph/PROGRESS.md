@@ -2155,3 +2155,35 @@ Git history is the source of truth for *what changed*; this file captures the
   mutates the graph (commit/expand/draft) OR asserts `streaming is False` right
   after submit must drain the turn first. `draft_compression` still does NOT set
   `_streaming` (parking-lot item (f)) — task 28 scoped only the submit→tick window.
+
+## 2026-07-04 — Task 29: extend the ctx_hash oracle to middle compression
+
+- Gap (review finding): task 22's PROGRESS claimed the task-17 oracle suite was
+  extended with a middle sequence, but `tests/test_ctx_hash_oracle.py` only ever
+  had tip-ending compression ranges. Every existing checked turn was
+  *non-discriminating* against a bug where `context_at_generation` returns the
+  now-prefix, because a tip K never folds material inside an earlier
+  already-generated turn's strict-ancestor prefix, so gen-view == now-view for
+  every checked turn.
+- **CORRECTION to the 2026-07-04 task-22 PROGRESS entry:** the sentence claiming
+  the ctx_hash oracle suite was extended with a middle sequence was inaccurate —
+  no such case existed until this task. The task-22 *code* (middle compression,
+  deleted 3a tip guard) was correct and stands; only its test-coverage claim was
+  overstated. This entry closes that gap.
+- Added two differential-oracle cases (authored against the public core API, not
+  the blind flow — this file is a cross-derivation oracle by design):
+  * `test_oracle_holds_for_middle_compression`: U1,A1,U2,A2 → compress the MIDDLE
+    range [u1,a1] into K → U3,A3 → `_check_oracle` over ALL assistant turns. A2 is
+    the discriminating turn — generated verbatim ([u1,a1,u2]) before K existed, but
+    its now-view folds [u1,a1] into K ([K,u2]); asserted via `has_drift`.
+  * `test_oracle_holds_through_middle_expand_recompress`: middle compress → expand
+    (E event) → re-compress the same range into K' → U3,A3, `_check_oracle` at each
+    stage; A2 still discriminates (K expanded, K' applies).
+- **Discrimination proof (acceptance):** temporarily made `context_at_generation`
+  `return now_prefix(...)` — both new cases (and one existing tip case) went RED;
+  reverted the mutant (NOT committed; `git diff ctx/core/reconstruction.py` empty).
+- Verification: `bash scripts/check.sh` green (ruff + mypy + 648 pytest, was 646).
+  No qa-tester — pure core-logic test task, no UI/runtime surface.
+- Gotcha: middle-compression discrimination requires a checked turn whose K folds
+  *inside its strict-ancestor prefix* (gen-view != now-view). Tip-K cases can't do
+  this — keep at least one middle case if the oracle is ever pruned.
