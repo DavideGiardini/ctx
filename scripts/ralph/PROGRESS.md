@@ -2011,3 +2011,42 @@ Git history is the source of truth for *what changed*; this file captures the
   MCP harness, and (b) the harness can't judge layout anyway — the region test IS
   the verification (same rationale as tasks 19-24).
 - Remaining Phase 3c: task 26 (snapshot.py::render surfacing Sprint 3 fields).
+
+## 2026-07-04 — Task 26: surface Sprint 3 state in snapshot.py::render() (FINAL)
+
+- Extended the pure QA renderer (`tools/agent/snapshot.py`) to emit the five
+  `describe_state()` fields it dropped, so agents read structured state instead of
+  inferring from screenshots (AGENTS.md limit b):
+  1. per-node `drift` → a `Δ` glyph appended AFTER the file/weight suffixes (last
+     non-space char on the node line); omitted when drift false/absent.
+  2. `context_gauge {pct, approximate}` → a `ctx: <marker><pct>%` line; `~` marks
+     approximate, `?` is the neutral placeholder when pct is None; omitted when the
+     key is absent.
+  3. `range_selection` → a byte-exact `range=[i,j,k]` segment on the nodes header
+     (mirrors `selected=[…]`, which is driven by top-level `selected_index`, NOT the
+     per-node `selected` flag — the blind author guessed `selected=True`; corrected).
+  4. `deep_dive.breadcrumb` → a `nav: a > b > c` line, OMITTED at the lone root
+     `["Chat"]` / empty / absent (noise rule).
+  5. `diff_view` → a `diff: <n> regions [warn] [drill]` line iff `open`; region count
+     = len(regions), warn/drill indicators toggle with their flags.
+- All new top-level lines sit before the `nodes=` header; each omitted when its data
+  isn't meaningful, so the fixed line order + cheap-diff property (C24) hold. The 618
+  existing snapshot/app tests stayed green throughout.
+- Tests: code-blind flow. test-spec-author wrote contract CS1–CS26
+  (`tests/specs/snapshot-sprint3.md`, additive to snapshot.md) + 23 cases
+  (`tests/test_snapshot_sprint3.py`) from intent only. Confirmed red (15 behavior
+  fails, 8 omit-cases already green, clean collection) before implementing.
+  TWO blind-wiring fixes (test-infra carve-out, NOT weakening): CS4 used a `weight`
+  key → corrected to `weight_pct` (the real key/int); CS16 used per-node
+  `selected=True` to drive the header → corrected to top-level `selected_index=0`.
+  Spec items CS4/CS16 updated to match.
+- Verification: `scripts/check.sh` green (641 passed; was 618). ruff+mypy clean.
+  NO qa-tester: `render()` is a pure presentation fn in `tools/agent` (outside the
+  shippable ctx package, ADR 0012) with no UI/runtime surface to drive — the
+  code-blind unit tests + green gate ARE the verification (step 7 carve-out).
+- Kept the Sprint 3 contract as a separate `snapshot-sprint3.md` (self-labelled
+  "additive to snapshot.md") rather than folding it in — avoids reflowing the
+  existing mutmut-survivor analysis section; the new test file cites it directly.
+
+### PRD COMPLETE
+- All 26 tasks are now `- [x]`. This was the final Sprint 3 task.

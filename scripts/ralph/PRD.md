@@ -649,7 +649,7 @@ become new `- [ ]` tasks" instruction. Not blockers for the Sprint 3 feature set
       _Acceptance:_ real-vs-artifact determined; if real, fixed + regression test;
       `scripts/check.sh` green.
 
-- [ ] **26. QA tooling: surface Sprint 3 state in `snapshot.py::render()`** _(deps: 19,
+- [x] **26. QA tooling: surface Sprint 3 state in `snapshot.py::render()`** _(deps: 19,
       20, 21)_ — `ChatApp.describe_state()` emits `drift` (per node), `diff_view`
       (`{open, regions, warning, drill}`), the deep-dive breadcrumb, `context_gauge`, and
       `range_selection`, but `tools/agent/render()` (`tools/agent/snapshot.py`) renders
