@@ -2050,3 +2050,23 @@ Git history is the source of truth for *what changed*; this file captures the
 
 ### PRD COMPLETE
 - All 26 tasks are now `- [x]`. This was the final Sprint 3 task.
+
+## 2026-07-04 — Seed: Phase 3d (post-sprint review hardening, not a task)
+- Sprint 3 (all 26 tasks) was reviewed by a three-agent adversarial pass over the
+  full `develop...feat/compression` diff: core semantics vs ADR-0016 (15 executable
+  probes), UI state machine (6 Pilot probes with real keypresses), and test
+  integrity (incl. a live mutant re-run of the task-13c claim — verified).
+- Overall verdict: the core conforms to ADR-0016 (event-only resolution, Q14 as-of
+  rule, created_seq/H6, ctx_hash oracle all held under probing); the 13a–13i
+  hardening is genuinely implemented; PROGRESS claims are trustworthy with ONE
+  exception (task 22's "extended oracle" — see task 29).
+- Filed tasks 27–32 (Phase 3d). The big two: the diff view never inherited the
+  deep-dive read-only gates (`c`/`v`/`x` act under an open diff — task 27), and
+  H2's `_streaming` flag starts one tick after `submit()` stamps the assistant
+  seq, leaving the exact window ADR-0016 A#3 §2 forbids (task 28).
+- Probe tests preserved in `scripts/ralph/probes/` (README there explains which
+  are red-by-design and which must be INVERTED when their bug is fixed). They are
+  outside the pytest gate (`testpaths=["tests"]`) but pass ruff+mypy. Promote
+  into `tests/` as tasks land; delete the directory when Phase 3d completes.
+- Gotcha: `test_review_hazards.py` currently FAILS by design — do not "fix" the
+  probes to green without fixing the app; the failing assert IS the acceptance.

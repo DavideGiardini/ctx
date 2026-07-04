@@ -663,6 +663,160 @@ become new `- [ ]` tasks" instruction. Not blockers for the Sprint 3 feature set
       is outside the shippable `ctx` package (ADR 0012). _Acceptance:_ `render()` surfaces
       each Sprint 3 field; unit tests cover them; `scripts/check.sh` green.
 
+### Phase 3d — hardening from the post-sprint review (2026-07-04)
+
+> Filed from a three-agent adversarial review of the full `develop...feat/compression`
+> diff (core semantics vs ADR-0016, UI state machine, test integrity), run after task
+> 26 completed. Probe tests preserved in `scripts/ralph/probes/` (see its README:
+> excluded from the pytest gate; `test_review_hazards.py` asserts the CORRECT behavior
+> and is currently red — promote its cases into `tests/` as each fix lands;
+> `test_adversarial_core.py` is green and documents current behavior, two of its tests
+> pin bugs and must be inverted when fixed). Tasks 27/28 are the substantive ones;
+> land 27–31 before merging `feat/compression` into develop.
+
+- [ ] **27. UI: the diff view must inherit the deep-dive read-only gates** _(deps:
+      20, 21; review finding, HIGH — probe-confirmed with real keypresses)_ — Bug:
+      `action_compress` (`ctx/ui/app.py:571`), `action_anchor_range` (`:343`), and
+      `action_expand` (`:593`) all gate on `if self._deep_dive_stack:` but never on
+      `self._diff_view`. With a diff open, focus sits on `DiffView` (not a text
+      input), so `c`/`v`/`x` bubble straight to the App bindings: `c` opens the
+      compression editor OVER the open diff and `Ctrl+S` then commits a range-of-one
+      K on the drifted turn while the diff still shows now-stale regions
+      (`MessageList.display` stays False, focus lands on the hidden list); `v` sets
+      an invisible anchor on the hidden list, making the first Esc a dead keypress
+      (the range-clear branch at `:217` precedes the diff branch at `:223` — the
+      13h#1 bug class re-introduced one layer up); `x` runs the expand handler under
+      the diff. This is exactly the illegal-transition family the 13-series
+      eliminated for deep-dive, reachable keyboard-only. Fix: extend each gate with
+      `or self._diff_view is not None` — consider one small
+      `_in_full_screen_inspection()` predicate shared by all selection/mutation
+      actions so the next full-screen view can't repeat this. _Acceptance:_ promote
+      the four red probes (`test_c_in_diff_view_opens_editor_over_diff`,
+      `test_v_in_diff_view_makes_first_esc_dead`,
+      `test_x_in_diff_view_mutates_under_diff`,
+      `test_c_in_diff_then_commit_full_damage`) into `tests/test_app_diff_view.py`
+      (real keypresses, `describe_state()` asserts) and make them green: `c`/`v`/`x`
+      in an open diff are no-ops (or breadcrumb), no editor opens, no K commits, a
+      single Esc pops the diff. `scripts/check.sh` green.
+
+- [ ] **28. Core: close the H2 submit→first-tick window; add the missing UI commit
+      guard** _(deps: none; review finding, MEDIUM latent — probe-confirmed)_ — Bug:
+      `_streaming` flips True only inside the first `__anext__` of `stream()`
+      (`ctx/core/conversation.py:631-665`), but the assistant node's `created_seq`
+      is stamped at `submit()` (`:326-337`). An event (commit/expand) landing
+      between the two is accepted: it gets `created_seq > seq(T)` yet folds into
+      the context actually sent at the first tick, so `context_at_generation(T)`
+      disagrees with `T.meta["ctx_hash"]` — the exact undetectable-direction
+      poisoning ADR-0016 A#3 §2 exists to forbid. Today only incidental UI mode
+      mechanics shield it; the hash tripwire detects but does not prevent. Fix in
+      core (record the choice + an ADR-0016 note): set `_streaming = True` in
+      `submit()` (cleared in `stream()`'s `finally`; decide how a submit never
+      followed by `stream()` unwinds — that path exists only in tests today) OR
+      reject events while the active tip is a pending empty assistant node. Also
+      the UI half the PRD's H2 note requires: `action_commit_compression`
+      (`ctx/ui/app.py:697-735`) relies solely on catching the core `ValueError` —
+      add the explicit `_stream_worker` refusal its sibling `action_expand`
+      (`:595`) already has. _Acceptance:_ INVERT the probe
+      `test_h2_window_between_submit_and_first_tick` into a `tests/` case:
+      commit/expand/draft between `submit()` and the first stream tick raise
+      `ValueError`; all existing streaming-guard tests stay green; Pilot: `Ctrl+S`
+      during a live turn breadcrumbs via the UI-layer guard (not the exception
+      path). `scripts/check.sh` green.
+
+- [ ] **29. Test: extend the ctx_hash oracle to middle compression (and correct the
+      task-22 record)** _(deps: 17, 22; review finding — the one PROGRESS claim
+      that did not survive audit)_ — Task 22's acceptance ("extend the task-17
+      oracle suite with a middle sequence … extended oracle green") is checked but
+      was never implemented: `git log --follow tests/test_ctx_hash_oracle.py` shows
+      only the task-17 commit; every compression in the oracle is a tip-ending
+      range. Middle-compression hash verification exists only for one turn in one
+      direction (`test_app_diff_view.py`'s `warning is False` on A2);
+      `test_reconstruction.py` M1–M3 assert structure, not hashes. This gap sits
+      precisely where the two independent fold implementations (`current_view()`,
+      `conversation.py:222-237`, vs `reconstruction`'s fold) could silently
+      diverge — false "reconstruction may be inexact" banners or a
+      confidently-wrong diff left pane. Fix: add middle sequences to
+      `tests/test_ctx_hash_oracle.py` — (a) U1,A1,U2,A2 → compress [U1,A1] →
+      U3,A3 → `_check_oracle` over ALL assistant turns; (b) a middle
+      expand→re-compress variant. Also note `test_pre_and_post_compression_turns_
+      both_verify` is non-discriminating against a now-view-returning
+      reconstruction (its K's range is never in a checked turn's strict-ancestor
+      prefix) — ensure at least one new case has a checked turn whose gen-view ≠
+      now-view mid-line. Append a PROGRESS correction to the task-22 entry.
+      _Acceptance:_ new oracle cases green on real code and RED under a temporary
+      local mutation making `context_at_generation` return the now-prefix (verify,
+      do not commit the mutant). `scripts/check.sh` green.
+
+- [ ] **30. UI: diff/deep-dive exclusivity + cursor restore after a nested diff**
+      _(deps: 20; review finding, MEDIUM — probe-confirmed)_ — Two related bugs.
+      (1) `_drill_selected` (`ctx/ui/app.py:416-428`) never checks
+      `_deep_dive_stack` before `_enter_diff`, but a folded FRAME assistant node
+      can drift (probe: compress [U1,A1]→K1, compress [U2,A2]→K2, dive K2, `g d`
+      on frame-A2) → a diff opens INSIDE a dive (breadcrumb `Chat › K… › Diff…`),
+      contradicting the exclusivity comment at `app.py:115-119`. (2) `_close_diff`
+      (`:520-522`) restores the cursor by membership in `core.nodes` instead of
+      `_visible_nodes()` — the frame node isn't in `core.nodes`, so popping the
+      diff wipes cursor + inspector mid-dive. First DECIDE: is diff-inside-dive a
+      legitimate stack level (the "one navigation family" reading) or forbidden?
+      If legitimate: fix `_close_diff` to restore via `_visible_nodes()` and keep
+      the breadcrumb coherent. If forbidden: gate `_drill_selected` on the dive
+      stack (breadcrumb "exit deep-dive first") — then (2) still needs the
+      `_visible_nodes()` fix or a proof it's unreachable. Record the decision.
+      _Acceptance:_ promote `test_diff_can_open_inside_deep_dive` per the
+      decision; `Ctrl+o` from a diff restores the pre-diff cursor + inspector in
+      every reachable context. `scripts/check.sh` green.
+
+- [ ] **31. UI: gate the remaining direct `add_node` appenders (13h#2 completion)**
+      _(deps: 12; review finding, LOW-MEDIUM — probe-confirmed)_ — 13h#2 gated
+      `_mount_node` for breadcrumb/connectivity/submit, but three command handlers
+      still call `MessageList.add_node` directly: `_handle_model_command`
+      (`ctx/ui/app.py:1268`), `_handle_resume_command`'s no-conversations branch
+      (`:1299`), and `_handle_include_command` (`:1325`, `:1333-1335`). Probe:
+      `/model` while deep-diving mounts its reply widget inside the read-only dive
+      frame (widget count 2→3), unreachable by the cursor until the exit-dive
+      rebuild self-heals it. Reachable via the mouse-focus seam 13f/13h documented.
+      Fix: route all three through `_mount_node` (or the same dive/diff gate).
+      _Acceptance:_ promote `test_model_command_mounts_into_dive_frame`: while
+      diving, `/model x` leaves the dive widget count unchanged; after exiting the
+      dive the breadcrumb is visible in the live view. Sweep `grep -n
+      "add_node" ctx/ui/app.py` — every call site is gated. `scripts/check.sh`
+      green.
+
+- [ ] **32. Perf: cache the per-refresh drift computation** _(deps: 19; review
+      finding, LOW-MEDIUM — measured)_ — `_node_drift` (`ctx/ui/app.py:962-975`)
+      calls `reconstruction.has_drift` per assistant node, and each call re-indexes
+      and re-folds the whole graph: measured **1.6 ms @ 50 turns, 23 ms @ 200,
+      151 ms @ 500** per full pass (`scripts/ralph/probes/bench_drift.py`) —
+      recomputed on every `_refresh_token_ui` (submit, stream-complete, breadcrumb,
+      commit) AND independently in every `describe_state()`. Extrapolates to
+      ~600 ms of jank per event at 1000 turns. Drift inputs change only when a
+      node/K/E enters the graph or the config flag flips, so cache the per-node
+      result in the UI layer (e.g. keyed on max `created_seq` + node count +
+      `show_context_drift`; invalidate in `_refresh_token_ui`) — keep
+      `ctx/core/reconstruction.py` pure. _Acceptance:_ existing drift/diff tests
+      green unchanged; a unit test proves the cache (monkeypatch-count
+      `reconstruction.has_drift`: two consecutive `describe_state()` calls with no
+      graph change → no recompute; a new commit → recompute); bench shows the
+      steady-state pass is O(1) post-cache. `scripts/check.sh` green.
+
+> **Review items deliberately NOT filed as tasks** (recorded so they aren't lost;
+> pick up opportunistically or in S4 planning): (a) spec files lack entries for
+> `diff_regions`/`reconstruction_warning` (tested in `test_reconstruction.py`
+> D1–D4/W1–W4 but un-specced — fold into whichever task next touches
+> `tests/specs/reconstruction*.md`); (b) `/new`/`/resume` never cancel a live
+> `_stream_worker` (pre-existing, predates the sprint; orphan stream keeps
+> `core.streaming` True in the new conversation until it drains); (c) blank
+> editor prompt falls back to the shipped `DEFAULT_COMPRESSION_PROMPT` constant,
+> not the user's configured `compression.default_prompt` (13i's letter vs Q13's
+> spirit — S7 assistant config is the natural home for resolving it);
+> (d) `expand_compression` reads `k.meta["range"]` unguarded (KeyError on a
+> corrupt K; every other range read uses `.get`); (e) the dangling
+> `active_leaf_id` fallback can select an off-line K as tip on a corrupt DB
+> (probe `test_dangling_active_leaf_fallback_can_put_k_on_tip`); (f) coverage
+> holes noted by the audit: resume-after-K/E seq continuity, missing-ctx_hash
+> banner Pilot on a migrated legacy DB, graph mutation during a live draft
+> (`draft_compression` doesn't set `_streaming` — revisit with task 28).
+
 ## Out of scope
 - **Nested compression** (compressing a range containing a K) — Q7: the flat guard
   stays; the breadcrumb stack is built general but depth stays 1. Post-3b follow-on.
