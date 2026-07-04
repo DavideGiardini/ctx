@@ -2104,3 +2104,54 @@ Git history is the source of truth for *what changed*; this file captures the
   not "fix" them to green without their app fix. `_in_full_screen_inspection()`
   is now the canonical read-only gate; reuse it for any new selection/mutation
   action rather than re-checking the stack/diff by hand.
+
+## 2026-07-04 — Task 28: close the H2 submit→first-tick window + UI commit guard
+
+- Bug: `_streaming` flipped True only at `stream()`'s first `__anext__`
+  (`conversation.py`), but the assistant node's `created_seq` is stamped earlier,
+  in `submit()`. A commit/expand/draft landing in that event-loop gap was accepted
+  — it gets `created_seq > seq(T)` yet folds into the context actually sent at the
+  first tick, so `context_at_generation(T)` disagrees with `T.meta["ctx_hash"]`
+  (the undetectable-direction poisoning ADR-0016 A#3 §2 forbids).
+- **Decision (Option A, per the PRD's first choice):** set `self._streaming = True`
+  at the end of `submit()` — the turn is in flight from the moment its seq is
+  stamped. `stream()`'s `finally` clears it (unchanged). Chose A over Option B
+  (pending-tip detection) because it's the ADR's literal "a turn is in flight"
+  model, reuses the *single* `streaming` guard that `commit`/`expand`/`draft`
+  already consult (all three now reject across the whole window), and the UI never
+  reads `core.streaming` so there's zero UI regression.
+- **Unwind of the "submit never followed by stream()" path** (tests-only today):
+  `new_conversation()` and `resume_conversation()` reset `_streaming = False` — a
+  fresh/switched conversation abandons any orphaned in-flight turn, so a stuck flag
+  can't leak. Recorded in an ADR-0016 A#3 §2 implementation note + AGENTS.md.
+- UI half: `action_commit_compression` (`ctx/ui/app.py`) now refuses `Ctrl+S`
+  while `_stream_worker` is live via an explicit check (mirrors `action_expand`),
+  breadcrumbing "Cannot commit while a response is streaming." instead of relying
+  on the core `ValueError` catch below it.
+- Tests (no code-blind flow — no new interface; the contract was pinned exactly by
+  ADR-0016 A#3 §2 + the inverted probe):
+  * Inverted the probe `test_h2_window_between_submit_and_first_tick` into
+    `tests/test_commit_compression.py::test_events_rejected_in_submit_to_first_tick_window`:
+    after a bare `submit()`, `streaming is True` and commit/expand/draft on an
+    earlier already-streamed range all raise `ValueError`, nothing mutates, and the
+    same commit succeeds once the turn is drained (proves it's the window, not a
+    permanent lock). Removed the probe from `test_adversarial_core.py` + README.
+  * Tightened `test_app_commit_failures.py`'s streaming-breadcrumb assertion to the
+    exact UI-guard message (locks "via the UI guard, not the core exception").
+- **Deliberate test-infra adaptation (NOT weakening):** six `c9x` setup-only tests
+  in `tests/test_conversation.py` (C91/C92/C94/C95/C96/C99) used `submit()` twice
+  *without streaming* purely to build settled graph state, then compress/rewind/
+  expand. With `submit()` now correctly marking in-flight, that setup left the core
+  streaming and the compress/rewind raised. Fix: made them `async` and drain each
+  turn (`await _collect(core.stream(a))`) like `_build_line`/real usage do — all
+  assertions unchanged. These are the C81–C90-family "build state directly" tests
+  the PRD flagged as representation-coupled; the change is setup ceremony, not the
+  contract.
+- Verification: `bash scripts/check.sh` green (ruff + mypy + 646 pytest, was 640).
+  No qa-tester: the in-process MCP harness can't see this iteration's edits
+  (AGENTS.md limit a), so the updated Pilot test is the UI acceptance floor.
+- Gotcha for future iterations: `core.streaming` is now True from `submit()`, not
+  just during token flow. Any NEW test that submits without streaming and then
+  mutates the graph (commit/expand/draft) OR asserts `streaming is False` right
+  after submit must drain the turn first. `draft_compression` still does NOT set
+  `_streaming` (parking-lot item (f)) — task 28 scoped only the submit→tick window.

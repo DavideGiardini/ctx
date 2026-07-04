@@ -699,7 +699,7 @@ become new `- [ ]` tasks" instruction. Not blockers for the Sprint 3 feature set
       in an open diff are no-ops (or breadcrumb), no editor opens, no K commits, a
       single Esc pops the diff. `scripts/check.sh` green.
 
-- [ ] **28. Core: close the H2 submit→first-tick window; add the missing UI commit
+- [x] **28. Core: close the H2 submit→first-tick window; add the missing UI commit
       guard** _(deps: none; review finding, MEDIUM latent — probe-confirmed)_ — Bug:
       `_streaming` flips True only inside the first `__anext__` of `stream()`
       (`ctx/core/conversation.py:631-665`), but the assistant node's `created_seq`
