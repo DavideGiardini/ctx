@@ -56,6 +56,12 @@ def render(state: dict) -> str:
     if footer:
         lines.append(f'footer="{footer}"')
 
+    # Breadcrumb — the deep-dive/diff navigation trail. A lone root (`["Chat"]`),
+    # an empty list, or an absent trail is noise and is omitted.
+    breadcrumb = (state.get("deep_dive") or {}).get("breadcrumb") or []
+    if len(breadcrumb) > 1:
+        lines.append("nav: " + " > ".join(breadcrumb))
+
     detail = state.get("detail") or {}
     if detail:
         node = detail.get("node_index")
@@ -73,6 +79,25 @@ def render(state: dict) -> str:
             line += f" splits={visible}"
         lines.append(line)
 
+    # Diff-view summary — present only while the full-screen context diff is open.
+    diff = state.get("diff_view") or {}
+    if diff.get("open"):
+        line = f"diff: {len(diff.get('regions', []))} regions"
+        if diff.get("warning"):
+            line += " warn"
+        if diff.get("drill") is not None:
+            line += " drill"
+        lines.append(line)
+
+    # Context gauge — absolute window usage. `~` marks an approximate (uncalibrated
+    # or drifted) reading; an unknown pct renders a neutral `?` placeholder.
+    gauge = state.get("context_gauge")
+    if gauge is not None:
+        pct = gauge.get("pct")
+        marker = "~" if gauge.get("approximate") else ""
+        pct_str = f"{pct}%" if pct is not None else "?"
+        lines.append(f"ctx: {marker}{pct_str}")
+
     colors = state.get("colors") or {}
     if colors:
         legend = " ".join(f"{role}={value}" for role, value in colors.items())
@@ -83,6 +108,9 @@ def render(state: dict) -> str:
     header = f"nodes={len(nodes)}"
     if selected is not None:
         header += f" selected=[{selected}]"
+    range_selection = state.get("range_selection") or []
+    if range_selection:
+        header += f" range=[{','.join(str(i) for i in range_selection)}]"
     lines.append(header)
 
     for node in nodes:
@@ -94,6 +122,8 @@ def render(state: dict) -> str:
         weight = node.get("weight_pct")
         if weight is not None:
             suffix += f"  w={weight}%"
+        if node.get("drift"):
+            suffix += "  Δ"
         lines.append(f"{marker}{trunc}[{node['index']}] {role} {content}{suffix}")
 
     return "\n".join(lines)
