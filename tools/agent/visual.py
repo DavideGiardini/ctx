@@ -14,23 +14,24 @@ process that imports ``ctx.*`` fresh from disk, so it is immune to the
 (HANDOFF-loop-v2 §2.1). The live MCP server stays for behavioral QA.
 
 Rasterization uses ``cairosvg``, which is **not** a permanent dependency — invoke
-this module under ``uv run --with cairosvg`` so the install is ephemeral. Snap
+this module under ``uv run --with cairosvg==2.9.0`` so the install is ephemeral. Snap
 ``inkscape`` cannot read ``/tmp`` (private sandbox) — do not use it.
 
 Usage (from the repo root)::
 
     # one state -> one PNG the Read tool renders visually
-    uv run --with cairosvg python -m tools.agent.visual state committed-K out.png
-    uv run --with cairosvg python -m tools.agent.visual state drift-diff diff.png --size 160x48
+    uv run --with cairosvg==2.9.0 python -m tools.agent.visual state committed-K out.png
+    uv run --with cairosvg==2.9.0 python -m tools.agent.visual state drift-diff diff.png \
+        --size 160x48
 
     # force a deliberate defect / fix for both-directions judge calibration
-    uv run --with cairosvg python -m tools.agent.visual state committed-K bad.png \
+    uv run --with cairosvg==2.9.0 python -m tools.agent.visual state committed-K bad.png \
         --variant k-violet
-    uv run --with cairosvg python -m tools.agent.visual state committed-K good.png \
+    uv run --with cairosvg==2.9.0 python -m tools.agent.visual state committed-K good.png \
         --variant k-green
 
     # render the whole standing fixture (all known-bug good/bad pairs + manifest)
-    uv run --with cairosvg python -m tools.agent.visual fixture /path/to/outdir
+    uv run --with cairosvg==2.9.0 python -m tools.agent.visual fixture /path/to/outdir
 
 The **judge** is the agent's own vision: ``Read`` the PNG and decide PASS/FAIL
 against the state's one-line visual intent. A judge that only ever says "pass" is
@@ -158,10 +159,39 @@ async def _state_drift_diff(pilot) -> None:
         await pilot.pause()
 
 
+async def _state_k_inspector(pilot) -> None:
+    """A committed K *selected* so the detail inspector renders its folded
+    originals split — the task-38 case (the inspector's message-bearing split
+    should be compact rows with dividers, not a plain-text dump)."""
+    await _state_committed_k(pilot)
+    await pilot.press("home")  # select the K (first node) -> left pane renders it
+    for _ in range(2):
+        await pilot.pause()
+
+
+async def _state_range_selection(pilot) -> None:
+    """A multi-node vim-style range selection (``v`` + ``down``) — the task-41
+    case: the selected run (and the gaps between rows) should read as one
+    contiguous highlighted block, not solid blue with default-colour gaps."""
+    await _submit_turn(pilot, "first question")
+    await _submit_turn(pilot, "second question")
+    await pilot.press("escape")
+    await pilot.pause()
+    await pilot.press("home")
+    await pilot.pause()
+    await pilot.press("v")  # anchor the range on the first node
+    await pilot.pause()
+    for _ in range(2):
+        await pilot.press("down")  # extend across the next two rows
+        await pilot.pause()
+
+
 STATES: dict[str, Callable[[object], Awaitable[None]]] = {
     "fresh": _state_fresh,
     "committed-K": _state_committed_k,
     "k-after-assistant": _state_k_after_assistant,
+    "k-inspector": _state_k_inspector,
+    "range-selection": _state_range_selection,
     "drift-diff": _state_drift_diff,
 }
 
@@ -214,7 +244,7 @@ def _strip_remote_fonts(svg: str) -> str:
 
 def rasterize(svg: str, png_path: Path) -> None:
     """SVG string -> PNG file at *png_path* (the Read tool renders PNG visually)."""
-    import cairosvg  # lazy: only needed under `uv run --with cairosvg`
+    import cairosvg  # lazy: only needed under `uv run --with cairosvg==2.9.0`
 
     png_path.parent.mkdir(parents=True, exist_ok=True)
     cairosvg.svg2png(

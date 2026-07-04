@@ -47,6 +47,19 @@ async def test_k_after_assistant_places_k_directly_after_an_assistant():
     assert roles == ["user", "assistant", "compression", "assistant"]
 
 
+async def test_k_inspector_selects_the_k():
+    # The task-38 inspector case needs the K selected so its splits render.
+    _svg, state = await capture("k-inspector")
+    selected = state["nodes"][state["selected_index"]]
+    assert selected["node_type"] == "compression"
+
+
+async def test_range_selection_spans_multiple_nodes():
+    # The task-41 case: a contiguous multi-node vim-style range.
+    _svg, state = await capture("range-selection")
+    assert len(state.get("range_selection") or []) >= 2
+
+
 async def test_drift_diff_opens_the_full_screen_diff():
     _svg, state = await capture("drift-diff")
     assert (state.get("diff_view") or {}).get("open") is True

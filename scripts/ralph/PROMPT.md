@@ -106,8 +106,9 @@ Operate as the autonomous engineer described in `AGENTS.md` (NOT professor mode)
      If you must look, render it yourself with the visual driver and `Read` the PNG:
 
      ```
-     uv run --with cairosvg python -m tools.agent.visual state <name> /tmp/x.png
-     # states: fresh, committed-K, k-after-assistant, drift-diff (see tools/agent/visual.py)
+     uv run --with cairosvg==2.9.0 python -m tools.agent.visual state <name> /tmp/x.png
+     # states: fresh, committed-K, k-after-assistant, k-inspector, range-selection,
+     #         drift-diff (see tools/agent/visual.py). cairosvg is cached (offline OK).
      ```
 
      Judge the PNG against the task's one-line visual intent. **Verify both
@@ -145,6 +146,11 @@ Operate as the autonomous engineer described in `AGENTS.md` (NOT professor mode)
    - Append a short dated entry to `scripts/ralph/PROGRESS.md`: what you did, what
      tests you added (or why none were warranted), the verification you ran, key
      decisions, and any gotcha a future fresh iteration must know.
+   - **If you did a visual check (step 7): record it explicitly** — the state you
+     rendered, the one-line intent you judged against, and the verdict (e.g.
+     "rendered `committed-K`, judged K bar green — PASS"). This makes the visual
+     gate auditable after the fact; a visual task with no recorded verdict reads as
+     skipped.
 
 10. **If — and only if — every task in the PRD is now `- [x]`**, print the exact
     line `RALPH_COMPLETE` on its own line as the last thing you do.

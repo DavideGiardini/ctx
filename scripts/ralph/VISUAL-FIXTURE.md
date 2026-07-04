@@ -26,7 +26,7 @@ is broken — fix it before trusting it on real tasks.
 From the repo root (cairosvg is ephemeral — no permanent dependency):
 
 ```
-uv run --with cairosvg python -m tools.agent.visual fixture /tmp/ctx-visual-fixture
+uv run --with cairosvg==2.9.0 python -m tools.agent.visual fixture /tmp/ctx-visual-fixture
 ```
 
 This writes, for each bug, `<bug>__FAIL.png` and `<bug>__PASS.png` plus a
