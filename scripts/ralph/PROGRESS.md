@@ -2070,3 +2070,37 @@ Git history is the source of truth for *what changed*; this file captures the
   into `tests/` as tasks land; delete the directory when Phase 3d completes.
 - Gotcha: `test_review_hazards.py` currently FAILS by design — do not "fix" the
   probes to green without fixing the app; the failing assert IS the acceptance.
+
+## 2026-07-04 — Task 27: diff view inherits the deep-dive read-only gates
+
+- What: `action_anchor_range` (`v`), `action_compress` (`c`), `action_expand`
+  (`x`) gated only on `self._deep_dive_stack`, not on an open diff view. With a
+  diff open, focus sits on `DiffView` (not a text input), so these keys bubbled
+  to the App bindings and acted under the diff: `c` opened the compression editor
+  over the diff, `v` set an invisible anchor on the hidden message list (making
+  the first Esc a dead keypress), `x` ran expand under the diff. Fix: added a
+  shared predicate `ChatApp._in_full_screen_inspection()` → `bool(_deep_dive_stack)
+  or _diff_view is not None`, and swapped the three `if self._deep_dive_stack:`
+  gates to call it. One helper so the next full-screen view can't repeat this.
+- Why the Esc fix falls out for free: with `v` now inert in a diff,
+  `_range_anchor_id` stays None, so `action_escape`'s range-clear branch
+  (`app.py:217`) is skipped and control reaches the diff-pop branch (`:223`) —
+  no change to Esc ordering needed.
+- Tests: promoted 4 of the 6 red probes from
+  `scripts/ralph/probes/test_review_hazards.py` into `tests/test_app_diff_view.py`
+  (house style — real keypresses, `describe_state()`/state asserts), renamed to
+  positive assertions: `test_c_in_diff_view_is_a_noop`,
+  `test_v_in_diff_view_does_not_anchor_and_first_esc_pops`,
+  `test_x_in_diff_view_does_not_mutate`,
+  `test_c_then_commit_in_diff_commits_nothing`. Reused the file's existing
+  `_drift_scenario` / `_middle_compress_scenario` helpers. Removed those 4 probes
+  from the probes file (+ its now-unused `CompressionEditor` import) and updated
+  the probes README; the 2 remaining probes (tasks 30/31) stay red by design.
+- Verification: `bash scripts/check.sh` green (ruff + mypy + 645 pytest). No
+  qa-tester (in-process harness can't see this iteration's uncommitted edits; the
+  4 deterministic Pilot tests are the acceptance floor per the PRD UI-task note).
+- Gotcha for future iterations: tasks 30 (`test_diff_can_open_inside_deep_dive`)
+  and 31 (`test_model_command_mounts_into_dive_frame`) are still red probes — do
+  not "fix" them to green without their app fix. `_in_full_screen_inspection()`
+  is now the canonical read-only gate; reuse it for any new selection/mutation
+  action rather than re-checking the stack/diff by hand.

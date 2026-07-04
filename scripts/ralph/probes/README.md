@@ -10,10 +10,12 @@ Run them explicitly with `uv run pytest scripts/ralph/probes/ -q`.
 
 Contents and their contract:
 
-- `test_review_hazards.py` — 6 UI Pilot probes asserting the **correct** behavior
-  for tasks 27/30/31. **Currently red by design** (they reproduce the defects).
+- `test_review_hazards.py` — UI Pilot probes asserting the **correct** behavior
+  for tasks 30/31. **Currently red by design** (they reproduce the defects).
   As each fix lands, adapt the relevant probe into a real test under `tests/`
   (house style: real keypresses, `describe_state()` asserts) and delete it here.
+  (Task 27's four diff-view-gating probes were promoted into
+  `tests/test_app_diff_view.py` on 2026-07-04 and removed from here.)
 - `test_adversarial_core.py` — 15 core probes documenting **current** behavior
   (all green). Most pin invariants that already hold (oracle round-trips, seq
   counting, migration idempotence, rewind guards …) and can be mined for extra

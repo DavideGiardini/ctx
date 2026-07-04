@@ -18,6 +18,7 @@ from textual.widgets import TextArea
 
 from ctx.core.provider import TestProvider as CannedProvider
 from ctx.ui.app import ChatApp
+from ctx.ui.widgets.compression_editor import CompressionEditor
 from ctx.ui.widgets.diff_view import DiffView
 from ctx.ui.widgets.input_bar import InputBar
 from ctx.ui.widgets.message_list import MessageList
@@ -245,3 +246,78 @@ async def test_middle_compress_earlier_turn_drifts(repo, workspace):
         assert diff["regions"] == [{"left": [u1, a1], "right": [k]}]
         assert app.query_one(DiffView).display is True
         assert app.query_one(MessageList).display is False
+
+
+# --- task 27: the diff view inherits the deep-dive read-only gates -------------
+# The selection/mutation Edit-mode keys (v/c/x) must be inert while a diff is
+# open, exactly as they are while deep-diving — otherwise they anchor an
+# invisible range on the hidden message list or mutate the graph under the diff
+# (promoted from scripts/ralph/probes/test_review_hazards.py).
+
+
+async def test_c_in_diff_view_is_a_noop(repo, workspace):
+    """`c` while the diff view is open must not open the compression editor
+    over the diff."""
+    app = _app(repo, workspace)
+    async with app.run_test() as pilot:
+        await _drift_scenario(app, pilot)
+        await pilot.press("g", "d")
+        assert app.describe_state()["diff_view"]["open"] is True
+
+        await pilot.press("c")
+
+        assert app.query_one(CompressionEditor).is_open is False
+        assert app.describe_state()["diff_view"]["open"] is True
+
+
+async def test_v_in_diff_view_does_not_anchor_and_first_esc_pops(repo, workspace):
+    """`v` while the diff is open must not set a range anchor, so the first Esc
+    pops the diff rather than clearing an invisible selection (dead keypress)."""
+    app = _app(repo, workspace)
+    async with app.run_test() as pilot:
+        await _drift_scenario(app, pilot)
+        await pilot.press("g", "d")
+        assert app.describe_state()["diff_view"]["open"] is True
+
+        await pilot.press("v")
+        assert app._range_anchor_id is None
+
+        await pilot.press("escape")
+        assert app.describe_state()["diff_view"]["open"] is False
+
+
+async def test_x_in_diff_view_does_not_mutate(repo, workspace):
+    """`x` (expand) while a diff is open must not mutate the graph or append a
+    breadcrumb under the open diff."""
+    app = _app(repo, workspace)
+    async with app.run_test() as pilot:
+        await _middle_compress_scenario(app, pilot)  # cursor on drifted A2
+        await pilot.press("g", "d")
+        assert app.describe_state()["diff_view"]["open"] is True
+
+        n_before = len(app.core.nodes)
+        await pilot.press("x")
+
+        assert len(app.core.nodes) == n_before
+        assert app.describe_state()["diff_view"]["open"] is True
+
+
+async def test_c_then_commit_in_diff_commits_nothing(repo, workspace):
+    """Full damage path: `c` then `Ctrl+S` while the diff is open must not
+    commit a range-of-one K on the drifted turn."""
+    app = _app(repo, workspace)
+    async with app.run_test() as pilot:
+        await _drift_scenario(app, pilot)
+        await pilot.press("g", "d")
+        assert app.describe_state()["diff_view"]["open"] is True
+
+        await pilot.press("c")
+        assert app.query_one(CompressionEditor).is_open is False
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+
+        assert not [n for n in app.core.nodes if n.node_type == "compression"]
+        # A single Esc still pops the diff cleanly (no dead keypress).
+        await pilot.press("escape")
+        assert app.describe_state()["diff_view"]["open"] is False
+        assert app.query_one(MessageList).display is True

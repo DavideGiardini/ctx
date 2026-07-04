@@ -674,7 +674,7 @@ become new `- [ ]` tasks" instruction. Not blockers for the Sprint 3 feature set
 > pin bugs and must be inverted when fixed). Tasks 27/28 are the substantive ones;
 > land 27–31 before merging `feat/compression` into develop.
 
-- [ ] **27. UI: the diff view must inherit the deep-dive read-only gates** _(deps:
+- [x] **27. UI: the diff view must inherit the deep-dive read-only gates** _(deps:
       20, 21; review finding, HIGH — probe-confirmed with real keypresses)_ — Bug:
       `action_compress` (`ctx/ui/app.py:571`), `action_anchor_range` (`:343`), and
       `action_expand` (`:593`) all gate on `if self._deep_dive_stack:` but never on

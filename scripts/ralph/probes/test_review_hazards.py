@@ -7,7 +7,6 @@ from ctx.core.provider import TestProvider as CannedProvider
 from ctx.core.storage import ConversationRepository
 from ctx.core.workspace import Workspace
 from ctx.ui.app import ChatApp
-from ctx.ui.widgets.compression_editor import CompressionEditor
 from ctx.ui.widgets.input_bar import InputBar
 from ctx.ui.widgets.message_list import MessageList
 
@@ -58,76 +57,6 @@ async def _drift_scenario(app, pilot) -> None:
     await pilot.press("down", "down", "down")
 
 
-async def test_c_in_diff_view_opens_editor_over_diff(repo, workspace):
-    """`c` while the diff view is open: gated on dive stack but not diff."""
-    app = _app(repo, workspace)
-    async with app.run_test() as pilot:
-        await _drift_scenario(app, pilot)
-        await pilot.press("g", "d")
-        assert app.describe_state()["diff_view"]["open"] is True
-
-        await pilot.press("c")
-        editor_open = app.query_one(CompressionEditor).is_open
-        diff_open = app.describe_state()["diff_view"]["open"]
-        print(f"\nEDITOR OPEN WHILE DIFF OPEN: editor={editor_open} diff={diff_open}")
-        assert not editor_open, "BUG: compression editor opened over the diff view"
-
-
-async def test_v_in_diff_view_makes_first_esc_dead(repo, workspace):
-    """`v` while diff open sets an invisible range anchor; Esc then clears it
-    (dead keypress) instead of popping the diff."""
-    app = _app(repo, workspace)
-    async with app.run_test() as pilot:
-        await _drift_scenario(app, pilot)
-        await pilot.press("g", "d")
-        assert app.describe_state()["diff_view"]["open"] is True
-
-        await pilot.press("v")
-        anchored = app._range_anchor_id is not None
-        await pilot.press("escape")
-        diff_still_open = app.describe_state()["diff_view"]["open"]
-        print(f"\nANCHORED IN DIFF: {anchored}; diff open after Esc: {diff_still_open}")
-        assert not (anchored and diff_still_open), (
-            "BUG: v anchored a range inside the diff view and the first Esc "
-            "cleared it invisibly instead of popping the diff"
-        )
-
-
-async def test_x_in_diff_view_mutates_under_diff(repo, workspace):
-    """`x` (expand) while a diff is open mutates the graph under the open diff."""
-    app = _app(repo, workspace)
-    async with app.run_test() as pilot:
-        # Middle compress: U1,A1,U2,A2 -> K,U2,A2; A2 drifts.
-        await _turn(app, "first")
-        await _turn(app, "second")
-        await pilot.press("escape")
-        await pilot.press("home")
-        await pilot.press("v", "down")
-        await pilot.press("c")
-        app.query_one("#compress-output", TextArea).text = "SUMMARY"
-        await pilot.press("ctrl+s")
-        if app.mode == "insert":
-            await pilot.press("escape")
-        await pilot.press("home")
-        await pilot.press("down", "down")  # A2 (drifted)
-        await pilot.press("g", "d")
-        assert app.describe_state()["diff_view"]["open"] is True
-
-        n_before = len(app.core.nodes)
-        # Cursor selection is still the drifted assistant node -> "Not a
-        # compression node" breadcrumb at minimum; but select the K first via
-        # the live-list selection surviving under the diff? Instead simulate a
-        # user pressing x directly (selection = A2).
-        await pilot.press("x")
-        n_after = len(app.core.nodes)
-        state = app.describe_state()
-        last = state["nodes"][-1]["content"] if state["nodes"] else ""
-        print(f"\nX IN DIFF: nodes {n_before}->{n_after}; last node: {last!r}")
-        print(f"diff still open: {state['diff_view']['open']}")
-        # Breadcrumb got appended to the (hidden) list while the diff is open
-        assert n_after == n_before, "x ran (breadcrumbed/mutated) under an open diff"
-
-
 async def test_model_command_mounts_into_dive_frame(repo, workspace):
     """/model while deep-diving mounts its reply widget inside the dive frame
     (13h#2 gated breadcrumb/connectivity/submit but not /model)."""
@@ -155,37 +84,6 @@ async def test_model_command_mounts_into_dive_frame(repo, workspace):
         assert widgets_after == widgets_before, (
             "BUG: /model reply widget mounted inside the read-only dive frame"
         )
-
-
-async def test_c_in_diff_then_commit_full_damage(repo, workspace):
-    """Full damage path: c in diff -> edit summary -> Ctrl+S commit."""
-    app = _app(repo, workspace)
-    async with app.run_test() as pilot:
-        await _drift_scenario(app, pilot)
-        await pilot.press("g", "d")
-        assert app.describe_state()["diff_view"]["open"] is True
-
-        await pilot.press("c")
-        assert app.query_one(CompressionEditor).is_open
-        app.query_one("#compress-output", TextArea).text = "SECOND-K"
-        await pilot.press("ctrl+s")
-        await pilot.pause()
-
-        st = app.describe_state()
-        ks = [n for n in app.core.nodes if n.node_type == "compression"]
-        print(f"\nAFTER COMMIT-IN-DIFF: diff_open={st['diff_view']['open']}")
-        print(f"message_list.display={app.query_one(MessageList).display}")
-        print(f"diff regions now={st['diff_view']['regions']}")
-        print(f"editor open={app.query_one(CompressionEditor).is_open}")
-        print(f"K nodes in view={len(ks)}")
-        print(f"focus={st['focus']} mode={st['mode']}")
-        print(f"breadcrumb={st['deep_dive']['breadcrumb']}")
-        # Now press Esc twice to see whether the user can get out cleanly.
-        await pilot.press("escape")
-        st2 = app.describe_state()
-        print(f"after Esc: diff_open={st2['diff_view']['open']} "
-              f"ml.display={app.query_one(MessageList).display}")
-        assert len(ks) == 0, "BUG: a K was committed while the diff view was open"
 
 
 async def test_diff_can_open_inside_deep_dive(repo, workspace):

@@ -332,6 +332,17 @@ class ChatApp(App):
         self._selected_node_id = None
         self._clear_range()
 
+    def _in_full_screen_inspection(self) -> bool:
+        """True while a full-screen read-only inspection view is up — a deep-dive
+        or the context-diff (task 27).
+
+        Both replace the live message list with a hidden-list frame, so
+        selection- and mutation-driving Edit-mode keys (``v``/``c``/``x``) must
+        be inert: otherwise they'd anchor an invisible range on the hidden list
+        or mutate the graph under the open view (the 13-series illegal-transition
+        family, one layer up)."""
+        return bool(self._deep_dive_stack) or self._diff_view is not None
+
     def action_anchor_range(self) -> None:
         """`v` in Edit mode: anchor a range selection at the current node.
 
@@ -340,7 +351,7 @@ class ChatApp(App):
         """
         if self.mode != "edit" or self._focus_in_detail():
             return
-        if self._deep_dive_stack:  # deep-dive is read-only (task 12)
+        if self._in_full_screen_inspection():  # read-only (tasks 12, 27)
             return
         if self._selected_node_id is None:
             return
@@ -568,7 +579,7 @@ class ChatApp(App):
         selection, so a command can never act on it)."""
         if self.mode != "edit" or self._focus_in_detail():
             return
-        if self._deep_dive_stack:  # deep-dive is read-only (task 12)
+        if self._in_full_screen_inspection():  # read-only (tasks 12, 27)
             return
         if not self._compression_range():
             return
@@ -590,7 +601,7 @@ class ChatApp(App):
         mutates nothing; refused while a turn is streaming (H2)."""
         if self.mode != "edit" or self._focus_in_detail():
             return
-        if self._deep_dive_stack:  # deep-dive is read-only (task 12)
+        if self._in_full_screen_inspection():  # read-only (tasks 12, 27)
             return
         if self._stream_worker is not None and not self._stream_worker.is_finished:
             await self._breadcrumb("Cannot expand while a response is streaming.")
