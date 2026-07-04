@@ -782,7 +782,7 @@ become new `- [ ]` tasks" instruction. Not blockers for the Sprint 3 feature set
       "add_node" ctx/ui/app.py` — every call site is gated. `scripts/check.sh`
       green.
 
-- [ ] **32. Perf: cache the per-refresh drift computation** _(deps: 19; review
+- [x] **32. Perf: cache the per-refresh drift computation** _(deps: 19; review
       finding, LOW-MEDIUM — measured)_ — `_node_drift` (`ctx/ui/app.py:962-975`)
       calls `reconstruction.has_drift` per assistant node, and each call re-indexes
       and re-folds the whole graph: measured **1.6 ms @ 50 turns, 23 ms @ 200,

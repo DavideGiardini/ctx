@@ -2257,3 +2257,31 @@ Git history is the source of truth for *what changed*; this file captures the
   (AGENTS.md limit a), so the new Pilot test is the UI acceptance floor.
 - Gotcha: `_mount_node` re-queries `MessageList` per call, so the include loop now
   does one query per file (was hoisted). Negligible; kept for a single gated seam.
+
+## 2026-07-04 — Task 32: cache the per-refresh drift computation
+- `_node_drift` (`ctx/ui/app.py`) re-folded the whole graph per assistant node
+  (`reconstruction.has_drift`, O(n²)) on every `_refresh_token_ui` AND every
+  `describe_state()`. Added a UI-layer memo: `_drift_signature()` returns a cheap
+  key `(conversation_id, len(all_nodes), max created_seq, len(core.nodes),
+  show_context_drift)`; `_node_drift` returns the cached `list[bool]` when the
+  signature matches, else recomputes and stores. `ctx/core/reconstruction.py`
+  stays pure (untouched).
+- Why the key works: graph is append-only, so any K/E/turn insertion bumps
+  `len(all_nodes)`/`max created_seq`; a rewind shortens `core.nodes`; `/new`/
+  `/resume` swap `conversation_id`; the flag flip is in the key. Streaming grows
+  node *content* only (drift is structural), so the cache correctly survives an
+  in-flight stream — no spurious invalidation. Auto-invalidating; no manual reset.
+- Tests: new `tests/test_app_drift_cache.py` (2 Pilot tests) is the acceptance
+  floor — monkeypatch-counts `reconstruction.has_drift`: cold pass recomputes,
+  a consecutive `describe_state()` on an unchanged graph does NOT, and a new
+  commit (K enters graph) does. Reused `_drift_scenario` from `test_app_drift.py`.
+- Gotcha: the scenario's own `_refresh_token_ui` warms the cache, so the test
+  sets `app._drift_cache = None` for a known cold baseline before arming the
+  counter — otherwise the first `describe_state()` is already a cache hit (count 0).
+- Gotcha: tests/ is not a package — import helpers as `from test_app_drift import …`
+  (bare, not relative), matching the pytest rootdir sys.path insert.
+- Verification: `scripts/check.sh` green (653 tests, ruff+mypy). Behavior-preserving
+  (drift markers/diff unchanged), so no qa-tester. The cited bench probe
+  (`scripts/ralph/probes/bench_drift.py`) measures the raw reconstruction cost that
+  motivated this; the memo proof is the call-count unit test, not the probe.
+- **All PRD tasks (1–32) are now `- [x]`.**
