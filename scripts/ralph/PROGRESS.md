@@ -2187,3 +2187,40 @@ Git history is the source of truth for *what changed*; this file captures the
 - Gotcha: middle-compression discrimination requires a checked turn whose K folds
   *inside its strict-ancestor prefix* (gen-view != now-view). Tip-K cases can't do
   this — keep at least one middle case if the oracle is ever pruned.
+
+## 2026-07-04 — Task 30: diff/deep-dive exclusivity + cursor restore
+
+- **Decision (the task asked to decide first): diff-inside-dive is FORBIDDEN.**
+  It contradicts the documented mutual-exclusivity invariant (`app.py:115-119`
+  `_diff_view` comment) and the review probe already asserted the forbidden
+  behavior (`assert not diff_view["open"]`). A nested diff would also break the
+  `action_pop_deep_dive` close ordering and the breadcrumb (`Chat › K… › Diff…`).
+  Rejected the "legitimate stack level" reading — it's the bigger change and
+  reopens a settled invariant.
+- Fix (1): `_drill_selected` now gates the diff branch on `_deep_dive_stack` — a
+  drifted *frame* assistant turn is a **silent no-op** while diving (not a
+  breadcrumb; consistent with the task-27 read-only v/c/x gates, which also just
+  `return`; a breadcrumb would add a persistent system node to the conversation).
+  The compression branch (nested K dive) is left intact (nesting-ready; 3a depth
+  stays 1 so it's inert in practice).
+- Fix (2): `_close_diff` restores the cursor via `_visible_nodes()` instead of
+  `core.nodes` membership (symmetric with `action_pop_deep_dive`). Under the
+  exclusivity gate the dive stack is always empty when a diff closes, so this
+  equals `core.nodes` today — but it stays correct if the invariant ever changes,
+  and `_select_message` already re-shows the inspector, so cursor + inspector both
+  restore.
+- Tests (Pilot, authored directly — UI layer, not the code-blind core flow):
+  * `test_diff_does_not_open_inside_deep_dive`: promotes the review probe
+    (double-compress K1/K2 → dive K2 → cursor on frame A2). Asserts A2 genuinely
+    drifts (`_turn_has_drift is True`) so the test can only pass because the gate
+    blocks it, then that `g d` leaves the diff shut, the dive active, and no
+    "Diff" breadcrumb.
+  * `test_ctrl_o_from_diff_restores_cursor_and_inspector`: opens a diff from the
+    live view, `ctrl+o`, asserts `selected_index`/`selected_role` and
+    `detail.node_index`/`node_role` all restore to the pre-diff assistant turn
+    (the existing `test_ctrl_o_restores_live_view` only checked pane display).
+- Verification: `bash scripts/check.sh` green (ruff + mypy + 650 pytest, was 648).
+  No qa-tester: the in-process MCP harness can't see this iteration's app.py edits
+  (AGENTS.md limit a), so the new Pilot tests are the UI acceptance floor.
+- Gotcha: the review probe file `scripts/ralph/probes/test_review_hazards.py` is
+  KEPT — task 31 still needs its `test_model_command_mounts_into_dive_frame`.

@@ -747,7 +747,7 @@ become new `- [ ]` tasks" instruction. Not blockers for the Sprint 3 feature set
       local mutation making `context_at_generation` return the now-prefix (verify,
       do not commit the mutant). `scripts/check.sh` green.
 
-- [ ] **30. UI: diff/deep-dive exclusivity + cursor restore after a nested diff**
+- [x] **30. UI: diff/deep-dive exclusivity + cursor restore after a nested diff**
       _(deps: 20; review finding, MEDIUM — probe-confirmed)_ — Two related bugs.
       (1) `_drill_selected` (`ctx/ui/app.py:416-428`) never checks
       `_deep_dive_stack` before `_enter_diff`, but a folded FRAME assistant node
