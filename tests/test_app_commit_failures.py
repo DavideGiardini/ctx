@@ -5,13 +5,13 @@ A ``Ctrl+S`` commit whose range is rejected by ``_validate_compress_range``
 was deleted in task 22, so a middle range now commits and is covered elsewhere)
 must **not** let the ``ValueError`` propagate: propagation soft-locks
 the editor and the whole app stops processing input (unrecoverable short of a
-restart). Instead the app surfaces the guard message as a system breadcrumb,
-keeps the editor open so the user can adjust, and stays responsive.
+restart). Instead the app surfaces the guard message as a transient hint
+(task 42), keeps the editor open so the user can adjust, and stays responsive.
 
 The oracle is the Task 13a acceptance criterion, asserted through the public
-``describe_state()`` snapshot: no exception escapes (the test would error), a
-system breadcrumb is appended, no new K is committed, and a subsequent keypress
-still changes app state (the editor closes on Esc).
+``describe_state()`` snapshot: no exception escapes (the test would error), the
+guard message shows as a transient hint, no new K is committed, and a subsequent
+keypress still changes app state (the editor closes on Esc).
 """
 
 import asyncio
@@ -63,11 +63,10 @@ def _compression_nodes(app) -> list[dict]:
     return [n for n in app.describe_state()["nodes"] if n["node_type"] == "compression"]
 
 
-def _has_system_breadcrumb(app, needle: str) -> bool:
-    return any(
-        n["role"] == "system" and needle in n["content"].lower()
-        for n in app.describe_state()["nodes"]
-    )
+def _hint_shown(app, needle: str) -> bool:
+    # Refusals surface as transient hints, not graph nodes (task 42).
+    hint = app.describe_state()["last_hint"]
+    return hint is not None and needle in hint.lower()
 
 
 async def test_commit_while_streaming_breadcrumbs_and_stays_responsive(repo, workspace):
@@ -97,7 +96,7 @@ async def test_commit_while_streaming_breadcrumbs_and_stays_responsive(repo, wor
         assert app.describe_state()["compression_editor"]["open"] is True
         # The refusal comes from the explicit UI-layer stream guard (task 28),
         # not the core ValueError catch — assert its exact message.
-        assert _has_system_breadcrumb(app, "cannot commit while a response is streaming")
+        assert _hint_shown(app, "cannot commit while a response is streaming")
 
         # Let the blocked stream finish so teardown does not hang.
         gate.set()
@@ -129,7 +128,7 @@ async def test_commit_range_containing_k_breadcrumbs_and_stays_responsive(repo, 
         # Still exactly one K — the nested commit was rejected, not applied.
         assert len(_compression_nodes(app)) == 1
         assert app.describe_state()["compression_editor"]["open"] is True
-        assert _has_system_breadcrumb(app, "compression node")
+        assert _hint_shown(app, "compression node")
 
         await pilot.press("escape")
         assert app.describe_state()["compression_editor"]["open"] is False

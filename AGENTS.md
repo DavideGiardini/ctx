@@ -157,7 +157,12 @@ a left `DetailInspector` and a right `#conversation` pane (the `MessageList` +
   dependencies; owns widgets, focus, Insert/Edit mode-switching (`_set_mode`),
   keybindings, selection→inspector wiring, and the `@work` streaming worker (which
   feeds both the truncated right-pane node and, when locked, the full left-pane
-  stream). `describe_state()` exposes observable state for snapshots. Per-node
+  stream). `describe_state()` exposes observable state for snapshots (incl.
+  `last_hint`, the most-recent transient hint). Transient UI hints (refusals,
+  "nothing to include") route through `_hint` → `self.notify()` — a toast, never
+  a graph node, so they don't accumulate across `/new`/`/resume` (task 42); only
+  *durable* breadcrumbs (`/model` changes, connectivity notices) stay persistent
+  `core.add_system_message` nodes (ADR 0006 #6). Per-node
   weight %s come from `tokens.weight_pct` (basis from `ui.weight_basis`, window
   from `tokens.model_window`) via `_node_weights()`, which both `describe_state`
   and `_refresh_token_ui` read. The header gauge comes from `_gauge_state()`

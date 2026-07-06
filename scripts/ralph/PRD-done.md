@@ -918,3 +918,16 @@ become new `- [ ]` tasks" instruction. Not blockers for the Sprint 3 feature set
       contiguous across the gaps between them** — not solid blue with default-color
       gaps. **Floor** — a Pilot test asserts the `range-selected` styling/class on
       the selected run. `scripts/check.sh` green.
+
+- [x] **42. UI: transient hints leave the conversation graph** _(deps: none;
+      review + qa finding)_ — `_breadcrumb` (`ctx/ui/app.py:800-806`) calls
+      `core.add_system_message`, which appends a **persistent** graph node, so
+      transient UI hints ("Write a summary before committing (Ctrl+S).", "Not a
+      compression node") become permanent nodes that accumulate forever (confirmed
+      still present after a `/new`→`/resume` cycle). Introduce a transient,
+      non-persistent surface for hints (Textual `self.notify()` toast or a footer
+      status line) and route UI hints through it; **reserve** persistent
+      `add_system_message` nodes for durable breadcrumbs only (e.g. `/model`
+      changes). _Acceptance:_ qa-tester — triggering a hint (empty-summary commit)
+      shows a transient message and adds **no** new node to `ctx_snapshot`; a
+      durable `/model` breadcrumb still appears as a node. `scripts/check.sh` green.

@@ -86,11 +86,10 @@ def _compression_nodes(app) -> list[dict]:
     return [n for n in app.describe_state()["nodes"] if n["node_type"] == "compression"]
 
 
-def _has_system_breadcrumb(app, needle: str) -> bool:
-    return any(
-        n["role"] == "system" and needle in n["content"].lower()
-        for n in app.describe_state()["nodes"]
-    )
+def _hint_shown(app, needle: str) -> bool:
+    # Refusals surface as transient hints, not graph nodes (task 42).
+    hint = app.describe_state()["last_hint"]
+    return hint is not None and needle in hint.lower()
 
 
 async def test_commit_mid_draft_is_refused(repo, workspace):
@@ -103,10 +102,10 @@ async def test_commit_mid_draft_is_refused(repo, workspace):
 
         await pilot.press("ctrl+s")
 
-        # No K committed, a breadcrumb warns, and the editor is still open.
+        # No K committed, a transient hint warns, and the editor is still open.
         assert _compression_nodes(app) == []
         assert app.describe_state()["compression_editor"]["open"] is True
-        assert _has_system_breadcrumb(app, "draft in progress")
+        assert _hint_shown(app, "draft in progress")
 
         gate.set()
         await app.workers.wait_for_complete()

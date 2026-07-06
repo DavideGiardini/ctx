@@ -56,6 +56,12 @@ def render(state: dict) -> str:
     if footer:
         lines.append(f'footer="{footer}"')
 
+    # Transient UI hint (task 42) — a toast, not a graph node. Shown while set so
+    # QA can confirm a hint fired without it appearing among the nodes.
+    hint = state.get("last_hint")
+    if hint:
+        lines.append(f'hint="{hint}"')
+
     # Breadcrumb — the deep-dive/diff navigation trail. A lone root (`["Chat"]`),
     # an empty list, or an absent trail is noise and is omitted.
     breadcrumb = (state.get("deep_dive") or {}).get("breadcrumb") or []

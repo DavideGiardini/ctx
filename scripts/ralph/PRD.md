@@ -149,19 +149,7 @@ diffs in git history. One line each below so open tasks can still resolve their
 - [x] 39 — UI: compression node color = context color
 - [x] 40 — UI: blank-line separation before a compression node
 - [x] 41 — UI: range selection uses hover styling, bridged across gaps
-
-- [ ] **42. UI: transient hints leave the conversation graph** _(deps: none;
-      review + qa finding)_ — `_breadcrumb` (`ctx/ui/app.py:800-806`) calls
-      `core.add_system_message`, which appends a **persistent** graph node, so
-      transient UI hints ("Write a summary before committing (Ctrl+S).", "Not a
-      compression node") become permanent nodes that accumulate forever (confirmed
-      still present after a `/new`→`/resume` cycle). Introduce a transient,
-      non-persistent surface for hints (Textual `self.notify()` toast or a footer
-      status line) and route UI hints through it; **reserve** persistent
-      `add_system_message` nodes for durable breadcrumbs only (e.g. `/model`
-      changes). _Acceptance:_ qa-tester — triggering a hint (empty-summary commit)
-      shows a transient message and adds **no** new node to `ctx_snapshot`; a
-      durable `/model` breadcrumb still appears as a node. `scripts/check.sh` green.
+- [x] 42 — UI: transient hints leave the conversation graph
 
 - [ ] **43. UI: no weight on non-model nodes; silent invalid keys; contextual footer**
       _(deps: 42; user-verified BROKEN)_ — (a) system/breadcrumb nodes show a `--%`

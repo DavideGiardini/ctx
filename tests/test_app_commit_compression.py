@@ -4,7 +4,7 @@
 range into a single compression node ``K``: the children leave the view, one K
 widget replaces them (numeric ``weight_pct``, ``meta["prompt"] == ""`` for a
 manual commit), and the resolved view round-trips through storage. An empty
-summary breadcrumbs instead of committing.
+summary shows a transient hint instead of committing (task 42).
 
 The oracle is the Task 8 acceptance criterion, asserted through the public
 ``describe_state()`` snapshot and ``app.core`` (for K's meta, an implementation
@@ -106,11 +106,9 @@ async def test_ctrl_s_empty_summary_breadcrumbs_no_commit(repo, workspace):
         assert not any(n["node_type"] == "compression" for n in state["nodes"])
         # No commit → editor stays open so the user can keep drafting.
         assert state["compression_editor"]["open"] is True
-        # A breadcrumb explains why nothing happened.
-        assert any(
-            n["role"] == "system" and "summary" in n["content"].lower()
-            for n in state["nodes"]
-        )
+        # A transient hint explains why nothing happened — not a graph node (task 42).
+        assert state["last_hint"] is not None
+        assert "summary" in state["last_hint"].lower()
 
 
 async def test_ctrl_s_inert_when_editor_closed(repo, workspace):

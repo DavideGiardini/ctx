@@ -124,6 +124,11 @@ class ChatApp(App):
         # ``g d`` on a *drifted assistant* turn (a K still deep-dives). ``None``
         # = no diff open. Ephemeral — never persisted.
         self._diff_view: dict | None = None
+        # Most-recent transient UI hint (task 42). Surfaced as a toast via
+        # ``notify`` and exposed on ``describe_state`` so headless QA can observe
+        # it; unlike a durable breadcrumb it is NOT a graph node. ``None`` = none
+        # shown yet; reset on a conversation switch.
+        self._last_hint: str | None = None
         logger.info("app initialized | default_model=%s", self.core.model)
 
     def compose(self) -> ComposeResult:
@@ -627,11 +632,11 @@ class ChatApp(App):
         if self._in_full_screen_inspection():  # read-only (tasks 12, 27)
             return
         if self._stream_worker is not None and not self._stream_worker.is_finished:
-            await self._breadcrumb("Cannot expand while a response is streaming.")
+            await self._hint("Cannot expand while a response is streaming.")
             return
         node = self._get_selected_node()
         if node is None or node.node_type != "compression":
-            await self._breadcrumb("Not a compression node")
+            await self._hint("Not a compression node")
             return
         children = self.core.folded_children(node.id)
         self.core.expand_compression(node.id)
@@ -695,6 +700,7 @@ class ChatApp(App):
         self._draft_worker = None
         self._last_drafted_prompt = ""
         self._pending_chord = None
+        self._last_hint = None
         self._clear_selection()
 
     def action_draft_compression(self) -> None:
@@ -755,16 +761,16 @@ class ChatApp(App):
         if self._draft_worker is not None and not self._draft_worker.is_finished:
             # A live draft is still overwriting the Bottom split — committing now
             # would fold a half-streamed summary. Refuse; Esc cancels it (13d).
-            await self._breadcrumb("Draft in progress — Esc cancels it first.")
+            await self._hint("Draft in progress — Esc cancels it first.")
             return
         if self._stream_worker is not None and not self._stream_worker.is_finished:
             # H2: a live turn is in flight (its ctx_hash isn't stamped until the
             # first tick). Refuse at the UI layer — mirrors action_expand — rather
             # than relying on the core ValueError catch below (task 28).
-            await self._breadcrumb("Cannot commit while a response is streaming.")
+            await self._hint("Cannot commit while a response is streaming.")
             return
         if not editor.output.strip():
-            await self._breadcrumb("Write a summary before committing (Ctrl+S).")
+            await self._hint("Write a summary before committing (Ctrl+S).")
             return
         ids = self._compression_range()
         if not ids:
@@ -780,7 +786,7 @@ class ChatApp(App):
             # it propagate uncaught (that soft-locks the app, task 13a). Mirrors
             # the graceful failure path in _draft_compression_worker.
             logger.error("commit error | error=%s", exc)
-            await self._breadcrumb(str(exc))
+            await self._hint(str(exc))
             return
         self._close_compression_editor()
         # Route the clear through _select_message(None) so the inspector resets to
@@ -814,13 +820,17 @@ class ChatApp(App):
             return
         await self.query_one(MessageList).add_node(node)
 
-    async def _breadcrumb(self, text: str) -> None:
-        """Append a session breadcrumb (system message) to the conversation."""
-        node = self.core.add_system_message(text)
-        await self._mount_node(node)
-        self._refresh_token_ui()
-        if self.mode == "insert":
-            self._lock_inspector_to_last()
+    async def _hint(self, text: str) -> None:
+        """Surface a transient UI hint — a toast, never a graph node (task 42).
+
+        Hints ("Write a summary before committing", "Not a compression node",
+        "No files to include", …) are ephemeral guidance; routing them through
+        ``core.add_system_message`` made them accumulate as permanent nodes that
+        survive ``/new``/``/resume``. They go through ``notify`` instead.
+        Durable breadcrumbs (``/model`` changes, connectivity notices) stay
+        persistent nodes (ADR 0006 #6) — they do NOT come here."""
+        self._last_hint = text
+        self.notify(text)
 
     def _focus_in_detail(self) -> bool:
         return self._is_focused_in(self.query_one(DetailInspector))
@@ -1201,6 +1211,7 @@ class ChatApp(App):
             "compression_editor": self._compression_editor_state(),
             "layout": {"header": True, "footer": True, "panes": ["detail", "conversation"]},
             "footer": self.query_one(AppFooter).current_hint(),
+            "last_hint": self._last_hint,
             "detail": {
                 "node_index": detail_node_index,
                 "node_role": detail_node_role,
@@ -1375,10 +1386,7 @@ class ChatApp(App):
     async def _handle_resume_command(self) -> None:
         conversations = self._repo.list()
         if not conversations:
-            node = self.core.add_system_message("No past conversations found.")
-            await self._mount_node(node)
-            if self.mode == "insert":
-                self._lock_inspector_to_last()
+            await self._hint("No past conversations found.")
             return
         result = await self.push_screen_wait(HistoryScreen(self._repo))
         if result is None:
@@ -1401,10 +1409,7 @@ class ChatApp(App):
     async def _handle_include_command(self) -> None:
         files = self._workspace.list_files()
         if not files:
-            node = self.core.add_system_message("No files in .ctx/context/ to include.")
-            await self._mount_node(node)
-            if self.mode == "insert":
-                self._lock_inspector_to_last()
+            await self._hint("No files in .ctx/context/ to include.")
             return
         result = await self.push_screen_wait(IncludeScreen(self._workspace))
         if not result:

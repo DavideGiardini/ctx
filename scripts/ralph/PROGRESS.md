@@ -2641,3 +2641,37 @@ Git history is the source of truth for *what changed*; this file captures the
   `--variant range-grey` → grey contiguous block (FIXED); both discriminate.
   Verdict: PASS. Pure rendering change, so no qa-tester (visual driver sees on-disk
   code by construction).
+
+## 2026-07-06 — Task 42: transient hints leave the conversation graph
+- UI-only change. `_breadcrumb` (appended a persistent `core.add_system_message`
+  graph node) → renamed `_hint`, now a transient toast: sets `self._last_hint` and
+  calls `self.notify(text)`, adds NO node. All 6 refusal/guidance call sites
+  (expand-while-streaming, "Not a compression node", draft-in-progress,
+  commit-while-streaming, empty-summary, commit-error) route through it. Also
+  converted the two dead-end info messages ("No past conversations found.", "No
+  files in .ctx/context/ to include.") from persistent nodes to `_hint`.
+- Durable breadcrumbs UNCHANGED: `/model` changes + connectivity notices still go
+  through `core.add_system_message` → persistent nodes (ADR 0006 #6). This is the
+  reserve half of the task.
+- `describe_state()` gains `"last_hint"` (most-recent hint | None); reset to None in
+  `_reset_transient_ui` so `/new`/`/resume` clear it. `tools/agent/snapshot.py`
+  renders it as a `hint="..."` line (only when set) so qa-tester can confirm a hint
+  fired without it appearing among the nodes.
+- Tests (written directly — UI change, ~20 product lines, precisely-specified floor;
+  same judgment as tasks 39–41):
+  `tests/test_app_transient_hints.py` — (1) empty-summary Ctrl+S → `last_hint` set,
+  node count unchanged, no system node added; (2) `/model openai/gpt-4o` → node count
+  grows and a system node names the model (guards against over-correcting ALL system
+  messages to transient).
+- Updated existing tests that asserted the OLD breadcrumb-as-node contract (deliberate
+  — behavior changed): `test_app_commit_compression.py` (empty-summary now asserts
+  `last_hint`), `test_app_commit_failures.py` + `test_app_draft_worker_lifecycle.py`
+  (`_has_system_breadcrumb` → `_hint_shown` checking `last_hint`),
+  `test_app_expand.py` (`x` on non-compression → hint + no node added, renamed test).
+- Verification: `bash scripts/check.sh` green (690 passed, was 688 + net new/moved).
+  No qa-tester/visual this iteration: the MCP harness runs `ctx.*` cached and can't
+  see this session's edits (AGENTS.md), and the acceptance is behavioral (node
+  presence), fully captured by the deterministic Pilot floor above. Phase-3e
+  end-to-end qa-tester pass is task 45.
+- AGENTS.md app.py bullet updated: transient hints via `_hint`→`notify` (not graph
+  nodes); durable breadcrumbs stay `add_system_message`; `describe_state` `last_hint`.
