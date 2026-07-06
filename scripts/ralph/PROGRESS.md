@@ -2376,3 +2376,42 @@ Git history is the source of truth for *what changed*; this file captures the
 - Gotcha: the failure path only clears — it does NOT reopen/reset the editor, so a
   user can still hand-commit after a failed draft (intended). The commit's prompt
   read precedes the close-clear, so ordering matters if that ever changes.
+
+## 2026-07-06 — Task 36: extract a shared compact message-row renderer (`MessageRow`)
+- Refactor (behavior-preserving): the compact two-line row rendering lived inside
+  `MessageWidget` (coupled to `MessageList`); tasks 37/38 need to render nodes as
+  the same compact rows in the diff panes and inspector splits. Extracted the row
+  rendering into a new thin UI widget `ctx/ui/widgets/message_row.py::MessageRow`
+  (takes a `Node`; draws the palette-colored left bar tall/solid, applies per-role
+  truncation, composes the right-docked drift+weight meta slot + content — Markdown
+  for turns, Static for system/context; `update_content`/`set_weight_*`/`set_drift`).
+  It sets **no id** unless the caller passes one, so the same node can appear in
+  more than one pane without an id collision (the blocker for 37's two panes).
+- `MessageWidget` now **subclasses** `MessageRow`, adding only the list-specific
+  state: `set_selected`/`set_range_selected`/`set_new_pass` + the `msg-<id>` id.
+  `_pass_starts`/`_SIDE` stay in `message_list.py` (pass margins are list-only).
+- CSS (`message_list.css`): retargeted the shared rules (padding/margin/overflow,
+  role-italic, `.content`, Static/Markdown, `.meta-slot`/`.weight`/`.drift`) from
+  `MessageWidget` to the `MessageRow` type selector; kept list-only rules
+  (`.pass-start` margin, `.selected`, `.range-selected`, `MessageList` scrollbar) on
+  `MessageWidget`/`MessageList`. **Key risk verified:** Textual type selectors match
+  a widget's base-class names, so `MessageRow` rules cascade to the `MessageWidget`
+  subclass — confirmed deterministically by the pre-existing
+  `test_message_list_meta_layout` (asserts `.meta-slot` dock/layout on a
+  `MessageWidget`) staying green, and by the visual render below.
+- Tests: new `tests/test_message_row.py` (10 = 2 parametrized × 5 roles) — the
+  acceptance floor exercising the *new* renderer on user/assistant/context/system/
+  compression: (a) left-bar `_border_color` == palette color for the role; (b) the
+  two-line layout (drift+weight meta slot present, content is Markdown for turns /
+  plain Static for system+context). Authored directly (not test-spec-author): a
+  behavior-preserving extraction where the acceptance IS the spec; the "renders
+  identically" half is proved by the whole existing UI suite staying green.
+- Verification: `bash scripts/check.sh` green (679 passed, was 669). Visual: rendered
+  `committed-K` via `tools/agent/visual.py`, judged the main list against "compact
+  two-line rows, role-colored left bars, right-docked weight/drift" — PASS (violet K
+  bar / orange assistant bar, 61% / Δ 39% weight slots intact; identical to before).
+  The violet K bar is expected here — recoloring it green is task 39, not 36.
+- Gotcha for 37/38: mount `MessageRow(node)` (NOT `MessageWidget`) in the diff/
+  inspector panes — `MessageWidget` forces the `msg-<id>` id and would collide with
+  the live list's row for the same node. `MessageRow` shared CSS is in
+  `message_list.css` (loaded app-wide via `CSS_PATH`), so it already applies anywhere.

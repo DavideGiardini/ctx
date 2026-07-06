@@ -1,49 +1,54 @@
-MessageWidget {
+/* Shared compact-row styling — targets MessageRow so it also applies to the
+   MessageWidget subclass (list rows) and to rows mounted in the diff/inspector
+   panes (tasks 37/38). */
+MessageRow {
     height: auto;
     padding: 0 1 0 2;
     margin: 0 0 1 0;
     overflow: hidden hidden;
 }
-MessageWidget.pass-start {
-    margin-top: 1;
-}
-MessageWidget.system {
+MessageRow.system {
     text-style: italic;
 }
-MessageWidget.context {
+MessageRow.context {
     text-style: italic;
 }
-MessageWidget .content {
+MessageRow .content {
     overflow: hidden hidden;
 }
-MessageWidget Static {
+MessageRow Static {
     padding: 0;
 }
-MessageWidget Markdown {
+MessageRow Markdown {
     padding: 0;
 }
-MessageWidget Markdown > MarkdownParagraph {
+MessageRow Markdown > MarkdownParagraph {
     margin: 0;
 }
 /* The drift glyph and weight % share one right-docked row so they flow
    side-by-side (Δ left of %) instead of both docking to the same edge and
    overlapping into "2Δ%" (task 25). */
-MessageWidget .meta-slot {
+MessageRow .meta-slot {
     dock: right;
     width: auto;
     height: 1;
     layout: horizontal;
 }
-MessageWidget .weight {
+MessageRow .weight {
     width: auto;
     height: 1;
     color: $text-muted;
 }
-MessageWidget .drift {
+MessageRow .drift {
     width: auto;
     height: 1;
     margin: 0 1 0 0;
     color: $text-muted;
+}
+
+/* List-only interaction state (cursor / range selection / pass margins). */
+MessageWidget.pass-start {
+    margin-top: 1;
 }
 MessageWidget.selected {
     background: $surface-lighten-1;

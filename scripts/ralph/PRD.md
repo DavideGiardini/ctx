@@ -143,24 +143,7 @@ diffs in git history. One line each below so open tasks can still resolve their
 - [x] 33 — Core: fix the stuck `_streaming` flag on a pre-stream failure
 - [x] 34 — Core: `build_context` never emits two adjacent same-role messages
 - [x] 35 — UI: reset `_last_drafted_prompt` on draft cancel/failure
-
-- [ ] **36. UI: extract a shared compact message-row renderer** _(deps: none;
-      keystone for 37–38; altitude/reuse finding)_ — the main conversation renders
-      nodes as two-line rows with a role-colored left bar + weight slot via
-      `MessageWidget` (`ctx/ui/widgets/message_list.py:55`), but the diff view
-      (`ctx/ui/widgets/diff_view.py:28-32` `_column`) and the detail inspector's
-      splits (`ctx/ui/widgets/detail_inspector.py`, `Static.update(view.content)`)
-      each roll their own plain-text dump. Extract the compact-row rendering into a
-      single reusable widget (or factory) that takes a `Node` and produces the
-      standard row (bar color from the palette, truncation, weight/drift slots),
-      and refactor `MessageList` to build rows through it — **no behavior change to
-      the main conversation**. This is the shared surface tasks 37 and 38 consume.
-      Keep it a thin UI widget; no core changes. _Acceptance:_ Pilot test — the main
-      message list renders identically before/after (snapshot of
-      `describe_state()`/row structure unchanged); the new renderer is unit/Pilot
-      exercised on a sample node of each role (user/assistant/context/compression/
-      system) producing the expected bar color + two-line layout. `scripts/check.sh`
-      green.
+- [x] 36 — UI: extract a shared compact message-row renderer (`MessageRow`)
 
 - [ ] **37. UI: rebuild the diff view as a full-screen two-pane node diff** _(deps:
       20, 21, 36; user-verified BROKEN)_ — today `DiffView`

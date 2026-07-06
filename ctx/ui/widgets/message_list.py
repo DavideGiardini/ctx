@@ -1,26 +1,9 @@
 from textual.actions import SkipAction
 from textual.binding import Binding
-from textual.color import Color
-from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.widgets import Markdown, Static
+from textual.containers import VerticalScroll
 
-from ctx.core.config import get_config
 from ctx.models.nodes import Node
-
-# Config key per node role for truncation lookups ("user" maps to "human").
-_TRUNCATION_KEY = {
-    "user": "human",
-    "assistant": "assistant",
-    "context": "context",
-    "system": "system",
-    # A compression summary stands in for a run of turns; truncate it like an
-    # assistant reply (there is no separate "compression" truncation config).
-    "compression": "assistant",
-}
-
-# Roles rendered as first-class turns: a "tall" left border (thick when the
-# cursor selects them). Others (system) get a plain "solid" border.
-_TALL_ROLES = ("user", "assistant", "context", "compression")
+from ctx.ui.widgets.message_row import _TALL_ROLES, MessageRow
 
 # Which "conversation pass" a role belongs to. context imports are always
 # human-invoked (/include), so they take the human side; only system nodes
@@ -52,34 +35,13 @@ def _pass_starts(roles: list[str]) -> list[bool]:
     return starts
 
 
-class MessageWidget(Vertical):
-    DEFAULT_CSS = ""
+class MessageWidget(MessageRow):
+    """A conversation-list row: the shared :class:`MessageRow` plus the list's
+    interaction state (cursor/range selection, pass margins) and a stable
+    ``msg-<node id>`` id the list queries by."""
 
     def __init__(self, node: Node, **kwargs) -> None:
-        self.node = node
-        self._role = node.role
-        self._content = node.content
-        super().__init__(
-            id=f"msg-{node.id}",
-            classes=node.role,
-            **kwargs,
-        )
-
-    def on_mount(self) -> None:
-        colors = get_config()["colors"]
-        color_str = colors.get(self._role, colors["system"])
-        self._border_color = Color.parse(color_str)
-        style = "tall" if self._role in _TALL_ROLES else "solid"
-        self.styles.border_left = (style, self._border_color)  # type: ignore[assignment]
-        self._apply_truncation()
-
-    def _apply_truncation(self) -> None:
-        truncation = get_config()["ui"]["truncation_lines"]
-        limit = truncation.get(_TRUNCATION_KEY.get(self._role, "system"))
-        if isinstance(limit, int):
-            self.styles.max_height = limit
-        else:  # "auto" (or anything non-int) disables truncation
-            self.styles.max_height = None
+        super().__init__(node, id=f"msg-{node.id}", **kwargs)
 
     def set_selected(self, selected: bool) -> None:
         self.set_class(selected, "selected")
@@ -94,36 +56,6 @@ class MessageWidget(Vertical):
 
     def set_new_pass(self, is_new_pass: bool) -> None:
         self.set_class(is_new_pass, "pass-start")
-
-    def set_weight_pct(self, pct: int | None) -> None:
-        self.query_one(".weight", Static).update("--%" if pct is None else f"{pct}%")
-
-    def set_weight_not_in_context(self) -> None:
-        """Deep-dive rendering (Q9): a folded original is *not* part of the live
-        context, so its weight slot reads "not in context" rather than a %."""
-        self.query_one(".weight", Static).update("not in context")
-
-    def set_drift(self, drifted: bool) -> None:
-        """Toggle a subtle drift marker beside the weight slot (ADR-0016 concern
-        "b", Q12/A#1, task 19): the AI turn's generation context has diverged from
-        the current one. Deliberately quiet — many turns legitimately drift, so it
-        is a single muted glyph, not an alarm."""
-        self.set_class(drifted, "drifted")
-        self.query_one(".drift", Static).update("Δ" if drifted else "")
-
-    def compose(self):
-        with Horizontal(classes="meta-slot"):
-            yield Static("", classes="drift")
-            yield Static("--%", classes="weight")
-        if self._role in ("system", "context"):
-            yield Static(self._content or "", classes="content")
-        else:
-            yield Markdown(self._content or "▌", classes="content")
-
-    def update_content(self, content: str) -> None:
-        self._content = content
-        placeholder = "" if self._role == "system" else "▌"
-        self.query_one(".content").update(content or placeholder)  # type: ignore[attr-defined]
 
 
 class MessageList(VerticalScroll):

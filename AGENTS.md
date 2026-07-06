@@ -193,9 +193,16 @@ a left `DetailInspector` and a right `#conversation` pane (the `MessageList` +
   fully. `describe_state()` gains `"diff_view"`
   `{open, regions: [{left, right}] (changed only), warning, drill: {left, right} | None}`
   and the unified breadcrumb appends "Diff …" then "Region" while drilled (task 20/21).
-- `widgets/` — `MessageList`/`MessageWidget` (truncated nodes via per-role
-  `max-height`, right-docked weight slot + subtle drift `Δ` marker
-  (`set_drift`, task 19), conversation-pass margins),
+- `widgets/` — `MessageRow` (`message_row.py`, task 36) is the single shared
+  compact-row renderer: takes a `Node`, draws the role-colored left bar
+  (palette), truncation, the right-docked drift `Δ` + weight meta slot, and the
+  content (Markdown for turns, Static for system/context); sets no id unless the
+  caller supplies one, so the same node can appear in more than one pane. The
+  conversation `MessageList`/`MessageWidget` (`MessageWidget` subclasses
+  `MessageRow`, adding the list's cursor/range selection, pass margins, and
+  `msg-<id>` id; shared CSS targets the `MessageRow` type selector so it cascades
+  to the subclass) renders through it — the shared surface the diff view and
+  inspector splits adopt in tasks 37/38,
   `DetailInspector` (reactive `show(NodeView)`; standard Markdown view vs. 3-split
   context view, empty splits hidden — a `context` node labels the splits
   Prompt/Content/Output, a `compression` K reuses the same split machinery
