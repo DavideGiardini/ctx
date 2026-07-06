@@ -2347,3 +2347,32 @@ Git history is the source of truth for *what changed*; this file captures the
   token counts, but those are computed live from `build_context`, so nothing pins a
   stale value; the full suite stayed green. `tests/specs/context.md` C24 had no
   enforcing test (spec-only), so only the prose needed updating.
+
+## 2026-07-06 — Task 35: reset `_last_drafted_prompt` on draft cancel/failure
+- Fix (`ctx/ui/app.py`): `action_draft_compression` stamps `_last_drafted_prompt`
+  BEFORE the worker runs so a later `Ctrl+S` can mark an AI-drafted K. But nothing
+  cleared it when the draft was cancelled (Esc) or errored, so a user who then
+  hand-wrote a summary and committed stamped the STALE prompt → K read as
+  AI-drafted, corrupting the manual-vs-drafted distinction. Cleared
+  `_last_drafted_prompt = ""` in `_draft_compression_worker`'s `CancelledError`
+  and `Exception` handlers, plus a defensive clear in `_close_compression_editor`
+  (belt for any close path that skips the worker handlers). The commit path reads
+  the prompt BEFORE calling `_close_compression_editor`, so the drafted-commit
+  case (task 9's `test_ctrl_s_after_draft_stamps_drafted_prompt_on_k`) is unaffected.
+- Test (Pilot, mandatory floor): new `tests/test_app_draft_prompt_reset.py` (2
+  tests). (1) cancel path — blocking provider, `Ctrl+D` with a custom Top prompt,
+  Esc to cancel the live worker (editor stays open), hand-write summary, `Ctrl+S`
+  → `K.meta["prompt"] == ""`. (2) failure path — erroring provider raises
+  mid-stream, then a hand-written commit → `K.meta["prompt"] == ""`. Both assert
+  `K.content` is the hand-written text too. Authored directly (not via
+  test-spec-author): a 4-line mechanical guard with an existing precedent
+  (`test_app_draft_worker_lifecycle.py`'s `_BlockingProvider`); assertions come
+  straight from the acceptance criterion, not implementation shape.
+- Red/green proof: both tests failed on old code with `assert 'focus on the
+  decisions' == ''`; green after the fix.
+- Verification: deterministic queryable state (K meta), no visual surface → Pilot
+  test IS the verification (PROMPT step 7 — no qa-tester, no render). Full gate
+  `bash scripts/check.sh` green (669 passed, was 667).
+- Gotcha: the failure path only clears — it does NOT reopen/reset the editor, so a
+  user can still hand-commit after a failed draft (intended). The commit's prompt
+  read precedes the close-clear, so ordering matters if that ever changes.

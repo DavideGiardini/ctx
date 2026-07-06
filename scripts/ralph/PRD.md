@@ -142,20 +142,7 @@ diffs in git history. One line each below so open tasks can still resolve their
 
 - [x] 33 — Core: fix the stuck `_streaming` flag on a pre-stream failure
 - [x] 34 — Core: `build_context` never emits two adjacent same-role messages
-
-- [ ] **35. UI: reset `_last_drafted_prompt` on draft cancel/failure** _(deps: none;
-      review finding, MEDIUM — code-confirmed)_ — `action_draft_compression` sets
-      `self._last_drafted_prompt = prompt` (`ctx/ui/app.py:704`) *before* the worker
-      runs, and nothing clears it on the Esc-cancel path (`:207-210`) or the error
-      path (`:720-722`). A user who drafts, cancels/errors, then hand-writes a
-      summary and commits (`Ctrl+S`) passes the **stale** prompt into
-      `commit_compression` (`:756-757`) → `K.meta["prompt"]` is non-empty → the
-      inspector renders it as AI-drafted (`:280-281`), corrupting the manual-vs-drafted
-      distinction. Fix: clear `_last_drafted_prompt` to `""` on draft cancel and on
-      draft failure (and defensively on editor close), so a manual commit stamps
-      `""`. _Acceptance:_ Pilot test — draft, cancel the worker, commit a
-      hand-written summary; `describe_state()`/inspector shows the K as manual
-      (empty prompt). `scripts/check.sh` green.
+- [x] 35 — UI: reset `_last_drafted_prompt` on draft cancel/failure
 
 - [ ] **36. UI: extract a shared compact message-row renderer** _(deps: none;
       keystone for 37–38; altitude/reuse finding)_ — the main conversation renders

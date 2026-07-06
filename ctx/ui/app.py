@@ -653,6 +653,10 @@ class ChatApp(App):
         if self._draft_worker is not None and not self._draft_worker.is_finished:
             self._draft_worker.cancel()
         self._draft_worker = None
+        # Defensive: whatever prompt a draft recorded is scoped to that editor
+        # session; clearing on close means the next editor's manual commit can't
+        # inherit a stale prompt even if a path skips the worker handlers (task 35).
+        self._last_drafted_prompt = ""
         self.query_one(DetailInspector).display = True
         self.query_one(MessageList).focus()
 
@@ -715,11 +719,17 @@ class ChatApp(App):
                 editor.set_output(text)
         except asyncio.CancelledError:
             # A cancelled draft keeps whatever streamed so far; the editor stays
-            # open (the caller cancelled via Esc) and mutates no graph state.
+            # open (the caller cancelled via Esc) and mutates no graph state. Drop
+            # the recorded prompt so a subsequent hand-written commit stamps ""
+            # (a manual K) rather than the abandoned draft's prompt (task 35).
+            self._last_drafted_prompt = ""
             raise
         except Exception as exc:
             editor.set_output(f"Draft failed: {exc}")
             logger.error("draft error | error=%s", exc)
+            # Same as the cancel path: a failed draft must not leave its prompt
+            # lingering to corrupt a later manual commit (task 35).
+            self._last_drafted_prompt = ""
 
     async def action_commit_compression(self) -> None:
         """`Ctrl+S` in the draft editor: fold the selected range into a K.
