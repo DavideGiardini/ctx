@@ -288,6 +288,7 @@ class ChatApp(App):
                 role=node.role,
                 node_type=node.node_type,
                 content=originals,
+                content_nodes=tuple(children),
                 prompt=node.meta.get("prompt", ""),
                 output=node.content,
             )

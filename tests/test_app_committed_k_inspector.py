@@ -90,6 +90,31 @@ async def test_manual_k_inspector_hides_empty_prompt_split(repo, workspace):
         assert inspector.splits_visible() == ["content", "output"]
 
 
+async def test_k_inspector_originals_split_renders_compact_rows(repo, workspace):
+    """Task 38: the Originals (content) split renders the folded children as the
+    shared compact MessageRows — not a plain markdown-bold text dump — and a
+    visible divider sits between the three splits."""
+    app = _app(repo, workspace)
+    async with app.run_test() as pilot:
+        await _two_turns(app)
+        await _open_editor_on_full_range(pilot)
+
+        app.query_one("#compress-output", TextArea).text = "SUMMARY"
+        await pilot.press("ctrl+s")  # commit -> K folding all 4 nodes
+        await pilot.press("home")  # select the K
+        await pilot.pause()
+        await pilot.pause()
+
+        inspector = app.query_one(DetailInspector)
+        # One compact row per folded child (user1, assistant1, user2, assistant2).
+        rows = list(inspector.query("#detail-content-rows MessageRow"))
+        assert len(rows) == 4
+        # The plain-text content Static is hidden in favour of the rows.
+        assert inspector.query_one("#detail-content-text").display is False
+        # A visible divider (border) separates the splits.
+        assert inspector.query_one("#detail-content").styles.border_bottom[0]
+
+
 async def test_number_keys_maximize_k_splits(repo, workspace):
     app = _app(repo, workspace)
     async with app.run_test() as pilot:

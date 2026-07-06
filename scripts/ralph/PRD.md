@@ -145,20 +145,7 @@ diffs in git history. One line each below so open tasks can still resolve their
 - [x] 35 — UI: reset `_last_drafted_prompt` on draft cancel/failure
 - [x] 36 — UI: extract a shared compact message-row renderer (`MessageRow`)
 - [x] 37 — UI: rebuild the diff view as a full-screen two-pane node diff
-
-- [ ] **38. UI: inspector splits render compact rows + visible dividers** _(deps:
-      36; user-verified BROKEN)_ — the detail inspector's central "Originals"/context
-      split renders folded messages as plain markdown-bold text
-      (`ctx/ui/widgets/detail_inspector.py`, `Static.update`), and
-      `DetailInspector.DEFAULT_CSS` has no rule/border between the
-      `#detail-prompt`/`#detail-content`/`#detail-output` sections. Render the
-      message-bearing split(s) as the task-36 compact rows (colored bar, two lines),
-      and add a visible divider between the three splits. _Acceptance:_ **visual
-      (primary)** — render `k-inspector` via `tools/agent/visual.py` and `Read` the
-      PNG: the inspector's "Originals" split shows **compact rows with colored left
-      bars** (not plain markdown-bold text) and a **visible divider** sits between
-      the three splits. **Floor** — a Pilot test asserts the split structure and
-      snapshot `splits=prompt,content,output`. `scripts/check.sh` green.
+- [x] 38 — UI: inspector splits render compact rows + visible dividers
 
 - [ ] **39. UI: compression node color = context color** _(deps: none; user-verified
       BROKEN)_ — the palette (`ctx/core/config.py:31-32`) sets `context=#22c55e`

@@ -19,6 +19,9 @@ from textual.containers import Container, Vertical, VerticalScroll
 from textual.reactive import reactive
 from textual.widgets import Markdown, Static
 
+from ctx.models.nodes import Node
+from ctx.ui.widgets.message_row import MessageRow
+
 
 @dataclass(frozen=True)
 class NodeView:
@@ -29,6 +32,10 @@ class NodeView:
     prompt: str = ""
     output: str = ""
     source_path: str | None = None
+    # Message-bearing nodes behind the content split (a K's folded children).
+    # When present, the content ("Originals") split renders these as compact
+    # rows (task 38); ``content`` stays the joined text for text-based callers.
+    content_nodes: tuple[Node, ...] = ()
 
 
 class _Split(VerticalScroll):
@@ -72,6 +79,10 @@ class DetailInspector(Container):
         color: $text-muted;
         text-style: italic;
     }
+    /* A visible divider between the three context splits (task 38). */
+    DetailInspector #detail-prompt { border-bottom: solid $surface; }
+    DetailInspector #detail-content { border-bottom: solid $surface; }
+    DetailInspector #detail-content-rows { height: auto; }
     DetailInspector _Split:focus {
         background: $surface-lighten-1;
     }
@@ -111,6 +122,7 @@ class DetailInspector(Container):
             with _Split(id="detail-content"):
                 yield Static("Content", classes="split-label", id="detail-content-label")
                 yield Static("", id="detail-content-text")
+                yield Vertical(id="detail-content-rows")
             with _Split(id="detail-output"):
                 yield Static("Output", classes="split-label", id="detail-output-label")
                 yield Static("", id="detail-output-text")
@@ -320,9 +332,28 @@ class DetailInspector(Container):
             value = values[name]
             box.display = bool(value)
             any_visible = any_visible or bool(value)
-            self.query_one(text_id, Static).update(value)
             self.query_one(f"#detail-{name}-label", Static).update(labels[name])
+            if name == "content":
+                self._render_content_split(view, value)
+            else:
+                self.query_one(text_id, Static).update(value)
         if not any_visible:
             # Defensive: a context node with no data at all still shows Content.
             self.query_one("#detail-content", _Split).display = True
-            self.query_one("#detail-content-text", Static).update("(no content)")
+            self._render_content_split(view, "(no content)")
+
+    def _render_content_split(self, view: NodeView, text: str) -> None:
+        """Render the content ("Originals" for a K) split. When the view carries
+        message-bearing nodes (a K's folded children), show them as the shared
+        compact rows (task 38); otherwise fall back to the plain-text body."""
+        rows = self.query_one("#detail-content-rows", Vertical)
+        text_widget = self.query_one("#detail-content-text", Static)
+        rows.remove_children()
+        if view.content_nodes:
+            text_widget.display = False
+            rows.display = True
+            rows.mount_all([MessageRow(node) for node in view.content_nodes])
+        else:
+            rows.display = False
+            text_widget.display = True
+            text_widget.update(text)

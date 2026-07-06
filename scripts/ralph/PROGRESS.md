@@ -2469,3 +2469,44 @@ Git history is the source of truth for *what changed*; this file captures the
   to get a drifted later turn, submit BOTH turns first then compress+expand the
   earlier pair (compressing before the 2nd turn makes it fold on both sides → no
   drift, `g d` correctly no-ops).
+
+## 2026-07-06 — Task 38: inspector splits render compact rows + visible dividers
+- UI-only, thin adapter (core untouched). The committed-K detail inspector's
+  central "Originals" (content) split used to render the folded children as one
+  joined `**role**\n\ncontent` markdown-bold string via `Static.update`; now it
+  renders them as the shared task-36 `MessageRow`s (colored left bar, two-line
+  compact row), one per folded child. Added a visible divider between the three
+  splits (Prompt / Originals / Summary).
+- Changes:
+  - `NodeView` gained `content_nodes: tuple[Node, ...] = ()` — the message-bearing
+    nodes behind the content split. `content` (the joined text) is KEPT so the
+    existing string assertions and `maximize_named`'s non-empty check stay valid;
+    the rows are an *additional* view, not a replacement of `content`.
+  - `ctx/ui/app.py::_node_view` passes `content_nodes=tuple(children)` for a K.
+  - `DetailInspector.compose` adds `Vertical(id="detail-content-rows")` inside the
+    content `_Split`; `_render_context` delegates the content split to a new
+    `_render_content_split(view, text)` that mounts `MessageRow`s when
+    `content_nodes` is present (via `remove_children()` + `mount_all(...)`, both
+    queued on the pump — flushed by `pilot.pause()`), else shows the plain text
+    (unchanged for file/context imports and the defensive "(no content)").
+  - CSS: `border-bottom: solid $surface` on `#detail-prompt` and `#detail-content`
+    (dividers between the three splits); `#detail-content-rows { height: auto }`.
+- GOTCHA: the helper was first named `_render_content` — collides with a Textual
+  `Widget._render_content` method (mypy override error). Renamed to
+  `_render_content_split`. Don't reintroduce the bare name.
+- Tests: added one Pilot test `test_k_inspector_originals_split_renders_compact_rows`
+  (asserts `#detail-content-rows MessageRow` count == folded-children count, the
+  plain-text Static is hidden, and `#detail-content` carries a `border_bottom`
+  style). Existing `splits_visible == [prompt,content,output]` tests remain the
+  structure floor and stayed green (they key on `content` string / splits_visible,
+  both preserved).
+- Verification: `bash scripts/check.sh` green (681 passed, was 680). **Visual**:
+  rendered `k-inspector` (140x44) via `tools/agent/visual.py`, `Read` the PNG —
+  judged against "Originals split shows compact rows with colored left bars + a
+  visible divider between the three splits" → PASS (Originals shows "hello there"
+  as a compact row with a colored left bar + `--%` slot; dashed horizontal
+  dividers between Prompt|Originals and Originals|Summary). Pure rendering change,
+  so no qa-tester (visual driver sees on-disk code by construction).
+- Gotcha for 43: the inspector's Originals rows currently show a default `--%`
+  weight slot; folded originals are "not in context" (Q9) — a future polish could
+  call `set_weight_not_in_context()`, but task 38 left the default (out of scope).
