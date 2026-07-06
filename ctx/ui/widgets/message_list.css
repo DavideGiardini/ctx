@@ -61,8 +61,22 @@ MessageWidget.pass-start {
 MessageWidget.selected {
     background: $surface-lighten-1;
 }
+/* Range selection wears the same grey hover background as the cursor (the bold
+   role-colored left bar is set in Python) — a multi-node run reads as one
+   highlighted block, not a separate solid-blue mode (task 41). */
 MessageWidget.range-selected {
-    background: $primary-darken-2;
+    background: $surface-lighten-1;
+}
+/* Bridge the inter-row gap inside a selected run so the highlight is one
+   continuous grey block: the upper row absorbs its separator as grey padding
+   and the lower row drops its (pass-start) top margin. Must follow .pass-start
+   so the zeroed top margin wins at equal specificity (task 41). */
+MessageWidget.range-continues-below {
+    margin-bottom: 0;
+    padding: 0 1 1 2;
+}
+MessageWidget.range-continues-above {
+    margin-top: 0;
 }
 MessageList {
     scrollbar-size: 1 1;

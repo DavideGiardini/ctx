@@ -44,12 +44,15 @@ If they all match, the visual gate is calibrated. Any mismatch = a broken gate.
 | bug | state | what the eye must catch |
 |---|---|---|
 | `task-40-blank-line-before-K` | `k-after-assistant` | a blank margin row separating a K from the assistant turn directly above it (pixel-level vertical spacing — `qa-tester` **cannot** see this) |
+| `task-41-range-selection-contiguous-hover-style` | `range-selection` | a multi-node range reads as one block: grey hover-style background + bold role-colored left bar on every selected row, **contiguous across the inter-row gaps** — not solid blue rows with default-colored gaps |
 | `task-39-K-bar-colour` (calibration only) | `committed-K` | the K's left bar is context-green, not violet (this one is *also* a one-line `ctx_snapshot` `colors:` assertion — kept only to calibrate the gate's colour discrimination, not as evidence the visual capability is needed) |
 
-The task-40 pair is the load-bearing case: a genuinely pixel-level bug that no
-queryable proxy captures. It was validated by hand when the gate was built — the
-`__FAIL` render shows the K flush against the assistant above it; the `__PASS`
-render inserts the blank margin row.
+The task-40 and task-41 pairs are the load-bearing cases: genuinely pixel-level bugs
+no queryable proxy captures. task-40 — the `__FAIL` render shows the K flush against
+the assistant above it; the `__PASS` render inserts the blank margin row. task-41 —
+the `range-blue` (FAIL) render shows solid-blue selected rows with dark gaps between
+them; the `range-grey` (PASS) render shows the grey hover-style block with role-colored
+bars bridged across the gaps.
 
 ## Adding a bug
 

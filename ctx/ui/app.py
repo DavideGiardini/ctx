@@ -382,19 +382,14 @@ class ChatApp(App):
         return ids[lo : hi + 1]
 
     def _apply_range_selection(self) -> None:
-        selected = set(self._range_ids())
-        for widget in self.query_one(MessageList).query(MessageWidget):
-            widget.set_range_selected(widget.node.id in selected)
+        self.query_one(MessageList).set_range(set(self._range_ids()))
 
     def _clear_range(self) -> None:
         if self._range_anchor_id is None:
             return
         self._range_anchor_id = None
-        try:
-            for widget in self.query_one(MessageList).query(MessageWidget):
-                widget.set_range_selected(False)
-        except Exception:
-            pass
+        with contextlib.suppress(Exception):
+            self.query_one(MessageList).set_range(set())
 
     # --- deep-dive (browse a compression's folded originals) ------------
 

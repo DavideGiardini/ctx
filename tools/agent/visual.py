@@ -79,6 +79,24 @@ async def _apply_post_variant(app, pilot, variant: str | None) -> None:
             if widget._role == "compression":
                 widget.set_new_pass(want_gap)
         await pilot.pause()
+    if variant in ("range-blue", "range-grey"):
+        # Force the task-41 broken look (solid blue, thin bar, gaps unbridged) vs
+        # the fixed look (leave the real grey/contiguous styling untouched) so the
+        # standing fixture keeps discriminating after the fix lands.
+        from textual.color import Color
+
+        from ctx.ui.widgets.message_list import MessageWidget
+        from ctx.ui.widgets.message_row import _TALL_ROLES
+
+        if variant == "range-blue":
+            for widget in app.query(MessageWidget):
+                if widget.has_class("range-selected"):
+                    widget.styles.background = Color.parse("#1e3a8a")
+                    widget.remove_class("range-continues-above")
+                    widget.remove_class("range-continues-below")
+                    if widget._role in _TALL_ROLES:
+                        widget.styles.border_left = ("tall", widget._border_color)
+        await pilot.pause()
 
 
 # --- Named states: keystroke scripts to reach a screen worth looking at ------
@@ -214,6 +232,19 @@ FIXTURE: list[dict] = [
         ),
         "bad": "k40-nogap",
         "good": "k40-gap",
+    },
+    {
+        "bug": "task-41-range-selection-contiguous-hover-style",
+        "state": "range-selection",
+        "intent": (
+            "A multi-node range selection must read as one continuous block: a "
+            "grey (hover-style) background with a bold role-colored left bar on "
+            "every selected row, AND the highlight must bridge the gaps between "
+            "rows (the inter-row gaps are grey too) — not solid blue rows with "
+            "default-colored gaps between them."
+        ),
+        "bad": "range-blue",
+        "good": "range-grey",
     },
     # task-39 (K bar colour) is intentionally NOT the primary fixture bug — it is a
     # one-line palette assertion (ctx_snapshot colors:) that needs no vision. It is

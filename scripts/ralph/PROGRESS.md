@@ -2587,3 +2587,57 @@ Git history is the source of truth for *what changed*; this file captures the
   `--variant k40-gap` → separated (FIXED); the real render matches k40-gap.
   Verdict: PASS. Pure rendering change, so no qa-tester (visual driver sees
   on-disk code by construction).
+
+## 2026-07-06 — Task 41: range selection = hover styling, bridged across gaps
+- UI-only rendering change (CSS + a small MessageWidget/MessageList refactor).
+  Two defects: (1) `.range-selected` was a solid dark blue (`$primary-darken-2`)
+  unlike the grey hover `.selected` (`$surface-lighten-1`); (2) the inter-row
+  **margin** gaps kept the default background, so a multi-node selection read as
+  separate bars, not one block (margin paints outside the widget box).
+- Changes:
+  - `ctx/ui/widgets/message_list.css`: `.range-selected` background → grey
+    (`$surface-lighten-1`, same as hover). New `.range-continues-below`
+    (`margin-bottom: 0; padding: 0 1 1 2`) and `.range-continues-above`
+    (`margin-top: 0`), placed AFTER `.pass-start` so the zeroed top margin wins at
+    equal specificity. The upper row of an adjacent pair absorbs the separator as
+    grey padding; the lower row drops its pass-start top margin → one grey row
+    between, contiguous.
+  - `ctx/ui/widgets/message_list.py`: `MessageWidget._refresh_border()` sets a
+    bold `thick` role-colored left bar when the row is cursor- OR range-selected
+    (else `tall`); both `set_selected`/`set_range_selected` call it. New
+    `set_range_continues(above, below)`. New `MessageList.set_range(selected_ids)`
+    centralizes the per-row flags (marks range-selected + computes contiguity from
+    visible order) so the app never has to know a row's neighbours.
+  - `ctx/ui/app.py`: `_apply_range_selection`/`_clear_range` now delegate to
+    `MessageList.set_range(...)` (used `contextlib.suppress` in clear — ruff SIM105
+    fired once it became a single statement).
+  - `tools/agent/visual.py`: new post-variant `range-blue` (forces the broken look:
+    solid blue, thin bar, continues classes stripped) + `range-grey` (no-op = real
+    fixed code); new FIXTURE entry `task-41-range-selection-contiguous-hover-style`.
+  - `tests/test_visual_states.py`: added `range-blue`/`range-grey` to
+    `known_variants`.
+  - `scripts/ralph/VISUAL-FIXTURE.md`: documented the new pair.
+- GOTCHA: first tried `padding-bottom: 1` (single edge) in `.range-continues-below`
+  — the fixed render lost its left indent (selected rows' text jumped ~2 cols
+  left). Textual reset the `padding` shorthand when only the bottom edge was set in
+  a higher-specificity rule. Fixed by writing the full shorthand `padding: 0 1 1 2`
+  (preserves left 2 / right 1 / top 0, adds bottom 1). NOTE the asymmetry: the
+  single-edge **margin** overrides (`margin-top: 0`, `margin-bottom: 0`) merge fine
+  (same as `.pass-start`'s `margin-top: 1`), but single-edge **padding** did not —
+  use the full padding shorthand if you touch this.
+- Tests (written directly, not code-blind — a CSS + ~30-line class-logic change
+  with a precisely-specified floor, same judgment as tasks 39/40):
+  `tests/test_app_range_selection.py::test_range_selection_uses_hover_style_and_bridges_gaps`
+  — v+down+down selects rows 0,1,2; asserts every selected row's `border_left[0]
+  == "thick"`, the interior contiguity classes (top: continues-below only; mid:
+  both; bottom: continues-above only), and the outside row has no selection classes
+  and a `tall` bar (the regression net for both the bar restyle and the bridging).
+- Verification: `bash scripts/check.sh` green (688 passed, was 687). **Visual**:
+  rendered `range-selection` (real on-disk code) — the 3 selected rows show bold
+  role-colored (blue/orange/blue) left bars over a grey hover background, the bar +
+  background bridging the inter-row gaps into one continuous block; the 4th
+  (unselected) row is detached by a normal gap; no solid blue anywhere. Calibrated
+  both directions: `--variant range-blue` → solid-blue rows with dark gaps (BROKEN),
+  `--variant range-grey` → grey contiguous block (FIXED); both discriminate.
+  Verdict: PASS. Pure rendering change, so no qa-tester (visual driver sees on-disk
+  code by construction).

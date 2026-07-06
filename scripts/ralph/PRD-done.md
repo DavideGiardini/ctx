@@ -900,3 +900,21 @@ become new `- [ ]` tasks" instruction. Not blockers for the Sprint 3 feature set
       (matching other turn-to-turn gaps); verify both directions against the task-40
       pair in `scripts/ralph/VISUAL-FIXTURE.md`. **Floor** — a Pilot test asserts the
       K widget carries the `pass-start` class. `scripts/check.sh` green.
+
+- [x] **41. UI: range selection uses hover styling, bridged across gaps** _(deps:
+      none; user-verified BROKEN)_ — `MessageWidget.range-selected` is a solid dark
+      blue (`background: $primary-darken-2`, `ctx/ui/widgets/message_list.css`),
+      unlike the grey hover/cursor style (`.selected { background:
+      $surface-lighten-1 }`), and the blank **margin** rows between two selected
+      messages keep the default background (the highlight doesn't bridge the gap
+      because `margin` paints outside the widget box). Restyle range selection to
+      match hover: a bold role-colored left bar + light-grey background, and make the
+      highlight **contiguous** across the inter-message gaps (e.g. convert the
+      selected run's separators to padding, or paint the gap rows), so a multi-node
+      selection reads as one continuous block. _Acceptance:_ **visual (primary —
+      pixel-level)** — render `range-selection` via `tools/agent/visual.py` and
+      `Read` the PNG: a multi-node `v`-selection shows **grey (hover-style)
+      backgrounds with bold role-colored left bars on every selected row AND
+      contiguous across the gaps between them** — not solid blue with default-color
+      gaps. **Floor** — a Pilot test asserts the `range-selected` styling/class on
+      the selected run. `scripts/check.sh` green.

@@ -76,7 +76,14 @@ async def test_colour_variants_flip_the_compression_palette(variant, expected):
 
 def test_fixture_entries_are_well_formed():
     # The manifest the agent judges against must reference real states/variants.
-    known_variants = {"k-violet", "k-green", "k40-nogap", "k40-gap"}
+    known_variants = {
+        "k-violet",
+        "k-green",
+        "k40-nogap",
+        "k40-gap",
+        "range-blue",
+        "range-grey",
+    }
     for entry in FIXTURE:
         assert entry["state"] in STATES
         assert entry["bad"] in known_variants
