@@ -227,7 +227,10 @@ a left `DetailInspector` and a right `#conversation` pane (the `MessageList` +
   logo / context-window gauge — `set_context_pct(pct, approximate)` renders a
   filled bar and a leading `~` when the figure is only an estimate; `--%` when
   the window is unknown),
-  `AppFooter` (mode-driven keybinding hints + model), `InputBar` (command
+  `AppFooter` (mode-driven keybinding hints + model; the Edit-mode hint is
+  contextual — `set_selection(node_type, drifted)` surfaces `x Expand` only on a
+  K and `g d Drift` only on a drifted turn, fed by `_sync_footer`, task 43c),
+  `InputBar` (command
   suggest/cycle), `IncludeScreen` (file-picker modal), `HistoryScreen`
   (conversation picker). CSS split across `app.css` and `widgets/*.css` plus
   widget `DEFAULT_CSS`.

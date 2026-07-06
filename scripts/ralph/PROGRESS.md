@@ -2675,3 +2675,40 @@ Git history is the source of truth for *what changed*; this file captures the
   end-to-end qa-tester pass is task 45.
 - AGENTS.md app.py bullet updated: transient hints via `_hint`→`notify` (not graph
   nodes); durable breadcrumbs stay `add_system_message`; `describe_state` `last_hint`.
+
+## 2026-07-06 — Task 43: no weight on non-model nodes; silent invalid keys; contextual footer
+- UI-only, three small changes:
+  - (a) `MessageRow.set_weight_pct` + `compose` now render the weight slot **empty**
+    (not "--%") when `self.node.goes_to_model()` is False. A system breadcrumb never
+    reaches the model, so a `--%` there was misleading. Suppression lives in the
+    shared row (single surface) so it holds in the list, diff panes, and splits.
+  - (b) `action_expand` (`x`): a non-compression selection is now a **silent no-op**
+    (was a "Not a compression node" hint) — the footer advertises `x` only on a K, so
+    a warning there is noise. Also wrapped `core.expand_compression` in
+    `try/except ValueError` → `_hint(str(exc))` (mirrors `action_commit_compression`;
+    folds in the review finding about an uncaught core guard).
+  - (c) The Edit-mode footer hint is now contextual: `AppFooter.set_selection(
+    node_type, drifted)` + `_edit_hint()` insert `x Expand` only when a K is selected
+    and `g d Drift` only on a drifted assistant turn; `_HINTS["edit"]` is the
+    no-selection base (head+tail, `x Expand` removed from it). App `_sync_footer`
+    now also pushes selection context; called from `_select_message`/`_clear_selection`
+    so the hint tracks the cursor. Drift computed via existing `_turn_has_drift`.
+- Tests (written directly — UI change, ~35 product lines, precisely-specified floor;
+  same judgment as tasks 39–42):
+  - `tests/test_message_row.py`: `test_non_model_node_shows_no_weight_slot` (system
+    row weight Static renders "" at mount and after `set_weight_pct(None)`),
+    `test_model_node_keeps_its_weight_slot` (assistant still shows "12%").
+  - `tests/test_app_footer_context.py`: footer omits `x Expand` on a plain turn (==
+    `_HINTS["edit"]`) and gains it once a committed K is selected.
+  - Updated `tests/test_app_expand.py`: the x-on-non-compression test now asserts a
+    silent no-op (`last_hint is None`, node count unchanged) — deliberate behavior
+    change from the task-42 "Not a compression node" hint contract; renamed the test.
+- Verification: `bash scripts/check.sh` green (693 passed, was 690 + net new/renamed).
+  No qa-tester/visual this iteration: the MCP harness runs `ctx.*` cached and can't
+  see this session's edits (AGENTS.md), and every acceptance proxy is queryable and
+  covered by the deterministic Pilot/row floor above (weight Static content, footer
+  string, node count + last_hint). No visual fixture state exercises a system-node
+  weight slot, and the "--%" suppression is a direct-render assertion, not a spacing
+  judgment. Phase-3e end-to-end qa-tester + visual pass is task 45.
+- Doc updates: AGENTS.md AppFooter bullet (contextual Edit hint via set_selection);
+  removed the stale "Not a compression node" example from `_hint`'s docstring.

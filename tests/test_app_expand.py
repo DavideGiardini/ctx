@@ -5,8 +5,9 @@ originally Task 11; ADR-0016 A#3/A#5).
 (the non-destructive inverse of a commit): the children come back on the line,
 ``K`` leaves the view, the selection lands on the first restored child, and the
 restored view round-trips through storage. A later turn then sees the children
-verbatim — no ``<conversation_summary>`` wrapper. ``x`` on any other node
-shows a transient "Not a compression node" hint (task 42) and mutates nothing.
+verbatim — no ``<conversation_summary>`` wrapper. ``x`` on any other node is a
+**silent no-op** (task 43b): no hint, no graph mutation — the footer advertises
+``x`` only when a K is selected, so a warning there would be noise.
 
 Task 13b removed the dead ``/expand`` slash command: expand is a selection-
 dependent action, and a slash command can never carry a selection (entering
@@ -145,7 +146,7 @@ async def test_next_turn_sees_children_verbatim_after_expand(repo, workspace):
         assert "second" in blob
 
 
-async def test_expand_on_non_compression_hints_without_adding_a_node(repo, workspace):
+async def test_expand_on_non_compression_is_a_silent_no_op(repo, workspace):
     app = _app(repo, workspace)
     async with app.run_test() as pilot:
         await _two_turns(app)
@@ -156,6 +157,6 @@ async def test_expand_on_non_compression_hints_without_adding_a_node(repo, works
         await pilot.press("x")
 
         state = app.describe_state()
-        # A transient hint, not a persistent graph node (task 42).
-        assert state["last_hint"] == "Not a compression node"
+        # Silent no-op (task 43b): no hint, no graph mutation.
+        assert state["last_hint"] is None
         assert len(state["nodes"]) == before

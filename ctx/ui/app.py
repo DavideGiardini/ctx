@@ -323,6 +323,7 @@ class ChatApp(App):
         self._selected_node_id = node_id
         if node_id is None:
             self.query_one(DetailInspector).show(None)
+            self._sync_footer()
             return
         try:
             widget = message_list.query_one(f"#msg-{node_id}", MessageWidget)
@@ -332,6 +333,7 @@ class ChatApp(App):
             pass
         node = self._get_selected_node()
         self.query_one(DetailInspector).show(self._node_view(node) if node else None)
+        self._sync_footer()
 
     def _clear_selection(self) -> None:
         if self._selected_node_id:
@@ -344,6 +346,7 @@ class ChatApp(App):
                 pass
         self._selected_node_id = None
         self._clear_range()
+        self._sync_footer()
 
     def _in_full_screen_inspection(self) -> bool:
         """True while a full-screen read-only inspection view is up — a deep-dive
@@ -625,8 +628,11 @@ class ChatApp(App):
 
         Inert unless a node is selected in Edit mode (not while focus is in the
         detail pane, and not while deep-diving — the deep-dive is read-only, Q8).
-        A non-compression selection breadcrumbs "Not a compression node" and
-        mutates nothing; refused while a turn is streaming (H2)."""
+        A non-compression selection is a **silent no-op** (task 43b): ``x`` is
+        simply not a valid action there, and the footer already advertises it only
+        when a K is selected — a hint would be noise. Refused while a turn is
+        streaming (H2), and any core guard (``ValueError``) surfaces as a hint
+        rather than propagating uncaught (mirrors ``action_commit_compression``)."""
         if self.mode != "edit" or self._focus_in_detail():
             return
         if self._in_full_screen_inspection():  # read-only (tasks 12, 27)
@@ -636,10 +642,13 @@ class ChatApp(App):
             return
         node = self._get_selected_node()
         if node is None or node.node_type != "compression":
-            await self._hint("Not a compression node")
             return
         children = self.core.folded_children(node.id)
-        self.core.expand_compression(node.id)
+        try:
+            self.core.expand_compression(node.id)
+        except ValueError as exc:
+            await self._hint(str(exc))
+            return
         await self._rebuild_message_list()
         if children:
             self._select_message(children[0].id)
@@ -823,8 +832,8 @@ class ChatApp(App):
     async def _hint(self, text: str) -> None:
         """Surface a transient UI hint — a toast, never a graph node (task 42).
 
-        Hints ("Write a summary before committing", "Not a compression node",
-        "No files to include", …) are ephemeral guidance; routing them through
+        Hints ("Write a summary before committing", "No files to include", …) are
+        ephemeral guidance; routing them through
         ``core.add_system_message`` made them accumulate as permanent nodes that
         survive ``/new``/``/resume``. They go through ``notify`` instead.
         Durable breadcrumbs (``/model`` changes, connectivity notices) stay
@@ -953,7 +962,12 @@ class ChatApp(App):
         self._sync_footer()
 
     def _sync_footer(self) -> None:
-        self.query_one(AppFooter).set_detail(self.query_one(DetailInspector).pane_mode)
+        footer = self.query_one(AppFooter)
+        footer.set_detail(self.query_one(DetailInspector).pane_mode)
+        node = self._get_selected_node()
+        node_type = node.node_type if node else None
+        drifted = node is not None and self._turn_has_drift(node, self.core.all_nodes())
+        footer.set_selection(node_type, drifted)
 
     def _get_selected_node(self) -> Node | None:
         if self._selected_node_id is None:

@@ -87,6 +87,28 @@ async def test_context_row_has_no_kind_glyph():
             row.query_one(".kind", Static)
 
 
+async def test_non_model_node_shows_no_weight_slot():
+    # Task 43a: a system breadcrumb never reaches the model, so its weight slot
+    # is blank rather than a misleading "--%" — both at first mount and after a
+    # refresh pushes a (None) weight onto it.
+    app = _Host(_make_node("system"))
+    async with app.run_test(size=(80, 24)):
+        row = app.query_one(MessageRow)
+        weight = row.query_one(".weight", Static)
+        assert str(weight.render()) == ""
+        row.set_weight_pct(None)
+        assert str(weight.render()) == ""
+
+
+async def test_model_node_keeps_its_weight_slot():
+    # The suppression is scoped to non-model nodes: a turn still shows its %.
+    app = _Host(_make_node("assistant"))
+    async with app.run_test(size=(80, 24)):
+        row = app.query_one(MessageRow)
+        row.set_weight_pct(12)
+        assert str(row.query_one(".weight", Static).render()) == "12%"
+
+
 def test_snapshot_colors_line_shows_compression_equals_context_green():
     # Task 39 floor: the ctx_snapshot `colors:` line reports the compression bar
     # color equal to the context green (#22c55e), not the old violet.

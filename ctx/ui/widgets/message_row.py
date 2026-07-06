@@ -81,6 +81,11 @@ class MessageRow(Vertical):
             self.styles.max_height = None
 
     def set_weight_pct(self, pct: int | None) -> None:
+        # A node that never reaches the model (a system breadcrumb) has no weight
+        # to show: leave the slot empty rather than a misleading "--%" (task 43a).
+        if not self.node.goes_to_model():
+            self.query_one(".weight", Static).update("")
+            return
         self.query_one(".weight", Static).update("--%" if pct is None else f"{pct}%")
 
     def set_weight_not_in_context(self) -> None:
@@ -102,7 +107,7 @@ class MessageRow(Vertical):
             if glyph:
                 yield Static(glyph, classes="kind")
             yield Static("", classes="drift")
-            yield Static("--%", classes="weight")
+            yield Static("--%" if self.node.goes_to_model() else "", classes="weight")
         if self._role in ("system", "context"):
             yield Static(self._content or "", classes="content")
         else:

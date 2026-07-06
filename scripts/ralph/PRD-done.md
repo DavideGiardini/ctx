@@ -931,3 +931,20 @@ become new `- [ ]` tasks" instruction. Not blockers for the Sprint 3 feature set
       changes). _Acceptance:_ qa-tester — triggering a hint (empty-summary commit)
       shows a transient message and adds **no** new node to `ctx_snapshot`; a
       durable `/model` breadcrumb still appears as a node. `scripts/check.sh` green.
+
+- [x] **43. UI: no weight on non-model nodes; silent invalid keys; contextual footer**
+      _(deps: 42; user-verified BROKEN)_ — (a) system/breadcrumb nodes show a `--%`
+      weight slot (`MessageWidget`, `ctx/ui/widgets/message_list.py:98-104`) though
+      they never go to the model — suppress the weight slot for nodes where
+      `goes_to_model()` is False and/or render durable breadcrumbs dimmed. (b) `x`
+      on a non-compression node emits a "Not a compression node" breadcrumb
+      (`ctx/ui/app.py:627`) — make it a **silent no-op** instead (and fold in the
+      `action_expand` review finding: wrap its `core.expand_compression` call in
+      `try/except ValueError` like `action_commit_compression` so a core guard never
+      propagates uncaught). (c) the footer (`ctx/ui/widgets/app_footer.py:9`
+      `_HINTS`) should surface only the actions valid for the current selection
+      (e.g. `x` only on a K, `g d`/"view drift" only on a drifted turn). `c` opening
+      a range-of-one is by-design (ADR-0016 Q5) — leave it. _Acceptance:_ qa-tester
+      — pressing `x` on a plain node adds no node and shows no warning; a system
+      breadcrumb shows no `--%`; the footer hint changes with the selected node type.
+      `scripts/check.sh` green.
