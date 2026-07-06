@@ -84,6 +84,14 @@ Write `scripts/ralph/PRD.md` following the shape of `scripts/ralph/PRD.template.
 exactly (Goal, Constraints/notes, Tasks as `- [ ]` with **bold title** — what —
 _Acceptance:_, Out of scope). Each task line must be self-contained enough that a
 fresh agent who reads only the PRD, `AGENTS.md`, and `PROGRESS.md` can execute it.
+
+**The PRD is a live worklist, not an archive — it stays lean.** The loop re-reads
+the whole file every iteration, so completed-task text is pure context tax. Per
+PROMPT.md step 8, when a task finishes the loop moves its full body to
+`scripts/ralph/PRD-done.md` and leaves a one-line `- [x] <N> — <title>` entry under
+a "## Completed" ledger. So: write open tasks in full; never let finished-task
+prose pile up in `PRD.md`. If you inherit a PRD already bloated with done tasks,
+prune it the same way before running the loop.
 Then tell the user how to run it:
 ```
 git switch -c feat/<name>     # if not already on a feature branch

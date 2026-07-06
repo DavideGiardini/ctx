@@ -26,5 +26,11 @@ floor (snapshot field / CSS class / unit test) under the picture.
 - [ ] **<Task 2 title>** — <what to do>. _Acceptance:_ <…>.
 - [ ] **<Task 3 title>** — <what to do>. _Acceptance:_ <…>.
 
+<!-- As tasks complete, the loop PRUNES them (PROMPT.md step 8): the finished
+task's full body is cut from here and moved to `PRD-done.md`, leaving a one-line
+entry under a "## Completed" ledger below. This keeps the live PRD lean because the
+loop re-reads the whole file every iteration. Start with no Completed section; it
+grows as the ledger, and `PRD-done.md` is created on the first completion. -->
+
 ## Out of scope
 - <Explicitly list what this feature does NOT include, so the loop doesn't drift.>

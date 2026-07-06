@@ -147,7 +147,14 @@ Operate as the autonomous engineer described in `AGENTS.md` (NOT professor mode)
    rendering change, prefer the visual driver (always current) over `qa-tester`.
 
 8. **Record progress — *before* you commit, so it lands in the same commit.**
-   - Mark the task done in the PRD: change its `- [ ]` to `- [x]`.
+   - **Mark the task done AND prune the PRD (keep the live worklist lean — the loop
+     re-reads the whole PRD every iteration).** Don't just flip `- [ ]` to `- [x]` in
+     place. Instead: **cut the finished task's full body out of `scripts/ralph/PRD.md`,
+     append it verbatim under its phase in `scripts/ralph/PRD-done.md`, and add a
+     single one-line entry** to the "Completed" ledger in `PRD.md`
+     (`- [x] <N> — <title>`). Preserve the task number so `deps:` / "task-N"
+     references still resolve. All of this goes in *this task's* commit (step 9), not
+     a separate one.
    - Append a short dated entry to `scripts/ralph/PROGRESS.md`: what you did, what
      tests you added (or why none were warranted), the verification you ran, key
      decisions, and any gotcha a future fresh iteration must know.
