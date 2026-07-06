@@ -18,6 +18,17 @@ def build_context(
     message; assistant nodes are appended as their own; other roles (e.g.
     system) are skipped.
 
+    ROLE-ALTERNATION INVARIANT: the returned list never contains two adjacent
+    dicts of the same role. Strict role-alternation providers (Anthropic-family
+    via litellm) reject consecutive same-role turns, so whenever user-role
+    material would follow an already-emitted user message it is *merged* into
+    that message with an explicit ``\\n\\n`` separator — never emitted as a
+    second user dict and never glued on with no separator. A dropped node (a
+    system breadcrumb) emits nothing and does **not** break the merge: two user
+    runs separated only by dropped nodes still collapse to one user message.
+    Only an assistant message breaks the run, so material after it starts a
+    fresh user dict (task 34).
+
     Failures are made *visible* rather than silent: when a context node's file
     fails to load (``load_file`` raises ``OSError``/``ValueError``), a marked
     ``<context_import source="…" error="…">`` block is emitted as user material
@@ -31,13 +42,9 @@ def build_context(
     ``load_file`` is injected so this stays pure and testable without I/O.
     """
     messages: list[dict] = []
-    # A dropped node (e.g. a system breadcrumb) is a coalescing boundary: the
-    # user-side run before it must not merge with user-side content after it.
-    coalescing = False
 
     for node in nodes:
         if not node.goes_to_model():
-            coalescing = False
             continue
 
         node_content, node_role = node.content, node.role
@@ -72,15 +79,13 @@ def build_context(
         if node_role == "user":
             if not node_content:
                 continue
-            if coalescing and messages and messages[-1]["role"] == "user":
-                messages[-1]["content"] += node_content
+            if messages and messages[-1]["role"] == "user":
+                messages[-1]["content"] += "\n\n" + node_content
             else:
                 messages.append({"role": "user", "content": node_content})
-            coalescing = True
         elif node_role == "assistant":
             if not node_content:
                 continue
             messages.append({"role": "assistant", "content": node_content})
-            coalescing = False
 
     return messages

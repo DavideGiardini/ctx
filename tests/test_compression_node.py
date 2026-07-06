@@ -155,7 +155,11 @@ def test_assistant_turn_splits_coalescing(stub_loader):
 
 
 # C11
-def test_dropped_system_node_still_splits_coalescing(stub_loader):
+def test_dropped_system_node_does_not_split_coalescing(stub_loader):
+    # A dropped node (system) emits nothing and does NOT break the user run: two
+    # summaries separated only by it merge into ONE user dict with a separator,
+    # so no two adjacent same-role dicts ever reach a role-alternation provider
+    # (task 34 corrected the task-15 coalescing-boundary rule).
     summary_1 = "Requirements were gathered from the client."
     summary_2 = "A prototype was demoed and approved."
     k1 = Node.compression(summary_1, "conv-1", ["a"])
@@ -167,10 +171,12 @@ def test_dropped_system_node_still_splits_coalescing(stub_loader):
     # system never reaches the model
     assert all(m["role"] != "system" for m in messages)
     users = _users(messages)
-    assert len(users) == 2
-    assert summary_1 in users[0]["content"]
-    assert summary_2 in users[1]["content"]
-    assert summary_2 not in users[0]["content"]
+    assert len(users) == 1
+    content = users[0]["content"]
+    assert summary_1 in content
+    assert summary_2 in content
+    assert content.index(summary_1) < content.index(summary_2)
+    assert "\n\n" in content
 
 
 # C12

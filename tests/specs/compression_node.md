@@ -83,12 +83,15 @@ C10. Assistant turn splits coalescing
   Rationale:An assistant turn between user-side items breaks coalescing into separate
             user messages.
 
-C11. Dropped system node still splits coalescing
+C11. Dropped system node does NOT split coalescing (task 34)
   Given:    `[K1, system_node, K2]` where the system node never reaches the model.
-  Expect:   the message list contains two separate user dicts (one per compression
-            summary), no system message, and the two summaries are NOT merged.
-  Rationale:A system node is dropped from output but still acts as a boundary that
-            breaks user-side coalescing.
+  Expect:   the message list contains ONE user dict (no system message) whose content
+            holds both summaries in order, separated by a blank line; the two summaries
+            are merged, not split.
+  Rationale:A dropped node emits nothing and must not create a coalescing boundary —
+            doing so emitted two adjacent user dicts, which role-alternation providers
+            reject. The `\n\n` separator preserves the "separate runs" intent while the
+            no-two-adjacent-same-role output invariant always holds (ADR-0016, task 34).
 
 C12. Ordering across mixed types preserved
   Given:    `[user u1, assistant a1, compression K]` with distinct texts.

@@ -782,3 +782,24 @@ become new `- [ ]` tasks" instruction. Not blockers for the Sprint 3 feature set
       raises inside `stream()`, `core.streaming` is `False` afterward and a
       subsequent `commit_compression` succeeds (currently it raises). Existing
       streaming/H2 tests green. `scripts/check.sh` green.
+
+- [x] **34. Core: `build_context` must never emit two adjacent same-role messages**
+      _(deps: none; review finding, MEDIUM — code-confirmed)_ — the task-15
+      coalescing-boundary rewrite (`ctx/core/context.py:36,40,75-79`) resets
+      `coalescing=False` on any dropped node (e.g. a system breadcrumb), so
+      `[context(user), system(dropped), context(user)]` now emits **two** adjacent
+      `{"role":"user"}` dicts (the old unconditional merge never did). Strict
+      role-alternation providers (Anthropic-family via litellm) reject consecutive
+      same-role turns. Also: the coalescing `+=` (`:76`) joins blocks with **no
+      separator**, running `</conversation_summary>` straight into the next user
+      text. Fix at the emit boundary so the coalescing-boundary *intent* (don't
+      merge semantically-separated runs into one logical block) is preserved while
+      the output invariant "no two adjacent dicts share a role" always holds — i.e.
+      when a user block would follow another user block, merge them with an explicit
+      separator (e.g. `\n\n`) rather than appending a second user dict. Keep the
+      function pure/framework-free. _Acceptance:_ code-blind test flow — tests prove
+      (a) `[context, dropped-system, context]` yields exactly one user message; (b)
+      a compression `K` followed by a user turn yields one user message with a
+      separator between the `</conversation_summary>` block and the turn text; (c)
+      existing `build_context` coalescing tests still pass (adjust expectations for
+      the separator). `scripts/check.sh` green.

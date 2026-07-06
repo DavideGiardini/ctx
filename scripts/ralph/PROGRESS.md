@@ -2314,3 +2314,36 @@ Git history is the source of truth for *what changed*; this file captures the
 - Gotcha for a future iter: an unreadable `/include`d file does NOT trigger this path
   (build_context catches it); the realistic real-world trigger is a `count_messages`
   failure. The invariant (any pre-stream raise clears the flag) is what the test locks.
+
+## 2026-07-06 — Task 34: build_context never emits two adjacent same-role messages
+- Fix (`ctx/core/context.py`): the task-15 "coalescing boundary" rule reset a
+  `coalescing` flag to False on any dropped node (system breadcrumb), so
+  `[user, dropped-system, user]` emitted TWO adjacent `{"role":"user"}` dicts —
+  which Anthropic-family providers (via litellm) reject. Also the merge `+=` glued
+  blocks with NO separator, running `</conversation_summary>` straight into the next
+  user text. Rewrote the emit boundary: **always** merge user-role material into the
+  previous message when the last emitted dict is already user, joining with an
+  explicit `\n\n` separator; only an assistant message breaks the run. Deleted the
+  `coalescing` flag entirely (now redundant — "is the last dict user?" is the sole
+  condition). The `\n\n` separator preserves the "separate runs" intent while the
+  no-two-adjacent-same-role output invariant now always holds. Pure/framework-free.
+- Tests (code-blind flow, `test-spec-author`): new `tests/test_context_role_alternation.py`
+  (4 tests) + `tests/specs/context_role_alternation.md`. Every test runs
+  `_assert_alternating` (no adjacent same-role dicts) plus: (C1) dropped node does
+  NOT split a user run → 1 dict; (C2) K then user → 1 dict, separator between the
+  closing tag and the text; (C3) two user nodes → exact `a\n\nb`; (C4) assistant
+  splits into two user dicts. Red proof: C1–C3 failed against old code (2 dicts /
+  no separator), C4 passed (unchanged), clean collection.
+- **Deliberate existing-test change (not a weakening):** `test_compression_node.py`
+  C11 + its spec (`tests/specs/compression_node.md` C11) and `tests/specs/context.md`
+  C24 all encoded the OLD "dropped node is a coalescing boundary → 2 dicts" behavior
+  that task 34 explicitly reverses. Updated them to the new contract (1 merged dict
+  with separator), citing task 34. These were the *reversed* behavior, not the
+  invariant under test — updating them is the task, not defeating the blind author.
+- Verification: pure core change (`ctx/core/context.py`), no UI/runtime surface →
+  no qa-tester, no render (PROMPT step 7). `bash scripts/check.sh` green (667 passed,
+  was 663). Ruff flagged the authored `zip(...)` missing `strict=` — added `strict=False`.
+- Gotcha: this changes `build_context` output → shifts `hash_context` digests and
+  token counts, but those are computed live from `build_context`, so nothing pins a
+  stale value; the full suite stayed green. `tests/specs/context.md` C24 had no
+  enforcing test (spec-only), so only the prose needed updating.
