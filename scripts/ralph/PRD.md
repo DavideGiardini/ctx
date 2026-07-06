@@ -144,29 +144,7 @@ diffs in git history. One line each below so open tasks can still resolve their
 - [x] 34 — Core: `build_context` never emits two adjacent same-role messages
 - [x] 35 — UI: reset `_last_drafted_prompt` on draft cancel/failure
 - [x] 36 — UI: extract a shared compact message-row renderer (`MessageRow`)
-
-- [ ] **37. UI: rebuild the diff view as a full-screen two-pane node diff** _(deps:
-      20, 21, 36; user-verified BROKEN)_ — today `DiffView`
-      (`ctx/ui/widgets/diff_view.py`) is a single `VerticalScroll` that replaces
-      only the right message-list pane and lays out an *internal* was/now split of
-      **full untruncated node text**; the left detail pane is unused. Rebuild it as
-      a full-screen replacement with **two side-by-side panes**: left = the turn's
-      context as-of generation (`reconstruction.context_at_generation`), right = the
-      same ancestor prefix now (`reconstruction.now_prefix`) — both rendered as the
-      standard compact two-line rows via the task-36 shared renderer (not plain
-      text). Align by node id (`reconstruction.diff_regions`), visually highlight the
-      changed/added/removed rows, and keep the existing region cursor: `up`/`down`
-      walk changed regions, `Ctrl+o` closes, the "reconstruction may be inexact"
-      banner is preserved. `g d` dispatch and the deep-dive path are unchanged.
-      _Acceptance:_ **visual (primary)** — render `drift-diff` via
-      `tools/agent/visual.py` (`uv run --with cairosvg==2.9.0 python -m
-      tools.agent.visual state drift-diff /tmp/x.png`) and `Read` the PNG: confirm
-      **two side-by-side panes**, each showing **compact two-line rows with colored
-      left bars** (not a raw-transcript text dump), with the changed region visibly
-      highlighted. **Behavioral floor** — qa-tester confirms the `g d`→two-pane→
-      `up`/`down`→`Ctrl+o` flow (region cursor moves; `Ctrl+o` restores the live
-      list + pre-diff cursor); a Pilot test asserts the `describe_state()` diff
-      fields (`nav`, region count/cursor). `scripts/check.sh` green.
+- [x] 37 — UI: rebuild the diff view as a full-screen two-pane node diff
 
 - [ ] **38. UI: inspector splits render compact rows + visible dividers** _(deps:
       36; user-verified BROKEN)_ — the detail inspector's central "Originals"/context

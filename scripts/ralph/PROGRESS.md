@@ -2415,3 +2415,57 @@ Git history is the source of truth for *what changed*; this file captures the
   inspector panes — `MessageWidget` forces the `msg-<id>` id and would collide with
   the live list's row for the same node. `MessageRow` shared CSS is in
   `message_list.css` (loaded app-wide via `CSS_PATH`), so it already applies anywhere.
+
+## 2026-07-06 — Task 37: rebuild the diff view as a full-screen two-pane node diff
+- UI rework (behavior contract unchanged): `DiffView` was a single-column
+  `VerticalScroll` inside `#conversation` that replaced only the message list and
+  laid out an *internal* was/now split of plain `[role] content` text; the left
+  detail pane stayed visible, so it was neither full-screen nor compact-row.
+- New `ctx/ui/widgets/diff_view.py`: a `Vertical` with a warning banner + a
+  `#diff-overview` Horizontal of two side-by-side `.diff-pane`s — `#diff-left`
+  ("was — context at generation") and `#diff-right` ("now — current context"),
+  each a `VerticalScroll` of task-36 `MessageRow`s. Every region's `left` nodes go
+  in the left pane, `right` nodes in the right pane (aligned by id via
+  `diff_regions`); changed-region rows carry `.changed` (amber bg) and the cursored
+  region's rows carry `.cursor` (brighter). `up`/`down` walk changed regions
+  (`set_cursor`/`move_cursor` now iterate per-region row lists, `_region_rows`,
+  instead of `#diff-region-N` ids). A separate `#diff-drill` Horizontal renders the
+  cursored region's blocks **in full/untruncated** (task 21). Preserved the public
+  API (`show`/`show_drill`/`close_drill`/`close`/`cursor`/`set_cursor`/`move_cursor`)
+  and the `up`/`down` `delegate_nav` binding, so `describe_state()["diff_view"]`
+  (computed in app.py from `self._diff_view`, not the widget) is unchanged.
+- Full-screen: added `ChatApp._toggle_diff_fullscreen(on)` — hides/restores
+  `MessageList` + `DetailInspector` + `#input-area`. Hiding the inspector lets
+  `#conversation` (width 1fr) expand to full body width, so the DiffView (still
+  inside it) spans the screen. `MessageList.display` still toggles (existing tests
+  assert it). Wired into `_enter_diff`/`_close_diff` **and** `_reset_transient_ui`
+  (the `/new`/`/resume` path also closes a standing diff — it previously restored
+  only `MessageList`, leaving the inspector/input hidden; now fixed via the helper).
+- `MessageRow` gained a keyword-only `truncate=True`; the diff *drill* passes
+  `truncate=False` so a region's blocks render in full (task 21 fidelity).
+- Tests: updated `_drill_text` helper in `tests/test_app_diff_view.py` (the old DOM
+  `#diff-drill .diff-side` Static structure is gone — now reads `MessageRow._content`
+  from `#diff-drill-left`/`-right`); added one Pilot test
+  `test_diff_is_fullscreen_two_pane_compact_rows` asserting the new invariants
+  (inspector+input hidden on open / restored on `ctrl+o`; panes render `MessageRow`s
+  whose ids == `context_at_generation` (left) / `now_prefix` (right); `.changed`
+  rows present). All other diff tests (open/close/drill/gates/exclusivity) unchanged
+  and green — they key on `describe_state`, not the DOM.
+- Verification: `bash scripts/check.sh` green (680 passed, was 679). **Visual**:
+  rendered `drift-diff` at 160x48 via `tools/agent/visual.py`, `Read` the PNG —
+  judged against "two side-by-side panes, compact two-line rows with colored left
+  bars, changed region highlighted" → PASS (labels "was …"/"now …", one amber-
+  highlighted compact row per pane with a colored left bar + `--%` slot, visible
+  center divider, no inspector/input bar). **qa-tester**: verified the real-TUI
+  flow (drift a turn → `g d` → full-screen two panes, inspector+input gone →
+  `up`/`down` no-crash → `enter` drills → `ctrl+o` back to overview → `ctrl+o`
+  closes + restores live list/inspector/input; `esc` close path too) — all PASS,
+  `textual_check_errors` clean throughout.
+- Gotchas for 38/44: diff panes mount `MessageRow(node)` (never `MessageWidget` —
+  no `msg-<id>` id, so the same node can appear on both sides). The diff rows show
+  a default `--%` weight slot (not wired in the diff); harmless but a future polish
+  could suppress it. `_region_rows` is index-aligned with the full region list
+  (incl. unchanged), `_changed_indices` selects the walkable ones. qa-tester note:
+  to get a drifted later turn, submit BOTH turns first then compress+expand the
+  earlier pair (compressing before the 2nd turn makes it fold on both sides → no
+  drift, `g d` correctly no-ops).

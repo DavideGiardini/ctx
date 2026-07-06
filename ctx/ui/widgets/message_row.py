@@ -44,10 +44,13 @@ class MessageRow(Vertical):
 
     DEFAULT_CSS = ""
 
-    def __init__(self, node: Node, **kwargs) -> None:
+    def __init__(self, node: Node, *, truncate: bool = True, **kwargs) -> None:
         self.node = node
         self._role = node.role
         self._content = node.content
+        # Rows in the diff *drill* view show a region's blocks in full (task 21);
+        # the list and diff *overview* rows truncate per the role config.
+        self._truncate = truncate
         extra = kwargs.pop("classes", "")
         super().__init__(classes=f"{node.role} {extra}".strip(), **kwargs)
 
@@ -60,6 +63,9 @@ class MessageRow(Vertical):
         self._apply_truncation()
 
     def _apply_truncation(self) -> None:
+        if not self._truncate:
+            self.styles.max_height = None
+            return
         truncation = get_config()["ui"]["truncation_lines"]
         limit = truncation.get(_TRUNCATION_KEY.get(self._role, "system"))
         if isinstance(limit, int):

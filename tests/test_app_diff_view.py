@@ -115,6 +115,45 @@ async def test_gd_on_drifted_assistant_opens_diff_region(repo, workspace):
         assert app.describe_state()["deep_dive"]["breadcrumb"][-1].startswith("Diff")
 
 
+async def test_diff_is_fullscreen_two_pane_compact_rows(repo, workspace):
+    """Task 37: `g d` opens a full-screen two-pane diff whose panes render the
+    turn's context as compact `MessageRow`s (not a plain-text dump). Opening it
+    hides the body panes it replaces (the left inspector + input area); `Ctrl+o`
+    restores them."""
+    from ctx.core import reconstruction
+    from ctx.ui.widgets.detail_inspector import DetailInspector
+    from ctx.ui.widgets.message_row import MessageRow
+
+    app = _app(repo, workspace)
+    async with app.run_test() as pilot:
+        await _drift_scenario(app, pilot)
+        a2 = app._get_selected_node()
+
+        await pilot.press("g", "d")
+
+        diff = app.query_one(DiffView)
+        # Full-screen: the panes the diff replaces are hidden.
+        assert app.query_one(DetailInspector).display is False
+        assert app.query_one("#input-area").display is False
+        # Two side-by-side panes, each rendering the turn's context (as-of
+        # generation left, now right) as compact rows aligned by node id.
+        all_nodes = app.core.all_nodes()
+        want_left = [n.id for n in reconstruction.context_at_generation(all_nodes, a2.id)]
+        want_right = [n.id for n in reconstruction.now_prefix(all_nodes, a2.id)]
+        left_ids = [r.node.id for r in diff.query_one("#diff-left").query(MessageRow)]
+        right_ids = [r.node.id for r in diff.query_one("#diff-right").query(MessageRow)]
+        assert left_ids == want_left
+        assert right_ids == want_right
+        assert left_ids != right_ids  # the drift really shows a difference
+        # The changed region's rows carry the highlight class.
+        assert diff.query(".changed")
+
+        await pilot.press("ctrl+o")
+
+        assert app.query_one(DetailInspector).display is True
+        assert app.query_one("#input-area").display is True
+
+
 async def test_diff_warning_on_tampered_ctx_hash(repo, workspace):
     app = _app(repo, workspace)
     async with app.run_test() as pilot:
@@ -159,12 +198,14 @@ async def test_gd_on_non_drifted_assistant_does_nothing(repo, workspace):
 
 
 def _drill_text(app) -> tuple[str, str]:
-    """Concatenated left / right block text of the drilled region as rendered."""
-    from textual.widgets import Static
+    """Concatenated left / right block content of the drilled region's rows."""
+    from ctx.ui.widgets.message_row import MessageRow
 
-    sides = app.query_one(DiffView).query("#diff-drill .diff-side")
-    cols = [" ".join(str(s.render()) for s in side.query(Static)) for side in sides]
-    return cols[0], cols[1]
+    def _side(pane_id: str) -> str:
+        rows = app.query_one(pane_id).query(MessageRow)
+        return " ".join(r._content for r in rows)
+
+    return _side("#diff-drill-left"), _side("#diff-drill-right")
 
 
 async def test_enter_drills_into_cursored_region(repo, workspace):

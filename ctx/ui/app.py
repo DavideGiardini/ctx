@@ -527,18 +527,29 @@ class ChatApp(App):
             "warning": warning,
             "drill": None,
         }
-        self.query_one(MessageList).display = False
+        self._toggle_diff_fullscreen(True)
         diff = self.query_one(DiffView)
         await diff.show(regions, warning)
         diff.focus()
         self.query_one(AppFooter).set_deep_dive(True)
+
+    def _toggle_diff_fullscreen(self, on: bool) -> None:
+        """Hide (``on``) or restore the body panes the full-screen diff replaces:
+        the message list, the left detail inspector, and the docked input area.
+        Hiding the inspector lets ``#conversation`` (and the ``DiffView`` inside
+        it) expand to the full body width, so the two panes read as full-screen
+        (task 37). ``MessageList.display`` still toggles so its cursor/visibility
+        assertions hold."""
+        self.query_one(MessageList).display = not on
+        self.query_one(DetailInspector).display = not on
+        self.query_one("#input-area").display = not on
 
     async def _close_diff(self) -> None:
         """Pop the diff view, restoring the live message list and its cursor."""
         target = self._diff_view["node_id"] if self._diff_view else None
         self._diff_view = None
         self.query_one(DiffView).close()
-        self.query_one(MessageList).display = True
+        self._toggle_diff_fullscreen(False)
         self.query_one(AppFooter).set_deep_dive(bool(self._deep_dive_stack))
         self.query_one(MessageList).focus()
         # Restore against the view actually rendered now (symmetric with
@@ -676,7 +687,7 @@ class ChatApp(App):
         if self._diff_view is not None:
             self._diff_view = None
             self.query_one(DiffView).close()
-            self.query_one(MessageList).display = True
+            self._toggle_diff_fullscreen(False)
             self.query_one(AppFooter).set_deep_dive(False)
         if self._deep_dive_stack:
             self._deep_dive_stack.clear()
