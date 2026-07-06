@@ -2551,3 +2551,39 @@ Git history is the source of truth for *what changed*; this file captures the
   `Σ`; task 43(a) will suppress `--%` on non-model nodes but K *does* go to the
   model, so its `%` stays. The `Σ` glyph is left-of the drift/weight, sharing the
   meta-slot layout task 25 fixed.
+
+## 2026-07-06 — Task 40: blank-line separation before a compression node
+- UI-only, pure-function tweak. A K node maps to the assistant *side* in
+  `_SIDE` (`ctx/ui/widgets/message_list.py`), so `_pass_starts` gave it no
+  `pass-start` when it followed an assistant turn (same side) — the K hugged the
+  reply above it with no `.pass-start { margin-top: 1 }` gap and the two read as
+  produced together.
+- Change: `_pass_starts` now special-cases `role == "compression"` to *always*
+  begin a new pass (`prev_side is not None`, i.e. a start unless it's the very
+  first node), so a K always detaches from the preceding turn. The existing
+  `MessageWidget.pass-start` CSS supplies the margin — no CSS change needed.
+  (Kept K's side as "assistant" for the *following* node's computation; only the
+  K's own start flag is forced.)
+- Tests (written directly, not code-blind — a 3-line change to an already-tested
+  pure function with a precisely-specified floor, same judgment as task 39):
+  - `tests/test_message_list_passes.py`: `test_compression_after_assistant_starts_a_new_pass`
+    (`[user,assistant,compression]` → `[F,T,T]`, the regression net) +
+    `test_leading_compression_is_never_a_pass_start` (`[compression,user]` →
+    `[F,T]`; first node never a start, the following human query legitimately is).
+  - `tests/test_app_commit_compression.py`:
+    `test_committed_k_after_assistant_carries_pass_start_margin` (the mandated
+    Pilot floor — compress only user2 so the K lands after assistant1; assert the
+    K widget `has_class("pass-start")`).
+- GOTCHA: my first draft of the leading-compression unit test wrongly expected
+  `[F,F]` — the `user` after a K *is* a pass start (K is assistant-side, user is
+  human-side). Fixed the assertion to `[F,T]` (not the code). If you touch
+  `_pass_starts`, remember a K only forces *its own* start; side tracking for
+  neighbours is unchanged.
+- Verification: `bash scripts/check.sh` green (687 passed, was 684). **Visual**:
+  rendered `k-after-assistant` (real on-disk code) — the first assistant reply
+  (orange, 24%) is followed by a **blank margin row**, then the green K (Σ 37%),
+  matching every other turn-to-turn gap. Calibrated both directions against the
+  standing fixture pair: `--variant k40-nogap` → assistant + K flush (BROKEN),
+  `--variant k40-gap` → separated (FIXED); the real render matches k40-gap.
+  Verdict: PASS. Pure rendering change, so no qa-tester (visual driver sees
+  on-disk code by construction).

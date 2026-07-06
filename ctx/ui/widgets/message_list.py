@@ -24,12 +24,21 @@ def _pass_starts(roles: list[str]) -> list[bool]:
     context imports) or an assistant turn (response + its imports); context nodes
     take the human side (they come from /include) and system nodes inherit the
     side of the preceding node. The first node is never a pass start.
+
+    A compression node ``K`` *always* starts a new pass (unless it is the very
+    first node): a summary of a folded run is its own block and must detach from
+    the preceding turn, even when that turn is on the same (assistant) side it
+    inherits — otherwise a K mounted right after an assistant reply hugs it with
+    no blank margin and the two read as produced together (task 40).
     """
     starts: list[bool] = []
     prev_side: str | None = None
     for role in roles:
         side = _SIDE.get(role, prev_side)
-        starts.append(prev_side is not None and side != prev_side)
+        if role == "compression":
+            starts.append(prev_side is not None)
+        else:
+            starts.append(prev_side is not None and side != prev_side)
         if side is not None:
             prev_side = side
     return starts

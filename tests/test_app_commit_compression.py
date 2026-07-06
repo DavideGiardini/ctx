@@ -18,6 +18,7 @@ from ctx.ui.app import ChatApp
 from ctx.ui.widgets.compression_editor import CompressionEditor
 from ctx.ui.widgets.detail_inspector import DetailInspector
 from ctx.ui.widgets.input_bar import InputBar
+from ctx.ui.widgets.message_list import MessageWidget
 
 
 def _app(repo, workspace) -> ChatApp:
@@ -123,6 +124,28 @@ async def test_ctrl_s_inert_when_editor_closed(repo, workspace):
         state = app.describe_state()
         assert not any(n["node_type"] == "compression" for n in state["nodes"])
         assert state["compression_editor"]["open"] is False
+
+
+async def test_committed_k_after_assistant_carries_pass_start_margin(repo, workspace):
+    # Compress only the *last two* nodes (user2 + assistant2) so the K lands
+    # right after assistant1 in the view. Both are on the assistant side, so
+    # without the task-40 fix the K would hug the reply above it with no gap.
+    app = _app(repo, workspace)
+    async with app.run_test() as pilot:
+        await _two_turns(app)  # view = [user1, assistant1, user2, assistant2]
+        await pilot.press("escape")  # → Edit mode
+        await pilot.press("home")  # cursor on user1
+        await pilot.press("down", "down")  # cursor on user2 (index 2)
+        await pilot.press("v", "down")  # range = [user2, assistant2] (ends at tip)
+        await pilot.press("c")  # open the draft editor
+
+        app.query_one("#compress-output", TextArea).text = "SUMMARY"
+        await pilot.press("ctrl+s")
+
+        k_widgets = [w for w in app.query(MessageWidget) if w._role == "compression"]
+        assert len(k_widgets) == 1
+        # The K begins its own pass, so it gets the top-margin separator (task 40).
+        assert k_widgets[0].has_class("pass-start")
 
 
 async def test_committed_k_round_trips_across_app_instances(repo, workspace):

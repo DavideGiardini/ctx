@@ -147,20 +147,7 @@ diffs in git history. One line each below so open tasks can still resolve their
 - [x] 37 — UI: rebuild the diff view as a full-screen two-pane node diff
 - [x] 38 — UI: inspector splits render compact rows + visible dividers
 - [x] 39 — UI: compression node color = context color
-
-- [ ] **40. UI: blank-line separation before a compression node** _(deps: none;
-      user-verified BROKEN)_ — a K mounted right after an assistant turn has ~zero
-      top gap (the assistant row ends and the K begins with no blank margin row),
-      so they read as produced together; other turn starts get a `.pass-start
-      { margin-top: 1; }` gap (`ctx/ui/widgets/message_list.css`). Give a compression
-      row the same top-margin/"pass-start" treatment so it is separated from the
-      preceding assistant turn (K sits on the user side, its own pass). _Acceptance:_
-      **visual (primary — pixel-level, no queryable proxy)** — render
-      `k-after-assistant` via `tools/agent/visual.py` and `Read` the PNG: confirm a
-      **blank margin row separates the K from the assistant row directly above it**
-      (matching other turn-to-turn gaps); verify both directions against the task-40
-      pair in `scripts/ralph/VISUAL-FIXTURE.md`. **Floor** — a Pilot test asserts the
-      K widget carries the `pass-start` class. `scripts/check.sh` green.
+- [x] 40 — UI: blank-line separation before a compression node
 
 - [ ] **41. UI: range selection uses hover styling, bridged across gaps** _(deps:
       none; user-verified BROKEN)_ — `MessageWidget.range-selected` is a solid dark
