@@ -11,11 +11,13 @@ mis-mapped the bar color or dropped a slot would slip past the list-only tests.
 import pytest
 from textual.app import App, ComposeResult
 from textual.color import Color
+from textual.css.query import NoMatches
 from textual.widgets import Markdown, Static
 
 from ctx.core.config import get_config
 from ctx.models.nodes import Node
 from ctx.ui.widgets.message_row import MessageRow
+from tools.agent.snapshot import render
 
 _ROLES = ["user", "assistant", "context", "system", "compression"]
 
@@ -63,3 +65,33 @@ async def test_two_line_layout(role):
             assert isinstance(content, Static) and not isinstance(content, Markdown)
         else:
             assert isinstance(content, Markdown)
+
+
+async def test_compression_row_carries_a_kind_glyph():
+    # Task 39: the K bar shares the context-import green, so a compression row
+    # must carry a distinguishing glyph to stay apart from an imported file.
+    app = _Host(_make_node("compression"))
+    async with app.run_test(size=(80, 24)):
+        row = app.query_one(MessageRow)
+        glyph = row.query_one(".kind", Static)
+        assert str(glyph.render()).strip() != ""
+
+
+async def test_context_row_has_no_kind_glyph():
+    # The glyph is what tells a summary apart from a same-colored file import, so
+    # a context row must NOT carry it.
+    app = _Host(_make_node("context"))
+    async with app.run_test(size=(80, 24)):
+        row = app.query_one(MessageRow)
+        with pytest.raises(NoMatches):
+            row.query_one(".kind", Static)
+
+
+def test_snapshot_colors_line_shows_compression_equals_context_green():
+    # Task 39 floor: the ctx_snapshot `colors:` line reports the compression bar
+    # color equal to the context green (#22c55e), not the old violet.
+    colors = get_config()["colors"]
+    assert colors["compression"] == colors["context"] == "#22c55e"
+    out = render({"mode": "edit", "model": "gpt-4o", "streaming": False, "colors": colors})
+    line = next(ln for ln in out.splitlines() if ln.startswith("colors:"))
+    assert "compression=#22c55e" in line and "context=#22c55e" in line

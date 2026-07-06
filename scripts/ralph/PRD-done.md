@@ -872,3 +872,17 @@ become new `- [ ]` tasks" instruction. Not blockers for the Sprint 3 feature set
       bars** (not plain markdown-bold text) and a **visible divider** sits between
       the three splits. **Floor** — a Pilot test asserts the split structure and
       snapshot `splits=prompt,content,output`. `scripts/check.sh` green.
+
+- [x] **39. UI: compression node color = context color** _(deps: none; user-verified
+      BROKEN)_ — the palette (`ctx/core/config.py:31-32`) sets `context=#22c55e`
+      (green) but `compression=#a855f7` (violet); the K's left bar renders violet.
+      Change the default `compression` color to match `context` (green), and — since
+      they now share a bar color — give the compression row a distinct **glyph/label**
+      so a summary is still visually distinguishable from an imported file. Update any
+      test asserting the old color. _Acceptance:_ **floor (deterministic, primary —
+      color is queryable, §2.4)** — a unit test asserts `ctx_snapshot`'s `colors:`
+      line shows `compression` == the `context` green, and the K row carries a
+      distinguishing glyph/marker. **Visual confirm** — render `committed-K` via
+      `tools/agent/visual.py`, `Read` the PNG, verify the K's left bar is green (not
+      violet) with its marker; calibrate the eye both directions with `--variant
+      k-violet`/`k-green`. `scripts/check.sh` green.

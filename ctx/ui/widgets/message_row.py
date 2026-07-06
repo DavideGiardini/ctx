@@ -38,6 +38,13 @@ _TRUNCATION_KEY = {
 # cursor selects them). Others (system) get a plain "solid" border.
 _TALL_ROLES = ("user", "assistant", "context", "compression")
 
+# A per-role kind glyph shown in the meta slot. A compression summary shares the
+# context-import green bar (task 39), so it carries a distinct glyph (Σ = the
+# "sum"/summary of a folded run) to stay visually distinguishable from an
+# imported file. Kept in the Greek block alongside the drift Δ so it renders in
+# the same fonts.
+_KIND_GLYPH = {"compression": "Σ"}
+
 
 class MessageRow(Vertical):
     """A compact two-line node row (see module docstring)."""
@@ -91,6 +98,9 @@ class MessageRow(Vertical):
 
     def compose(self):
         with Horizontal(classes="meta-slot"):
+            glyph = _KIND_GLYPH.get(self._role)
+            if glyph:
+                yield Static(glyph, classes="kind")
             yield Static("", classes="drift")
             yield Static("--%", classes="weight")
         if self._role in ("system", "context"):

@@ -29,7 +29,10 @@ _DEFAULTS: dict = {
         "assistant": "#f97316",
         "system": "#737373",
         "context": "#22c55e",
-        "compression": "#a855f7",
+        # A compression summary shares the context-import green (both are
+        # human-side, model-facing injections); the row's kind glyph (≡) is what
+        # keeps a summary distinguishable from an imported file (task 39).
+        "compression": "#22c55e",
     },
     "ui": {
         # Max lines a node occupies in the right-pane conversation graph before

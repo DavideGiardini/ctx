@@ -223,7 +223,8 @@ FIXTURE: list[dict] = [
         "state": "committed-K",
         "intent": (
             "The compression (K) node's left border bar must be the same green as "
-            "context imports, not violet/purple."
+            "context imports, not violet/purple (it carries a Σ glyph to stay "
+            "distinguishable from a file import)."
         ),
         "bad": "k-violet",
         "good": "k-green",

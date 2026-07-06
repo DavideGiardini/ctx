@@ -146,20 +146,7 @@ diffs in git history. One line each below so open tasks can still resolve their
 - [x] 36 — UI: extract a shared compact message-row renderer (`MessageRow`)
 - [x] 37 — UI: rebuild the diff view as a full-screen two-pane node diff
 - [x] 38 — UI: inspector splits render compact rows + visible dividers
-
-- [ ] **39. UI: compression node color = context color** _(deps: none; user-verified
-      BROKEN)_ — the palette (`ctx/core/config.py:31-32`) sets `context=#22c55e`
-      (green) but `compression=#a855f7` (violet); the K's left bar renders violet.
-      Change the default `compression` color to match `context` (green), and — since
-      they now share a bar color — give the compression row a distinct **glyph/label**
-      so a summary is still visually distinguishable from an imported file. Update any
-      test asserting the old color. _Acceptance:_ **floor (deterministic, primary —
-      color is queryable, §2.4)** — a unit test asserts `ctx_snapshot`'s `colors:`
-      line shows `compression` == the `context` green, and the K row carries a
-      distinguishing glyph/marker. **Visual confirm** — render `committed-K` via
-      `tools/agent/visual.py`, `Read` the PNG, verify the K's left bar is green (not
-      violet) with its marker; calibrate the eye both directions with `--variant
-      k-violet`/`k-green`. `scripts/check.sh` green.
+- [x] 39 — UI: compression node color = context color
 
 - [ ] **40. UI: blank-line separation before a compression node** _(deps: none;
       user-verified BROKEN)_ — a K mounted right after an assistant turn has ~zero

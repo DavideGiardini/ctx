@@ -45,6 +45,14 @@ MessageRow .drift {
     margin: 0 1 0 0;
     color: $text-muted;
 }
+/* Kind glyph (≡) marking a compression summary — shares the context-green bar,
+   so this glyph is what tells a summary apart from an imported file (task 39). */
+MessageRow .kind {
+    width: auto;
+    height: 1;
+    margin: 0 1 0 0;
+    color: $text-muted;
+}
 
 /* List-only interaction state (cursor / range selection / pass margins). */
 MessageWidget.pass-start {

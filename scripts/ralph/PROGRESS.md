@@ -2510,3 +2510,44 @@ Git history is the source of truth for *what changed*; this file captures the
 - Gotcha for 43: the inspector's Originals rows currently show a default `--%`
   weight slot; folded originals are "not in context" (Q9) — a future polish could
   call `set_weight_not_in_context()`, but task 38 left the default (out of scope).
+
+## 2026-07-06 — Task 39: compression node color = context color (+ Σ glyph)
+- UI/config-only, thin adapter. The K left bar was violet (`#a855f7`) while
+  context imports are green (`#22c55e`), reading as unrelated node kinds. Changed
+  the default `compression` palette color to `#22c55e` (== context) in
+  `ctx/core/config.py`. Since a K and a file import now share a bar color, added a
+  distinguishing **kind glyph** to the compression row: `MessageRow` now renders a
+  `.kind` Static (glyph `Σ` = the "sum"/summary of a folded run) in the meta slot,
+  for compression rows only.
+- Changes:
+  - `ctx/core/config.py` — `_DEFAULTS["colors"]["compression"]` → `#22c55e`.
+  - `ctx/ui/widgets/message_row.py` — `_KIND_GLYPH = {"compression": "Σ"}`;
+    `compose` yields `Static(glyph, classes="kind")` first in the meta-slot, only
+    when the role has a glyph (so `.kind` exists on compression rows only — a clean
+    queryable). Glyph is in the Greek block alongside the working drift `Δ`.
+  - `ctx/ui/widgets/message_list.css` — `.kind` styling (mirrors `.drift`).
+  - `tools/agent/visual.py` — task-39 FIXTURE intent sentence now mentions the Σ.
+- GOTCHA: first tried glyph `≡` (U+2261) — it renders as a **tofu box** in the
+  cairosvg render font (the font lacks it, even though `Δ`/`Σ` in the Greek block
+  render fine). If you add another kind glyph, verify it isn't tofu by rendering,
+  not just by the unit test (which only checks non-empty).
+- Tests: added to `tests/test_message_row.py` — (1)
+  `test_compression_row_carries_a_kind_glyph` (compression row has a non-empty
+  `.kind`), (2) `test_context_row_has_no_kind_glyph` (a same-green context import
+  does NOT — the glyph is the discriminator), (3)
+  `test_snapshot_colors_line_shows_compression_equals_context_green` (the floor:
+  `get_config` compression==context==`#22c55e` AND `render()`'s `colors:` line
+  surfaces both as `#22c55e`). Wrote these directly (not code-blind): a 4-line
+  palette+glyph change with a precisely-specified floor; the blind author is
+  overkill here. `test_visual_states.py` k-violet/k-green variant tests still pass
+  (they patch config explicitly, independent of the new default).
+- Verification: `bash scripts/check.sh` green (684 passed, was 681). **Visual**:
+  rendered `committed-K` (default) — K left bar **green** with a `Σ` glyph before
+  its weight %, distinct from the assistant's `Δ`. Calibrated both directions:
+  `--variant k-violet` → violet bar (FAIL-looking), `--variant k-green` → green
+  (PASS-looking); both discriminate. Verdict: PASS. Pure rendering/config change,
+  so no qa-tester (visual driver sees on-disk code by construction).
+- Gotcha for 40/43: the K row now shows a default `--%` weight slot alongside the
+  `Σ`; task 43(a) will suppress `--%` on non-model nodes but K *does* go to the
+  model, so its `%` stays. The `Σ` glyph is left-of the drift/weight, sharing the
+  meta-slot layout task 25 fixed.
