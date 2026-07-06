@@ -762,3 +762,23 @@ become new `- [ ]` tasks" instruction. Not blockers for the Sprint 3 feature set
 > banner Pilot on a migrated legacy DB, graph mutation during a live draft
 > (`draft_compression` doesn't set `_streaming` — revisit with task 28).
 
+### Phase 3e — UI polish + review-verified fixes (2026-07-04)
+
+- [x] **33. Core: fix the stuck `_streaming` flag on a pre-stream failure** _(deps:
+      3; review finding, HIGH — code-confirmed, not hand-reproducible under the
+      zero-delay `TestProvider`)_ — `submit()` sets `self._streaming = True`
+      (`ctx/core/conversation.py:347`) but the only in-turn reset is `stream()`'s
+      `finally` (`:678`). The pre-`try` region of `stream()` (`:654-659`) runs
+      `build_context(...)` — which does real file I/O to load `/include`d imports —
+      plus `hash_context`/`tokens.count_messages` **before** the `try`. An
+      unreadable/missing imported file (or a token-count failure) raises there, so
+      `finally` never runs and `_streaming` stays `True`; the UI's `_stream_worker`
+      is reset to `None` by `on_worker_state_changed`, so every later
+      `commit`/`draft`/`expand_compression` raises "cannot … while streaming"
+      permanently until `/new` or `/resume`. Fix so the flag is always cleared —
+      set `_streaming = True` inside the `try`, or wrap the pre-try work so any
+      exit clears it. Keep `ctx/core/*` framework-free. _Acceptance:_ code-blind
+      test flow — a unit test proves that when `build_context`/`count_messages`
+      raises inside `stream()`, `core.streaming` is `False` afterward and a
+      subsequent `commit_compression` succeeds (currently it raises). Existing
+      streaming/H2 tests green. `scripts/check.sh` green.

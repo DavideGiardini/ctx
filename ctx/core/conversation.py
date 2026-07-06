@@ -650,29 +650,40 @@ class ConversationCore:
         provider reports a sane ``Usage`` (see ``_calibrate``) it updates
         ``last_usage`` and ``calibration`` for this turn; otherwise both are left
         unchanged. The yielded values stay plain ``str``.
+
+        The in-flight ``streaming`` flag is raised on entry and always lowered on
+        exit, including when the pre-stream context build itself raises (e.g. an
+        unreadable ``/include``d file surfacing through ``build_context``); a stuck
+        flag would otherwise permanently block every later compression op.
         """
-        context_nodes = [n for n in self.nodes if n is not assistant_node]
-        messages = build_context(context_nodes, self._workspace.read_file)
-        # AIDEV-NOTE: stamp the per-turn ctx_hash once, at the real generation
-        # moment — immutable after (ADR-0016 A#3 §4 tripwire, reconstruction oracle).
-        assistant_node.meta["ctx_hash"] = hash_context(messages)
-        local_sum = tokens.count_messages(messages, self.model)
-
-        def on_usage(usage: Usage) -> None:
-            self._calibrate(local_sum, usage)
-
         self._streaming = True
         try:
-            async for token in self._provider.stream(messages, self.model, on_usage):
-                assistant_node.content += token
-                yield token
-        except asyncio.CancelledError:
-            self.persist()
-            raise
-        except Exception:
-            self.persist()
-            raise
-        else:
-            self.persist()
+            context_nodes = [n for n in self.nodes if n is not assistant_node]
+            messages = build_context(context_nodes, self._workspace.read_file)
+            # AIDEV-NOTE: stamp the per-turn ctx_hash once, at the real generation
+            # moment — immutable after (ADR-0016 A#3 §4 tripwire, reconstruction oracle).
+            assistant_node.meta["ctx_hash"] = hash_context(messages)
+            local_sum = tokens.count_messages(messages, self.model)
+
+            def on_usage(usage: Usage) -> None:
+                self._calibrate(local_sum, usage)
+
+            # AIDEV-NOTE: persist only once the stream loop is entered — a pre-stream
+            # build failure must NOT persist the empty assistant node (submit already
+            # persisted the user tip so resume lands cleanly on the user turn, task 33).
+            try:
+                async for token in self._provider.stream(
+                    messages, self.model, on_usage
+                ):
+                    assistant_node.content += token
+                    yield token
+            except asyncio.CancelledError:
+                self.persist()
+                raise
+            except Exception:
+                self.persist()
+                raise
+            else:
+                self.persist()
         finally:
             self._streaming = False

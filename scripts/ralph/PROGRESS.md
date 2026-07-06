@@ -2285,3 +2285,32 @@ Git history is the source of truth for *what changed*; this file captures the
   (`scripts/ralph/probes/bench_drift.py`) measures the raw reconstruction cost that
   motivated this; the memo proof is the call-count unit test, not the probe.
 - **All PRD tasks (1–32) are now `- [x]`.**
+
+## 2026-07-06 — Task 33: clear the stuck `_streaming` flag on a pre-stream failure
+- Fix (`ctx/core/conversation.py` `stream()`): the context-build region
+  (`build_context` → loader I/O, `hash_context`, `count_messages`) ran BEFORE the
+  `try` whose `finally` cleared `_streaming`, so any raise there left the flag stuck
+  True → every later `commit/draft/expand_compression` raised "cannot … while
+  streaming" until `/new`/`/resume`. Wrapped the whole body in an outer `try/finally`
+  (flag lowered on ANY exit) and kept an **inner** `try/except/else` for persist —
+  so a pre-stream build failure clears the flag but does NOT persist the empty
+  assistant node (submit already persisted the user tip; resume still lands cleanly
+  on the user turn). Framework-free; core-only.
+- Test (code-blind flow, `test-spec-author`): new `tests/test_stream_streaming_flag.py`
+  (1 test) + `tests/specs/conversation_streaming_flag.md`. Asserts public invariant
+  only: after a raising context build, `core.streaming is False` and a subsequent
+  `commit_compression` on a 1-node range succeeds.
+- **Test-infra correction (not a weakening):** the blind author injected a loader
+  raising `OSError`, but `build_context` deliberately **swallows** `OSError/ValueError`
+  (renders an error placeholder, `ctx/core/context.py:52`) — so that never reaches
+  stream()'s pre-region. Changed the loader to raise `RuntimeError` (a type
+  `build_context` propagates) to model a genuine context-build failure; all observable
+  assertions kept. Also fixed the author's import path (`ctx.core.conversation`) and
+  tightened `pytest.raises(Exception)` → `RuntimeError` (ruff B017).
+- Red/green proof: with the fix stashed, the test fails at `assert core.streaming is
+  False` (flag stuck True); with it restored, green. Genuine regression net.
+- Verification: pure core change, no UI/runtime surface → no qa-tester, no render
+  (PROMPT step 7). `bash scripts/check.sh` green (663 passed, was 662).
+- Gotcha for a future iter: an unreadable `/include`d file does NOT trigger this path
+  (build_context catches it); the realistic real-world trigger is a `count_messages`
+  failure. The invariant (any pre-stream raise clears the flag) is what the test locks.
