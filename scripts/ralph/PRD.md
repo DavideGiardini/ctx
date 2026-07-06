@@ -153,21 +153,7 @@ diffs in git history. One line each below so open tasks can still resolve their
 - [x] 43 — UI: no weight on non-model nodes; silent invalid keys; contextual footer
 - [x] 44 — UI: incremental message-list reconcile (kill the refresh flash)
 
-- [ ] **45. Verify the polished compression UI end-to-end (qa-tester)** _(deps:
-      33–44)_ — drive the real TUI and confirm, in one pass, the full corrected flow:
-      compress a middle range (K is context-green with a distinct glyph, separated by
-      a blank line from the preceding assistant turn, no full-refresh flash); a
-      multi-node selection reads as one grey contiguous block; hints appear transiently
-      and add no nodes; `x`/invalid keys are silent no-ops and the footer tracks the
-      selection; deep-dive a K (compact rows + dividers in the inspector split); open
-      the diff view on a drifted turn (two panes, compact rows, changed region marked,
-      `up`/`down`/`Ctrl+o` work); and no soft-lock after a failed `/include`.
-      `textual_check_errors` clean throughout. _Acceptance:_ a written qa report with
-      every item WORKS, **plus a visual pass**: render `committed-K`,
-      `k-after-assistant`, `k-inspector`, `range-selection`, and `drift-diff` via
-      `tools/agent/visual.py`, `Read` each PNG, and confirm the corrected appearance;
-      re-run `scripts/ralph/VISUAL-FIXTURE.md` and confirm both directions still
-      discriminate. Any regression filed as a follow-up task.
+- [x] 45 — Verify the polished compression UI end-to-end (qa-tester + visual)
 
 ## Out of scope
 - **Nested compression** (compressing a range containing a K) — Q7: the flat guard

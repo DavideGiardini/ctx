@@ -2743,3 +2743,38 @@ Git history is the source of truth for *what changed*; this file captures the
   driver both physically cannot observe a flash. Instance preservation is the exact
   mechanism that removes it, so the deterministic Pilot floor above fully captures the
   acceptance. Phase-3e end-to-end qa-tester + visual pass is task 45.
+
+## 2026-07-06 — Task 45: Sprint 3 end-to-end verification (qa-tester + visual) — FINAL
+- Verification-only task (no product code changed). Gate green up front:
+  `bash scripts/check.sh` → 694 passed, ruff + mypy clean.
+- **qa-tester behavioral pass** (one launch, in-process HarnessApp via ctx-agent MCP):
+  all 8 acceptance items reported WORKS, `textual_check_errors` clean after every
+  risky step (compression commit, deep-dive enter/exit, diff enter/exit, include
+  modal, invalid key). Confirmed: 4-turn build → middle-range commit (range=[2,3,4],
+  nodes 8→6, downstream turns gain Δ, no crash); contiguous range_selection=[2,3,4];
+  empty-commit hint adds no node (node count held); `x` on non-K and unbound `z` are
+  silent no-ops; footer shows `x Expand` only on a K and `g d Drift` only on a drifted
+  turn; deep-dive K shows the folded originals + read-only footer, Ctrl+o pops;
+  diff view opens on drifted turn [3] (diff_view.open, 1 region, up/down no-crash,
+  Ctrl+o closes); `/include` modal dismisses cleanly with no soft-lock (submitted a
+  message afterward, nodes 8→10). Two fixture-gap notes (not product bugs): the harness
+  always seeds sample.txt so the literal "nothing to include" hint path is unreachable
+  (substituted empty-commit hint); diff region-cursor movement only exercised with 1
+  region since the compact `diff:` snapshot line exposes no active-region index.
+- **Visual pass** (fresh `uv run` visual driver, always current on-disk code). Rendered
+  and judged each state against its one-line intent:
+  - `committed-K` — K left bar context-green with `Σ` glyph, assistant below has `Δ` → PASS
+  - `k-after-assistant` — blank margin row separates the green `Σ` K from the assistant
+    turn directly above it → PASS
+  - `k-inspector` — Prompt / Originals / Summary splits render as compact rows with
+    visible dotted dividers → PASS
+  - `range-selection` — grey hover-style block, role-colored left bars, contiguous
+    across inter-row gaps; unselected trailing turn stays dark → PASS
+  - `drift-diff` — two panes ("was — context at generation" / "now — current context"),
+    compact rows, changed region highlighted amber → PASS
+- **VISUAL-FIXTURE re-run** — all 6 PNGs matched `expected_verdict`, both directions
+  discriminate (gate calibrated): task-40 FAIL flush-K / PASS gap-before-K; task-41
+  FAIL solid-blue-with-dark-gaps / PASS grey-contiguous-block; task-39 FAIL violet-bar /
+  PASS green-bar.
+- No regressions found → no follow-up tasks filed. **This was the last open PRD task —
+  Sprint 3 (compression & spatial navigation, 3a–3e) is complete.**
