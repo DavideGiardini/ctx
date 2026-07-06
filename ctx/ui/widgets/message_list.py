@@ -112,6 +112,41 @@ class MessageList(VerticalScroll):
         self._apply_pass_margins()
         self.call_after_refresh(self.scroll_end)
 
+    async def reconcile(self, nodes: list[Node]) -> None:
+        """Bring the rendered rows in line with *nodes* by mutating only the
+        difference: drop the widgets whose node left the view and mount one row
+        for each node that entered, in place — every surviving node keeps its
+        original widget instance. Replaces a teardown+remount that blanked and
+        repopulated the whole pane on every structural change (commit folds a
+        run into one K, expand unfolds it back, deep-dive nav swaps frames),
+        which read as a top-to-bottom refresh flash. The list becomes a pure
+        projection of the caller's view (task 44).
+
+        Surviving rows are assumed to keep their relative order (the only
+        structural changes drop or insert contiguous runs — they never reorder
+        what stays), so new rows are mounted next to their predecessor and the
+        final DOM order matches *nodes*.
+        """
+        by_id = {w.node.id: w for w in self.query(MessageWidget)}
+        target_ids = {node.id for node in nodes}
+        for node_id, widget in by_id.items():
+            if node_id not in target_ids:
+                await widget.remove()
+        prev: MessageWidget | None = None
+        for node in nodes:
+            existing = by_id.get(node.id)
+            if existing is not None:
+                prev = existing
+                continue
+            widget = MessageWidget(node)
+            if prev is None:
+                await self.mount(widget, before=0)
+            else:
+                await self.mount(widget, after=prev)
+            prev = widget
+        self._apply_pass_margins()
+        self.call_after_refresh(self.scroll_end)
+
     def set_range(self, selected_ids: set[str]) -> None:
         """Apply a range selection across the list: mark each row in
         *selected_ids* and bridge the gaps within every contiguous selected run

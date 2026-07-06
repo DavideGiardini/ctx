@@ -2712,3 +2712,34 @@ Git history is the source of truth for *what changed*; this file captures the
   judgment. Phase-3e end-to-end qa-tester + visual pass is task 45.
 - Doc updates: AGENTS.md AppFooter bullet (contextual Edit hint via set_selection);
   removed the stale "Not a compression node" example from `_hint`'s docstring.
+
+## 2026-07-06 — Task 44: incremental message-list reconcile (kill the refresh flash)
+- UI-only change. New `MessageList.reconcile(nodes)` mutates only the difference:
+  removes widgets whose node left the view, mounts one row per node that entered
+  (via `mount(before=0)` / `mount(after=prev)` so DOM order matches the target),
+  and preserves every surviving node's *same widget instance*. Re-applies pass
+  margins once and scrolls to end (behavior-preserving vs the old per-add scroll).
+- `_rebuild_message_list` (`ctx/ui/app.py`) now delegates to `reconcile(_visible_nodes())`
+  instead of teardown-every-child + add-every-node. The list becomes a pure projection
+  of the view; the top-to-bottom blank/repopulate flash on commit/expand/deep-dive-nav
+  is gone (the flash *was* the teardown+remount). All three call sites unchanged
+  (commit :806, expand :652, deep-dive nav via `_refresh_deep_dive_view` :505).
+- Assumption documented in reconcile's docstring: surviving rows keep relative order
+  (structural changes only drop/insert contiguous runs, never reorder survivors), so
+  new rows mount next to their predecessor. True for every current structural op.
+- Test (written directly — UI change, ~30 product lines, precisely-specified floor;
+  same judgment as tasks 39–43): `tests/test_app_reconcile.py::test_commit_preserves_
+  surviving_widget_instances` — 2 turns → fold the trailing 2 nodes → assert the two
+  leading rows are the *identical* widget objects (`after[id] is before[id]`), exactly
+  3 rows remain, and the lone new K widget is last/in-place. This is the queryable
+  proxy for "no teardown" — a revert to remount recreates the instances and fails it.
+- Verification: `bash scripts/check.sh` green (694 passed, was 693). The existing
+  suite exercises the reconcile path through the still-green expand
+  (`test_app_expand.py`), deep-dive, and commit Pilot tests, so those structural ops
+  render correctly through the new code.
+- No qa-tester/visual this iteration: the "flash" is a rendering-*timing* artifact
+  (transient teardown→repopulate) — qa-tester (runs `ctx.*` cached, snapshot-only,
+  can't see this session's edits or perceive timing) and the single-frame visual
+  driver both physically cannot observe a flash. Instance preservation is the exact
+  mechanism that removes it, so the deterministic Pilot floor above fully captures the
+  acceptance. Phase-3e end-to-end qa-tester + visual pass is task 45.

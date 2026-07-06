@@ -948,3 +948,17 @@ become new `- [ ]` tasks" instruction. Not blockers for the Sprint 3 feature set
       — pressing `x` on a plain node adds no node and shows no warning; a system
       breadcrumb shows no `--%`; the footer hint changes with the selected node type.
       `scripts/check.sh` green.
+
+- [x] **44. UI: incremental message-list reconcile (kill the refresh flash)** _(deps:
+      36)_ — `_rebuild_message_list` (`ctx/ui/app.py:777`) tears down every child and
+      re-mounts every visible node one awaited call at a time on **every** structural
+      change (commit `:774`, expand `:631`, deep-dive nav `:501`), causing the
+      right pane to blank and repopulate top-to-bottom. Replace the teardown+remount
+      with a reconcile against `_visible_nodes()` that removes only the rows that left
+      the view and inserts only those that entered (on a commit: drop the folded rows,
+      insert one K), preserving unaffected widgets. This is the deep form of the
+      task-27/31 "gate every appender" whack-a-mole (the list becomes a projection of
+      `_visible_nodes()`). _Acceptance:_ Pilot test — after a commit, the surviving
+      row widgets are the same instances as before (not all recreated) and the K
+      appears in place; qa-tester confirms no full blank/repopulate on commit/expand.
+      `scripts/check.sh` green.

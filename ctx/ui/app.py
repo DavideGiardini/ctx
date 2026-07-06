@@ -807,14 +807,13 @@ class ChatApp(App):
         self._refresh_token_ui()
 
     async def _rebuild_message_list(self) -> None:
-        """Tear down and re-mount the message list from ``core.nodes`` (the
-        current resolved view). Used after a structural change — e.g. a
-        compression commit folds a range into a single K widget."""
-        message_list = self.query_one(MessageList)
-        for child in list(message_list.children):
-            await child.remove()
-        for node in self._visible_nodes():
-            await message_list.add_node(node)
+        """Reconcile the message list against the current view
+        (``_visible_nodes()``). Used after a structural change — a compression
+        commit folds a range into a single K widget, expand unfolds it, deep-dive
+        nav swaps frames. Delegates to ``MessageList.reconcile``, which mutates
+        only the difference so surviving rows keep their widget instances and the
+        pane no longer blanks-and-repopulates on every change (task 44)."""
+        await self.query_one(MessageList).reconcile(self._visible_nodes())
 
     async def _mount_node(self, node: Node) -> None:
         """Mount a freshly-appended core node into the message list — but only
