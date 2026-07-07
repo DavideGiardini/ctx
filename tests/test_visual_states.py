@@ -83,6 +83,8 @@ def test_fixture_entries_are_well_formed():
         "k40-gap",
         "range-blue",
         "range-grey",
+        "bar-outer",
+        "bar-inner",
     }
     for entry in FIXTURE:
         assert entry["state"] in STATES

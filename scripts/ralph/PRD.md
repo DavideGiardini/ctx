@@ -175,24 +175,7 @@ diffs in git history. One line each below so open tasks can still resolve their
 - [x] 47 — Core+config: reframe `draft_compression` + rewrite the default prompt (full spec in `PRD-done.md`)
 - [x] 48 — UI: drop the zero-token interrupted node on cancel (full spec in `PRD-done.md`)
 
-- [ ] 49 — **UI (visual): colored left bar on an inner `MessageRow` wrapper** — fix the
-      selection-bar bleed: when a range spans multiple rows, the grey bridge between two
-      selected rows currently also shows the **upper node's colored left bar** running
-      through the gap (the `border-left` draws through the `range-continues-below`
-      bottom padding — `message_list.css:74-77`, `message_row.py:69`). Restructure
-      `MessageRow` (`ctx/ui/widgets/message_row.py`) so the role-colored `border_left`
-      (and the cursor/selection `thick` variant set in `MessageWidget._refresh_border`,
-      `message_list.py:75`) lives on an **inner wrapper** around the meta-slot+content,
-      while the **outer** row carries the grey `range-selected` background and the bridge
-      padding — so the bridged gap has **no** colored bar. Must not regress the diff /
-      inspector panes (they mount `MessageRow` too) or the normal per-row bar.
-      _Acceptance:_ **visual** — with a multi-node range selected (`v` + extend), the grey
-      gap between two selected rows shows **no** colored left bar; each node's colored bar
-      stops at its own content; holds even when both neighbours share a role/color.
-      Render via `tools/agent/visual.py` and look (PROMPT.md step 7). Deterministic
-      floor: `MessageWidget` still gets `range-continues-below`/`range-selected`;
-      a Pilot/snapshot test that the border is applied to the inner wrapper (not the
-      outer row). Green `scripts/check.sh`.
+- [x] 49 — UI (visual): colored left bar on an inner `MessageRow` wrapper (full spec in `PRD-done.md`)
 
 - [ ] 50 — **UI (visual): `DiffView` equal-height aligned regions** — the two diff panes
       must stay row-aligned by region. In `DiffView` (`ctx/ui/widgets/diff_view.py`,

@@ -80,7 +80,7 @@ class MessageWidget(MessageRow):
             return
         active = self.has_class("selected") or self.has_class("range-selected")
         style = "thick" if active else "tall"
-        self.styles.border_left = (style, self._border_color)  # type: ignore[assignment]
+        self._row_body().styles.border_left = (style, self._border_color)  # type: ignore[assignment]
 
     def set_new_pass(self, is_new_pass: bool) -> None:
         self.set_class(is_new_pass, "pass-start")

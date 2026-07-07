@@ -77,9 +77,10 @@ async def test_range_selection_uses_hover_style_and_bridges_gaps(repo, workspace
         bottom = message_list.query_one(f"#msg-{view_ids[2]}", MessageWidget)
         outside = message_list.query_one(f"#msg-{view_ids[3]}", MessageWidget)
 
-        # Hover-style bar: every selected row gets the bold `thick` left border.
+        # Hover-style bar: every selected row gets the bold `thick` left border —
+        # on the inner body wrapper, not the outer row (task 49).
         for widget in (top, mid, bottom):
-            assert widget.styles.border_left[0] == "thick"
+            assert widget._row_body().styles.border_left[0] == "thick"
 
         # Gap bridging: interior boundaries carry the continues-* classes; the
         # run's outer edges do not, so it detaches from the surrounding turns.
@@ -94,7 +95,7 @@ async def test_range_selection_uses_hover_style_and_bridges_gaps(repo, workspace
         assert not outside.has_class("range-selected")
         assert not outside.has_class("range-continues-above")
         assert not outside.has_class("range-continues-below")
-        assert outside.styles.border_left[0] == "tall"
+        assert outside._row_body().styles.border_left[0] == "tall"
 
 
 async def test_esc_clears_range_and_stays_in_edit(repo, workspace):

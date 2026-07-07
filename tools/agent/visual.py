@@ -95,7 +95,23 @@ async def _apply_post_variant(app, pilot, variant: str | None) -> None:
                     widget.remove_class("range-continues-above")
                     widget.remove_class("range-continues-below")
                     if widget._role in _TALL_ROLES:
-                        widget.styles.border_left = ("tall", widget._border_color)
+                        widget._row_body().styles.border_left = ("tall", widget._border_color)
+        await pilot.pause()
+
+    if variant in ("bar-outer", "bar-inner"):
+        # task-49: the colored bar must live on the inner body, so a selection's
+        # grey bridge padding (on the outer row) has no bar bleeding through the
+        # gap. `bar-outer` reproduces the pre-fix bleed (bar back on the outer
+        # row, drawn down through the bridge padding); `bar-inner` leaves the real
+        # (fixed) rendering untouched.
+        from ctx.ui.widgets.message_list import MessageWidget
+        from ctx.ui.widgets.message_row import _TALL_ROLES
+
+        if variant == "bar-outer":
+            for widget in app.query(MessageWidget):
+                if widget.has_class("range-selected") and widget._role in _TALL_ROLES:
+                    widget._row_body().styles.border_left = ("hidden", widget._border_color)
+                    widget.styles.border_left = ("thick", widget._border_color)
         await pilot.pause()
 
 
@@ -245,6 +261,17 @@ FIXTURE: list[dict] = [
         ),
         "bad": "range-blue",
         "good": "range-grey",
+    },
+    {
+        "bug": "task-49-selection-bar-no-bleed-in-gap",
+        "state": "range-selection",
+        "intent": (
+            "Within a multi-node range selection, the grey gap bridging two "
+            "selected rows must show NO colored left bar — each row's colored bar "
+            "stops at its own content; no bar segment bleeds down through the gap."
+        ),
+        "bad": "bar-outer",
+        "good": "bar-inner",
     },
     # task-39 (K bar colour) is intentionally NOT the primary fixture bug — it is a
     # one-line palette assertion (ctx_snapshot colors:) that needs no vision. It is

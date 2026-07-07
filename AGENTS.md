@@ -203,6 +203,10 @@ a left `DetailInspector` and a right `#conversation` pane (the `MessageList` +
   (palette), truncation, the right-docked drift `Δ` + weight meta slot, and the
   content (Markdown for turns, Static for system/context); sets no id unless the
   caller supplies one, so the same node can appear in more than one pane. The
+  colored bar lives on an inner `.row-body` wrapper (around the meta slot +
+  content), not the outer row — so a range selection's grey bridge padding (on
+  the outer row) has no bar bleeding through the gap (task 49); `_row_body()`
+  is the seam both `on_mount` and `MessageWidget._refresh_border` set the bar on. The
   conversation `MessageList`/`MessageWidget` (`MessageWidget` subclasses
   `MessageRow`, adding the list's cursor/range selection, pass margins, and
   `msg-<id>` id; shared CSS targets the `MessageRow` type selector so it cascades

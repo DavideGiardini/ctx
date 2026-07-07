@@ -67,6 +67,23 @@ async def test_two_line_layout(role):
             assert isinstance(content, Markdown)
 
 
+@pytest.mark.parametrize("role", ["assistant", "system"])
+async def test_colored_bar_lives_on_inner_body_not_outer_row(role):
+    # Task 49: the role-colored left bar is on the inner `.row-body` wrapper, not
+    # the outer row — so a selection's grey bridge padding (carried by the outer
+    # row) has no colored bar bleeding through it. Covers a tall-role turn and a
+    # solid-border system row.
+    app = _Host(_make_node(role))
+    async with app.run_test(size=(80, 24)):
+        row = app.query_one(MessageRow)
+        body = row.query_one(".row-body")
+        expected = Color.parse(get_config()["colors"][role])
+        assert body.styles.border_left[1] == expected
+        assert body.styles.border_left[0] in ("tall", "solid")
+        # The outer row carries no left border of its own.
+        assert not row.styles.border_left[0]
+
+
 async def test_compression_row_carries_a_kind_glyph():
     # Task 39: the K bar shares the context-import green, so a compression row
     # must carry a distinguishing glyph to stay apart from an imported file.

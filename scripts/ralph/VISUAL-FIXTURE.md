@@ -45,6 +45,7 @@ If they all match, the visual gate is calibrated. Any mismatch = a broken gate.
 |---|---|---|
 | `task-40-blank-line-before-K` | `k-after-assistant` | a blank margin row separating a K from the assistant turn directly above it (pixel-level vertical spacing — `qa-tester` **cannot** see this) |
 | `task-41-range-selection-contiguous-hover-style` | `range-selection` | a multi-node range reads as one block: grey hover-style background + bold role-colored left bar on every selected row, **contiguous across the inter-row gaps** — not solid blue rows with default-colored gaps |
+| `task-49-selection-bar-no-bleed-in-gap` | `range-selection` | within a multi-node range, the grey gap bridging two selected rows shows **no** colored left bar — each row's bar stops at its own content, none bleeds down through the gap (pixel-level; queryable proxy is only "bar is on the inner body") |
 | `task-39-K-bar-colour` (calibration only) | `committed-K` | the K's left bar is context-green, not violet (this one is *also* a one-line `ctx_snapshot` `colors:` assertion — kept only to calibrate the gate's colour discrimination, not as evidence the visual capability is needed) |
 
 The task-40 and task-41 pairs are the load-bearing cases: genuinely pixel-level bugs

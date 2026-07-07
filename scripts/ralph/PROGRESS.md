@@ -2880,3 +2880,43 @@ Git history is the source of truth for *what changed*; this file captures the
   `.cancel()` to let the cancellation propagate; `worker.wait()` re-raises `WorkerCancelled` on a
   cancelled worker, so wrap it in `contextlib.suppress(WorkerCancelled)` (see `_cancel_and_settle`).
 - `bash scripts/check.sh` green (700 passed). ruff + mypy clean.
+
+## 2026-07-07 — Task 49: colored left bar on an inner `MessageRow` wrapper
+- What: fixed the selection-bar bleed — a multi-node range's grey bridge between two
+  selected rows no longer shows the upper node's colored left bar running through the
+  gap. Root cause: the role-colored `border_left` was on the outer `MessageRow`, so the
+  `range-continues-below` bridge (a bottom padding on that same row) had the bar drawn
+  down through it.
+- How: restructured `MessageRow.compose` (`ctx/ui/widgets/message_row.py`) to wrap the
+  meta slot + content in an inner `Vertical(classes="row-body")`; the role-colored bar
+  now lives on that inner body (`on_mount` + the new `_row_body()` seam), while the outer
+  row carries only the `range-selected` grey background and the bridge padding. Moved the
+  row's own `padding: 0 1 0 2` onto `.row-body` in CSS and reduced
+  `range-continues-below` to `padding-bottom: 1` on the outer row (outside the inner bar).
+  `MessageWidget._refresh_border` (`message_list.py`) now sets the `thick`/`tall` variant
+  on `_row_body()` too. Visual is byte-identical for the normal per-row bar: outer padding
+  0 + inner border at col 0 + inner padding-left 2 = bar col 0, content col 3 (same as
+  before).
+- Tests: green gate is the floor for the behaviour-preserving parts; added the task's
+  mandated deterministic floor to `tests/test_message_row.py`
+  (`test_colored_bar_lives_on_inner_body_not_outer_row`, parametrized assistant+system):
+  the colored bar is on `.row-body` (matching palette + tall/solid style) and the outer
+  row has no left border. Updated `tests/test_app_range_selection.py`'s hover-style test
+  to read `widget._row_body().styles.border_left` instead of the outer widget (the border
+  moved by design — the task-mandated inner-wrapper location; not weakening a test).
+- Verification (visual, PROMPT.md step 7): rendered `range-selection` via
+  `tools/agent/visual.py` and judged both directions on a forced good/bad pair (new
+  `bar-outer`/`bar-inner` post-variants):
+  - `bar-outer` (FAIL, forced pre-fix bleed): blue + orange bar segments visibly bleed
+    through the grey gaps between the three selected rows.
+  - `bar-inner` (PASS, real code): the selected run is one continuous grey block; each
+    row's colored bar stops at its own content; the gaps show no colored bar.
+  Both directions discriminate → gate calibrated; real render judged PASS against the
+  task's one-line intent. Added the bug to the standing fixture
+  (`tools/agent/visual.py` FIXTURE + `scripts/ralph/VISUAL-FIXTURE.md`) as
+  `task-49-selection-bar-no-bleed-in-gap`. Did NOT spawn qa-tester (it can't perceive the
+  gap bar; the visual render is the check and the Pilot test is the regression net).
+- `bash scripts/check.sh` green (702 passed, was 700; +2 new). ruff + mypy clean.
+- Gotcha: the bar is now on `.row-body`, not the outer row — any code/test/fixture that
+  reads or sets a row's `styles.border_left` must go through `_row_body()`. Updated the
+  `range-blue` fixture variant accordingly.

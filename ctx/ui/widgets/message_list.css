@@ -3,8 +3,15 @@
    panes (tasks 37/38). */
 MessageRow {
     height: auto;
-    padding: 0 1 0 2;
     margin: 0 0 1 0;
+    overflow: hidden hidden;
+}
+/* The inner wrapper carries the role-colored left bar (set in Python) plus the
+   row's own padding; the outer row carries only the selection background and
+   bridge padding, so a bridged gap shows no colored bar (task 49). */
+MessageRow .row-body {
+    height: auto;
+    padding: 0 1 0 2;
     overflow: hidden hidden;
 }
 MessageRow.system {
@@ -69,11 +76,13 @@ MessageWidget.range-selected {
 }
 /* Bridge the inter-row gap inside a selected run so the highlight is one
    continuous grey block: the upper row absorbs its separator as grey padding
-   and the lower row drops its (pass-start) top margin. Must follow .pass-start
-   so the zeroed top margin wins at equal specificity (task 41). */
+   and the lower row drops its (pass-start) top margin. The bridge padding is on
+   the *outer* row, outside the inner body's colored bar, so the gap is pure grey
+   with no bar bleeding through it (task 49). Must follow .pass-start so the
+   zeroed top margin wins at equal specificity (task 41). */
 MessageWidget.range-continues-below {
     margin-bottom: 0;
-    padding: 0 1 1 2;
+    padding-bottom: 1;
 }
 MessageWidget.range-continues-above {
     margin-top: 0;

@@ -66,8 +66,17 @@ class MessageRow(Vertical):
         color_str = colors.get(self._role, colors["system"])
         self._border_color = Color.parse(color_str)
         style = "tall" if self._role in _TALL_ROLES else "solid"
-        self.styles.border_left = (style, self._border_color)  # type: ignore[assignment]
+        # The colored bar lives on the inner body, not the outer row, so a
+        # selection's grey bridge padding (on the outer row) has no bar running
+        # through it (task 49).
+        self._row_body().styles.border_left = (style, self._border_color)  # type: ignore[assignment]
         self._apply_truncation()
+
+    def _row_body(self) -> Vertical:
+        """The inner wrapper around the meta slot + content that carries the
+        role-colored left bar (task 49). The outer row carries only the
+        selection background and inter-row bridge padding."""
+        return self.query_one(".row-body", Vertical)
 
     def _apply_truncation(self) -> None:
         if not self._truncate:
@@ -102,16 +111,17 @@ class MessageRow(Vertical):
         self.query_one(".drift", Static).update("Δ" if drifted else "")
 
     def compose(self):
-        with Horizontal(classes="meta-slot"):
-            glyph = _KIND_GLYPH.get(self._role)
-            if glyph:
-                yield Static(glyph, classes="kind")
-            yield Static("", classes="drift")
-            yield Static("--%" if self.node.goes_to_model() else "", classes="weight")
-        if self._role in ("system", "context"):
-            yield Static(self._content or "", classes="content")
-        else:
-            yield Markdown(self._content or "▌", classes="content")
+        with Vertical(classes="row-body"):
+            with Horizontal(classes="meta-slot"):
+                glyph = _KIND_GLYPH.get(self._role)
+                if glyph:
+                    yield Static(glyph, classes="kind")
+                yield Static("", classes="drift")
+                yield Static("--%" if self.node.goes_to_model() else "", classes="weight")
+            if self._role in ("system", "context"):
+                yield Static(self._content or "", classes="content")
+            else:
+                yield Markdown(self._content or "▌", classes="content")
 
     def update_content(self, content: str) -> None:
         self._content = content
