@@ -179,16 +179,7 @@ diffs in git history. One line each below so open tasks can still resolve their
 
 - [x] 50 — **UI (visual): `DiffView` equal-height aligned regions** (full spec in `PRD-done.md`)
 
-- [ ] 51 — **UI: `DiffView` locked bidirectional scroll + region-nav scrolls both**
-      (dep: 50) — couple the two panes' vertical scroll: a wheel / pageup / pagedown in
-      **either** `VerticalScroll` (`#diff-left`/`#diff-right`, and the drill panes) moves
-      the other to the same offset, and `set_cursor` (`diff_view.py:185`) scrolls **both**
-      panes to the cursored region (today it scrolls only the left `cursored[0]`). No
-      feedback loop (guard re-entrant scroll syncs). _Acceptance:_ qa-tester / Pilot:
-      after scrolling one pane or moving the region cursor (`up`/`down`), both panes report
-      the **same** `scroll_y`. Deterministic floor: a Pilot test asserting
-      `left.scroll_offset.y == right.scroll_offset.y` after a scroll and after a
-      region-cursor move. Green `scripts/check.sh`.
+- [x] 51 — UI: `DiffView` locked bidirectional scroll + region-nav scrolls both (full spec in `PRD-done.md`)
 
 ## Out of scope
 - **Nested compression** (compressing a range containing a K) — Q7: the flat guard

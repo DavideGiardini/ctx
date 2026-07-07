@@ -324,6 +324,66 @@ async def test_diff_regions_are_row_aligned_across_panes(repo, workspace):
         assert not any(c.has_class("diff-filler") for c in left)
 
 
+# --- task 51: locked bidirectional scroll + region-nav scrolls both -----------
+
+
+async def _two_region_drift_scenario(app, pilot) -> None:
+    """Eight turns, then compress two separate middle pairs so the last turn's
+    diff overflows the pane and holds two changed regions (one near the top, one
+    lower) — enough to exercise a manual scroll and a region-cursor jump."""
+    for i in range(8):
+        await _turn(app, f"turn {i}")
+
+    await pilot.press("escape")  # → Edit
+    view = app.core.nodes  # U0,A0,U1,A1,...,U7,A7
+    pairs = [(view[2].id, view[3].id), (view[8].id, view[9].id)]  # turns 1 and 4
+
+    for u_id, _a_id in pairs:
+        app._select_message(u_id)
+        await pilot.press("v", "down")  # range = [U, A]
+        await pilot.press("c")
+        app.query_one("#compress-output", TextArea).text = "SUMMARY"
+        await pilot.press("ctrl+s")
+        if app.mode == "insert":
+            await pilot.press("escape")
+
+    last = app.core.nodes[-1]
+    assert last.role == "assistant"
+    app._select_message(last.id)
+    await pilot.press("g", "d")
+
+
+async def test_diff_panes_scroll_locked_and_region_nav_scrolls_both(repo, workspace):
+    """Task 51: the two overview panes share one vertical offset. Scrolling one
+    pane moves the other to match, and a region-cursor move (`down`) scrolls both
+    panes to the cursored region — after either, they report the same scroll_y."""
+    app = _app(repo, workspace)
+    async with app.run_test() as pilot:
+        await _two_region_drift_scenario(app, pilot)
+        await pilot.pause()
+        assert app.describe_state()["diff_view"]["open"] is True
+
+        diff = app.query_one(DiffView)
+        left = diff.query_one("#diff-left", VerticalScroll)
+        right = diff.query_one("#diff-right", VerticalScroll)
+        assert left.max_scroll_y > 0  # the diff overflows → the offset matters
+
+        # (1) Scrolling one pane mirrors onto the other.
+        left.scroll_to(y=left.max_scroll_y, animate=False, immediate=True)
+        await pilot.pause()
+        assert left.scroll_offset.y > 0
+        assert right.scroll_offset.y == left.scroll_offset.y
+
+        # (2) Reset, then a region-cursor jump scrolls BOTH to the lower region.
+        left.scroll_to(y=0, animate=False, immediate=True)
+        await pilot.pause()
+        assert left.scroll_offset.y == right.scroll_offset.y == 0
+
+        await pilot.press("down")  # region 0 → region 1 (lower in the diff)
+        await pilot.pause()
+        assert right.scroll_offset.y == left.scroll_offset.y
+
+
 # --- task 27: the diff view inherits the deep-dive read-only gates -------------
 # The selection/mutation Edit-mode keys (v/c/x) must be inert while a diff is
 # open, exactly as they are while deep-diving — otherwise they anchor an

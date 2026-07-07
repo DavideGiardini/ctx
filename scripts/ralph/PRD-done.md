@@ -1067,3 +1067,14 @@ become new `- [ ]` tasks" instruction. Not blockers for the Sprint 3 feature set
       test on the filler-count helper (per-region `max(len(left),len(right))` on both
       sides) or a Pilot assertion that both panes hold equal row+filler counts per
       region. Green `scripts/check.sh`.
+
+- [x] 51 — **UI: `DiffView` locked bidirectional scroll + region-nav scrolls both**
+      (dep: 50) — couple the two panes' vertical scroll: a wheel / pageup / pagedown in
+      **either** `VerticalScroll` (`#diff-left`/`#diff-right`, and the drill panes) moves
+      the other to the same offset, and `set_cursor` (`diff_view.py:185`) scrolls **both**
+      panes to the cursored region (today it scrolls only the left `cursored[0]`). No
+      feedback loop (guard re-entrant scroll syncs). _Acceptance:_ qa-tester / Pilot:
+      after scrolling one pane or moving the region cursor (`up`/`down`), both panes report
+      the **same** `scroll_y`. Deterministic floor: a Pilot test asserting
+      `left.scroll_offset.y == right.scroll_offset.y` after a scroll and after a
+      region-cursor move. Green `scripts/check.sh`.

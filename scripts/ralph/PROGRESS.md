@@ -2962,3 +2962,47 @@ Git history is the source of truth for *what changed*; this file captures the
   navigation **wraps** (last node → index 0). The working `drift-diff` state (2 nodes)
   reaches its last node by an even count of downs by luck; a 3-node view needs `home` +
   *exactly* 2 downs, not "press down N times and clamp" (there is no clamp — it wraps).
+
+## 2026-07-07 — Task 51: DiffView locked bidirectional scroll + region-nav scrolls both
+- What: the two context-diff panes now share one vertical offset. A scroll of either pane
+  (wheel / pageup / pagedown / `scroll_visible`) moves the other to the same offset, and a
+  region-cursor move (`up`/`down`) scrolls **both** panes to the cursored region — so the
+  task-50 equal-height, region-aligned rows stay side-by-side while navigating.
+- How (`ctx/ui/widgets/diff_view.py`): added `_SyncedScroll(VerticalScroll)` — a `partner`
+  ref + a `_syncing` guard, overriding `watch_scroll_y` to mirror the new offset onto the
+  partner via `partner.scroll_to(y=new, animate=False, immediate=True)`. The mirror is
+  **source-agnostic** (it hangs off the `scroll_y` reactive watcher, so it fires however the
+  scroll happened — wheel, keys, or `scroll_visible`). Re-entrancy: the watcher sets
+  `partner._syncing = True` **while driving it**, so the partner's own watcher sees the flag
+  and the mirror never bounces back (no feedback loop). `compose()` now yields `_SyncedScroll`
+  for all four panes; `on_mount()` pairs them (overview left⟷right, drill left⟷right).
+  `show()` tracks per-region `_region_sides` (left_rows, right_rows); `set_cursor` scrolls the
+  first row of **each** side into view (was: only `cursored[0]`) — correct even when the
+  cursored region's left side is empty (its first row is absent). With the lock, scrolling
+  one side would suffice, but the explicit both-scroll matches the task intent and the
+  empty-side case.
+- Why immediate=True: `_scroll_to(immediate=True, animate=False)` sets `scroll_y`
+  synchronously (widget.py), so the mirror lands inside the guarded try/finally — deterministic
+  for the Pilot floor and no deferred double-fire.
+- Tests: added the mandatory deterministic floor to `tests/test_app_diff_view.py`
+  (`test_diff_panes_scroll_locked_and_region_nav_scrolls_both`). New scenario
+  `_two_region_drift_scenario` (8 turns → compress two separate middle pairs → the last turn
+  drifts with TWO changed regions, one near the top, one lower) so the diff overflows the pane
+  (asserts `max_scroll_y > 0`) and a `down` region-jump genuinely scrolls to a lower region.
+  Asserts (1) after `left.scroll_to(max)` both panes' `scroll_offset.y` equal and > 0, and
+  (2) after resetting to 0 and pressing `down` (region 0→1) both equal. **Red/green
+  confirmed**: neutering the mirror body to `pass` makes it fail (right stays 0 ≠ left); the
+  real code passes.
+- Verification (PROMPT step 7): the acceptance is a numeric scroll-offset equality — a fully
+  queryable assertion, not a perceptual/layout property — so the Pilot floor IS the faithful
+  verification. Did NOT render visually (nothing perceptual to judge that the offset equality
+  doesn't already capture) and did NOT spawn qa-tester (in-process cache can't see this edit;
+  it also can't drive a wheel scroll meaningfully + deadlock risk).
+- `bash scripts/check.sh` green (705 passed, was 704; +1). ruff + mypy clean.
+- Docs: updated AGENTS.md DiffView line + the module docstring with the scroll-lock note.
+- Gotcha: `_SyncedScroll.partner` is typed `_SyncedScroll | None` (not `VerticalScroll`) so
+  mypy allows `partner._syncing`; the drill panes are locked too but render untruncated,
+  unequal-height single regions, so their locked offsets clamp to each side's own
+  `max_scroll_y` (best-effort — the acceptance floor is on the equal-height overview panes).
+- **This was the last unchecked task in `scripts/ralph/PRD.md` — Sprint 3 + all follow-ups
+  complete.**

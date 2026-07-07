@@ -227,7 +227,11 @@ a left `DetailInspector` and a right `#conversation` pane (the `MessageList` +
   (`move_cursor`), a reconstruction-inexact warning banner, and a `#diff-drill`
   overlay (`show_drill`/`close_drill`) that isolates one region's full block
   sequences; shown in place of the `MessageList` while `_diff_view` is open,
-  task 20/21), `AppHeader` (title /
+  task 20/21. Its four panes are `_SyncedScroll`s, scroll-locked per pair
+  (overview left⟷right, drill left⟷right): a scroll of one mirrors onto its
+  `partner` (re-entrancy-guarded) and `set_cursor` scrolls **both** panes to the
+  cursored region — kept aligned by the task-50 equal-height rows, task 51),
+  `AppHeader` (title /
   logo / context-window gauge — `set_context_pct(pct, approximate)` renders a
   filled bar and a leading `~` when the figure is only an estimate; `--%` when
   the window is unknown),

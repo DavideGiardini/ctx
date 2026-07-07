@@ -12,6 +12,11 @@ blocks are byte-identical, never a text diff); the rows of each contiguous
 A warning banner is shown when reconstruction could not be verified against the
 turn's stored ``ctx_hash`` (H4 honesty: refuse to confidently present a possibly
 wrong left pane, cf. ``git fsck``).
+
+The two panes are **scroll-locked** (:class:`_SyncedScroll`, task 51): because
+task 50 makes them equal-height and region-aligned, mirroring their vertical
+offset keeps a region's two sides side-by-side however the user scrolls, and a
+region-cursor move (``up``/``down``) scrolls both panes to the cursored region.
 """
 
 from __future__ import annotations
@@ -43,6 +48,32 @@ def region_slot_count(region: DiffRegion) -> int:
     region still lines up. An unchanged region's two sides are equal already,
     so this is just their shared length."""
     return max(len(region.left), len(region.right))
+
+
+class _SyncedScroll(VerticalScroll):
+    """A ``VerticalScroll`` locked to a ``partner`` pane's vertical offset (task 51).
+
+    The two diff panes render region-aligned, equal-height rows (task 50), so any
+    scroll of one — wheel, pageup/pagedown, or ``scroll_visible`` on a cursored
+    region — must move the other to the same offset to keep a region's sides
+    side-by-side. Mirroring is source-agnostic: it hangs off ``scroll_y``'s
+    reactive watcher, so it fires however the scroll happened. ``_syncing`` is set
+    on the *partner* while we drive it, so its own watcher sees the flag and the
+    mirror never bounces back into an infinite loop."""
+
+    partner: _SyncedScroll | None = None
+    _syncing: bool = False
+
+    def watch_scroll_y(self, old_value: float, new_value: float) -> None:
+        super().watch_scroll_y(old_value, new_value)
+        partner = self.partner
+        if partner is None or self._syncing:
+            return
+        partner._syncing = True
+        try:
+            partner.scroll_to(y=new_value, animate=False, immediate=True)
+        finally:
+            partner._syncing = False
 
 
 class DiffView(Vertical):
@@ -107,17 +138,26 @@ class DiffView(Vertical):
         with Horizontal(id="diff-overview", classes="diff-panes"):
             with Vertical(classes="diff-pane"):
                 yield Static("was — context at generation", classes="diff-side-label")
-                yield VerticalScroll(id="diff-left", classes="diff-rows")
+                yield _SyncedScroll(id="diff-left", classes="diff-rows")
             with Vertical(classes="diff-pane"):
                 yield Static("now — current context", classes="diff-side-label")
-                yield VerticalScroll(id="diff-right", classes="diff-rows")
+                yield _SyncedScroll(id="diff-right", classes="diff-rows")
         with Horizontal(id="diff-drill", classes="diff-panes"):
             with Vertical(classes="diff-pane"):
                 yield Static("was", classes="diff-side-label")
-                yield VerticalScroll(id="diff-drill-left", classes="diff-rows")
+                yield _SyncedScroll(id="diff-drill-left", classes="diff-rows")
             with Vertical(classes="diff-pane"):
                 yield Static("now", classes="diff-side-label")
-                yield VerticalScroll(id="diff-drill-right", classes="diff-rows")
+                yield _SyncedScroll(id="diff-drill-right", classes="diff-rows")
+
+    def on_mount(self) -> None:
+        """Lock each pane pair's vertical scroll together (task 51): overview
+        left⟷right and drill left⟷right each mirror the other's offset."""
+        pairs = (("#diff-left", "#diff-right"), ("#diff-drill-left", "#diff-drill-right"))
+        for a_id, b_id in pairs:
+            a = self.query_one(a_id, _SyncedScroll)
+            b = self.query_one(b_id, _SyncedScroll)
+            a.partner, b.partner = b, a
 
     async def _mount_side(
         self,
@@ -187,6 +227,7 @@ class DiffView(Vertical):
                 await child.remove()
 
         self._region_rows = []
+        self._region_sides = []
         self._changed_indices = []
         for i, region in enumerate(regions):
             slots = region_slot_count(region)
@@ -197,6 +238,7 @@ class DiffView(Vertical):
                 right_pane, region.right, changed=region.changed, pad_to=slots
             )
             self._region_rows.append([*left_rows, *right_rows])
+            self._region_sides.append((left_rows, right_rows))
             if region.changed:
                 self._changed_indices.append(i)
         self.set_cursor(0)
@@ -247,9 +289,12 @@ class DiffView(Vertical):
         cursored = self._region_rows[region_index]
         for row in cursored:
             row.add_class("cursor")
-        if cursored:
-            with contextlib.suppress(Exception):
-                cursored[0].scroll_visible(animate=False)
+        # Scroll BOTH panes to the region (task 51) so the locked panes land on
+        # the same offset even when one side is empty (its first row is absent).
+        for side in self._region_sides[region_index]:
+            if side:
+                with contextlib.suppress(Exception):
+                    side[0].scroll_visible(animate=False)
 
     def move_cursor(self, step: int) -> None:
         """Move the changed-region cursor by ``step`` (clamped at the ends)."""
@@ -258,5 +303,6 @@ class DiffView(Vertical):
         self.set_cursor(self._cursor + step)
 
     _region_rows: list[list[MessageRow]] = []
+    _region_sides: list[tuple[list[MessageRow], list[MessageRow]]] = []
     _changed_indices: list[int] = []
     _cursor: int = 0
