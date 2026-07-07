@@ -4,7 +4,12 @@ from uuid import uuid4
 
 from ctx.core import tokens
 from ctx.core.config import DEFAULT_COMPRESSION_PROMPT, get_config
-from ctx.core.context import build_context
+from ctx.core.context import (
+    CLOSE_COMPRESS_MARKER,
+    OPEN_COMPRESS_MARKER,
+    build_compression_transcript,
+    build_context,
+)
 from ctx.core.provider import Provider, Usage
 from ctx.core.reconstruction import hash_context
 from ctx.core.storage import StoragePort
@@ -592,14 +597,24 @@ class ConversationCore:
         3a tip guard was deleted in task 22 so a middle range drafts too), raising
         ``ValueError`` on any failure **before any provider call**.
 
-        Renders **only the range** through ``build_context`` with the core's own
-        file loader, so each node contributes exactly its model-facing form (a raw
-        import → the full file body; an already-summarized node → its summary; never
-        the "Included:" label) — the Q10c invariant that the draft sees what the
-        model sees. One final user message carrying the instruction (``prompt`` when
-        it is non-blank, else ``DEFAULT_COMPRESSION_PROMPT`` — a ``None`` or
-        whitespace-only prompt is not a real instruction, 13i) is appended, and the
-        result is streamed via the provider on the active model.
+        The provider call is framed per ADR-0016 Amendment #6 (superseding Q10c):
+
+        - the **system** message is the editable instruction — ``prompt`` when it is
+          non-blank, else ``DEFAULT_COMPRESSION_PROMPT``; a ``None`` or
+          whitespace-only prompt is not a real instruction (13i) and falls back to
+          the default. The scaffold that tells the model to summarize only the
+          marked span lives inside that prompt;
+        - the **user** message is the *whole active line* rendered by
+          ``build_compression_transcript(self.current_view(), <range ids>,
+          self.read_file)`` — every node in its model-facing form (imports as file
+          bodies, committed ``K``s as their summaries) with the selected range
+          wrapped in ``<compress_this>``/``</compress_this>`` markers, so the model
+          sees the before/after context and never leads with a bare assistant turn.
+
+        Exactly two messages are sent: ``[system, user]``. If the marked span
+        renders empty (e.g. the range is a single interrupted zero-token turn),
+        ``ValueError`` is raised **before any provider call** — there is nothing to
+        compress.
 
         This is a meta-operation, never a gauge anchor (Q10b): it hands the provider
         a no-op ``on_usage``, so ``last_usage``/``calibration``/``usage_generation``
@@ -608,12 +623,28 @@ class ConversationCore:
         exactly as it was (Q3); committing is the separate ``commit_compression``.
         """
         range_nodes = self._validate_compress_range(start_id, end_id)
-        messages = build_context(range_nodes, self._workspace.read_file)
+        range_ids = [n.id for n in range_nodes]
+        transcript = build_compression_transcript(
+            self.current_view(), range_ids, self.read_file
+        )
+        # A#6 §3: refuse an empty marked span before any provider call — the range
+        # rendered no model-facing content (an interrupted zero-token turn), so the
+        # <compress_this> pair is adjacent and empty and there is nothing to compress.
+        _, _, after_open = transcript.partition(OPEN_COMPRESS_MARKER)
+        marked, _, _ = after_open.partition(CLOSE_COMPRESS_MARKER)
+        if not marked.strip():
+            raise ValueError("nothing to compress: the selected range is empty")
+
         # A blank/whitespace-only prompt is not a real instruction (several APIs
-        # reject an empty user message); fall back to the default (13i).
-        has_prompt = prompt is not None and prompt.strip() != ""
-        instruction = prompt if has_prompt else DEFAULT_COMPRESSION_PROMPT
-        messages.append({"role": "user", "content": instruction})
+        # reject an empty system message); fall back to the default (13i).
+        if prompt is not None and prompt.strip() != "":
+            system_prompt = prompt
+        else:
+            system_prompt = DEFAULT_COMPRESSION_PROMPT
+        messages: list[dict[str, str]] = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": transcript},
+        ]
 
         # No gauge anchor (Q10b): a no-op on_usage keeps last_usage/calibration/
         # usage_generation untouched no matter what the provider reports.

@@ -172,27 +172,7 @@ diffs in git history. One line each below so open tasks can still resolve their
 > deps noted inline.
 
 - [x] 46 — Core: `build_compression_transcript` helper (full spec in `PRD-done.md`)
-
-- [ ] 47 — **Core+config: reframe `draft_compression` + rewrite the default prompt**
-      (dep: 46) — rework `ConversationCore.draft_compression`
-      (`ctx/core/conversation.py:585`) per ADR-0016 A#6: build the provider call as
-      **system** message = the passed `prompt` (already the editor's full prompt) and a
-      single **user** message = `build_compression_transcript(self.current_view(), <range ids>, self._workspace.read_file)`
-      — i.e. the whole active line with the selected range marked, no longer just the
-      range. Keep the existing guards (`_validate_compress_range`, H2 streaming refusal,
-      no-op `on_usage`/Q10b). **Refuse when the marked span renders empty** (raise
-      `ValueError` before any provider call → the UI already breadcrumbs core
-      `ValueError`s). Rewrite `DEFAULT_COMPRESSION_PROMPT` (`ctx/core/config.py:17`,
-      re-exported from `conversation.py`) to the marker-aware **scaffold + preserve-intent**
-      system prompt from A#6 (mentions `<compress_this>`; still one editable block).
-      Update any test asserting the *old literal* prompt text (e.g. in
-      `tests/test_conversation.py`); tests importing the constant are fine. The UI
-      call site (`app.py:_draft_compression_worker`, passes `start_id,end_id,prompt`)
-      does **not** change. _Acceptance:_ code-blind test flow for the new
-      `draft_compression` behavior — tests assert the emitted messages are exactly
-      `[system=prompt, user=transcript]`, the user message contains both the marked
-      range and surrounding context, and an empty marked span raises `ValueError`
-      before the provider is touched. Green `scripts/check.sh`.
+- [x] 47 — Core+config: reframe `draft_compression` + rewrite the default prompt (full spec in `PRD-done.md`)
 
 - [ ] 48 — **UI: drop the zero-token interrupted node on cancel** — when a stream is
       cancelled (`Ctrl+C`) having produced **no** tokens, the empty assistant node must

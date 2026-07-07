@@ -2812,3 +2812,50 @@ Git history is the source of truth for *what changed*; this file captures the
 - Note: the uncommitted CONTEXT.md / ADR-0016 (A#6) / PRD.md (Phase 3f filing) working-tree
   changes were the phase-3f setup left in place; folded into this commit as the phase's
   first landing.
+
+## 2026-07-07 — Task 47: reframe `draft_compression` + rewrite the default prompt (A#6)
+- Reframed `ConversationCore.draft_compression` (`ctx/core/conversation.py`) per ADR-0016
+  Amendment #6, which **overrides Q10c** (draft no longer sees *only the range*): the
+  provider call is now exactly two messages `[system, user]`:
+  - **system** = the editable instruction — the passed `prompt` when non-blank, else
+    `DEFAULT_COMPRESSION_PROMPT` (a `None`/whitespace-only prompt still falls back, 13i;
+    the fallback is an explicit `if/else`, not a ternary, so mypy narrows `str | None`
+    to `str`);
+  - **user** = the whole active line via
+    `build_compression_transcript(self.current_view(), range_ids, self.read_file)` (task
+    46's helper) — every model-facing node in order with the selected range wrapped in
+    `<compress_this>`/`</compress_this>`, so the model sees before+range+after context and
+    never leads with a bare assistant turn.
+  Kept all existing guards: `_validate_compress_range` (H2/streaming, contiguous forward
+  slice, flat), no-op `on_usage` (Q10b gauge non-anchoring), no state mutation (Q3).
+- **New guard:** an **empty marked span** raises `ValueError` **before any provider call**.
+  Detected by partitioning the built transcript on the marker constants and checking the
+  text between them is blank — this relies on the helper's documented contract (an empty
+  span emits the two markers as an adjacent empty pair, task 46 C7). Reuses `read_file`
+  (the core's own loader property) rather than reaching into `_workspace`.
+- **Default prompt rewritten** (`ctx/core/config.py` `DEFAULT_COMPRESSION_PROMPT`,
+  re-exported by `conversation.py`): from A#1's bare "Preserve the facts…" user-turn text
+  to the A#6 marker-aware **scaffold+preserve-intent system prompt** (mentions
+  `<compress_this>`, still one editable block). Only config.py + the ADR history hold the
+  old literal now; no test asserted it literally (they import the constant).
+- Tests: code-blind flow (PROMPT.md step 4). The pre-existing `tests/test_draft_compression.py`
+  + spec encoded the **superseded** Q10c contract (prompt as trailing *user* message, only
+  the range rendered). I first ran the OLD file against the NEW impl to prove the behavior
+  genuinely changed → 4 red (C123/C124/C124b/C129 asserting the trailing-user shape). Then
+  spawned `test-spec-author` (blind, no read tools) with ONLY the new interface + A#6 prose
+  intent; it re-authored `tests/specs/draft_compression.md` (C121–C131) and
+  `tests/test_draft_compression.py` (10 tests). New behavior covered: exact `[system,user]`
+  role sequence, custom prompt = system msg, None/blank → default system msg, user msg =
+  full transcript with markers + before-context, empty span → `ValueError` w/ provider never
+  called. Invariants kept lean: token pass-through, gauge untouched w/ Usage, validation
+  before provider (3 bad ranges fused into one test), H2 streaming, no-mutation, flat guard.
+  Deletion test applied — C121+C123 fused into one test; validation trio fused. Net −3 tests
+  (13→10) but broader/correct coverage.
+- Verification: **pure core logic** (message construction + a config constant); the UI call
+  site `app.py:_draft_compression_worker` is unchanged (still passes `start_id,end_id,prompt`),
+  so per PROMPT step 7 no qa-tester / visual applies — the code-blind tests + green gate ARE
+  the verification. `bash scripts/check.sh` green (698 passed, was 701; the 13→10 draft-test
+  swap accounts for the −3). ruff + mypy clean.
+- Gotcha for a future iteration: the empty-span check depends on task 46's helper emitting an
+  adjacent empty marker pair for an empty span — if that helper's marker format changes, the
+  partition-based check here must move in lockstep.

@@ -10,13 +10,23 @@ CONFIG_PATH = CONFIG_DIR / "config.json"
 # the other user-settable defaults (ADR 0006 #3).
 DEFAULT_MODEL = "openrouter/google/gemma-4-26b-a4b-it"
 
-# The preserve-info instruction handed to the model when drafting a compression
-# and no per-range prompt is supplied (ADR-0016 A#1). Single source of the text:
-# it seeds _DEFAULTS["compression"]["default_prompt"] and conversation.py
-# re-exports it as DEFAULT_COMPRESSION_PROMPT. Overriding is JSON-only (task 18).
+# The *system* prompt handed to the model when drafting a compression and no
+# per-range prompt is supplied (ADR-0016 A#6, superseding A#1's user-turn text).
+# The draft call sends the whole conversation as one user message with the target
+# span wrapped in <compress_this>…</compress_this>, so the default is a marker-aware
+# scaffold ("summarize only what is between the markers") plus the preserve-intent
+# clause. Single source of the text: it seeds _DEFAULTS["compression"]
+# ["default_prompt"] and conversation.py re-exports it as
+# DEFAULT_COMPRESSION_PROMPT. Overriding is JSON-only (task 18); the user may edit
+# the whole thing, markers included, at their own risk (power over protection).
 DEFAULT_COMPRESSION_PROMPT = (
-    "Preserve the facts, decisions, entities, and open threads needed for the "
-    "conversation to continue coherently."
+    "You are compressing part of an ongoing conversation. The full conversation is "
+    "given to you as a single message, with one span wrapped in <compress_this> and "
+    "</compress_this> markers. Summarize only the content between those markers; use "
+    "everything outside them as context to understand that span, but do not "
+    "summarize the rest. Preserve the facts, decisions, entities, and open threads "
+    "needed for the conversation to continue coherently. Respond with only the "
+    "summary text, no preamble."
 )
 
 _DEFAULTS: dict = {
