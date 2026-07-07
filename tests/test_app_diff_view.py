@@ -14,6 +14,7 @@ now-view is ``[U1,A1,U2]``, so ``g d`` on ``A2`` shows one changed region
 ``left=[K]`` ⟷ ``right=[U1,A1]``.
 """
 
+from textual.containers import VerticalScroll
 from textual.widgets import TextArea
 
 from ctx.core.provider import TestProvider as CannedProvider
@@ -287,6 +288,40 @@ async def test_middle_compress_earlier_turn_drifts(repo, workspace):
         assert diff["regions"] == [{"left": [u1, a1], "right": [k]}]
         assert app.query_one(DiffView).display is True
         assert app.query_one(MessageList).display is False
+
+
+# --- task 50: equal-height aligned regions (blank-padded shorter side) --------
+
+
+async def test_diff_regions_are_row_aligned_across_panes(repo, workspace):
+    """Task 50: a changed region whose two sides differ in row count must occupy
+    equal vertical space in both panes — the shorter side is blank-padded with
+    filler rows. Here the changed region is [U1,A1] (2 rows, left) ⟷ [K] (1 row,
+    right), so the right pane gains one filler and both panes hold the same total
+    number of row slots."""
+    from textual.widgets import Static
+
+    from ctx.ui.widgets.diff_view import DiffView
+
+    app = _app(repo, workspace)
+    async with app.run_test() as pilot:
+        await _middle_compress_scenario(app, pilot)  # cursor on drifted A2
+        await pilot.press("g", "d")
+        assert app.describe_state()["diff_view"]["open"] is True
+
+        diff = app.query_one(DiffView)
+        left = list(diff.query_one("#diff-left", VerticalScroll).children)
+        right = list(diff.query_one("#diff-right", VerticalScroll).children)
+
+        # Both panes hold the same number of slots per region ⇒ same total.
+        assert len(left) == len(right)
+        # The shorter (right) side was padded: it gained a blank filler that is
+        # not a MessageRow (so never a cursor target).
+        fillers = [c for c in right if c.has_class("diff-filler")]
+        assert len(fillers) == 1
+        assert all(isinstance(f, Static) for f in fillers)
+        # The left (taller) side needs no filler.
+        assert not any(c.has_class("diff-filler") for c in left)
 
 
 # --- task 27: the diff view inherits the deep-dive read-only gates -------------

@@ -1052,3 +1052,18 @@ become new `- [ ]` tasks" instruction. Not blockers for the Sprint 3 feature set
       floor: `MessageWidget` still gets `range-continues-below`/`range-selected`;
       a Pilot/snapshot test that the border is applied to the inner wrapper (not the
       outer row). Green `scripts/check.sh`.
+
+- [x] 50 — **UI (visual): `DiffView` equal-height aligned regions** — the two diff panes
+      must stay row-aligned by region. In `DiffView` (`ctx/ui/widgets/diff_view.py`,
+      `show`/`_mount_side`), for each **changed** region whose two sides have different
+      row counts (a verbatim run ⟷ a single `K` summary), pad the **shorter** side with
+      blank filler rows so both panes occupy equal vertical space for that region and the
+      *next* region still lines up. Use a uniform overview row height so the filler count
+      is deterministic (`taller_rows − shorter_rows`). Filler rows are not cursor targets
+      (mirror the existing `(none)` placeholder handling). _Acceptance:_ **visual** —
+      scrolled to any position, an unchanged region's left/right rows sit at the same y,
+      and a changed region's shorter side is blank-padded so following regions stay
+      aligned. Render via `tools/agent/visual.py` and look. Deterministic floor: a unit
+      test on the filler-count helper (per-region `max(len(left),len(right))` on both
+      sides) or a Pilot assertion that both panes hold equal row+filler counts per
+      region. Green `scripts/check.sh`.

@@ -2920,3 +2920,45 @@ Git history is the source of truth for *what changed*; this file captures the
 - Gotcha: the bar is now on `.row-body`, not the outer row — any code/test/fixture that
   reads or sets a row's `styles.border_left` must go through `_row_body()`. Updated the
   `range-blue` fixture variant accordingly.
+
+## 2026-07-07 — Task 50: DiffView equal-height aligned regions
+- What: the two-pane context diff now stays row-aligned by region. A **changed** region
+  whose sides differ in row count (a verbatim run ⟷ a single K summary) previously left the
+  shorter side floating up, so every *following* region's rows sat at different y on the two
+  panes. Now the shorter side is blank-padded with filler rows up to the taller side's slot
+  count, and every overview row is pinned to a uniform height so the filler count is
+  deterministic.
+- How (`ctx/ui/widgets/diff_view.py`): added a pure `region_slot_count(region)` helper
+  (`max(len(left), len(right))`) + an `OVERVIEW_ROW_HEIGHT = 2` constant. `_mount_side` gained
+  a `pad_to` param: in the overview it (a) pins each MessageRow's `height`+`max_height` to
+  `OVERVIEW_ROW_HEIGHT` — this **overrides** the per-role truncation cap (system=1) so all
+  rows are one uniform slot tall — and (b) mounts `pad_to − occupied` blank `.diff-filler`
+  Statics after the real rows / the `(none)` placeholder. `show()` passes
+  `pad_to=region_slot_count(region)` to both sides per region. Fillers are plain Statics, not
+  in `_region_rows`, so (like `(none)`) they're never cursor targets. Drill panes pass no
+  `pad_to` → auto height, untruncated (single region, no cross-region alignment needed).
+- Tests: added the mandatory deterministic floor to `tests/test_app_diff_view.py`
+  (`test_diff_regions_are_row_aligned_across_panes`, using the existing
+  `_middle_compress_scenario` → region `[U1,A1]`⟷`[K]`): asserts both panes hold equal total
+  slots, the shorter (right) side gained exactly one `.diff-filler` Static, and the taller
+  (left) side got none. **Red/green confirmed** — neutering `slots` to `None` in `show()`
+  makes it fail (right=1 vs left=2). Also added a visual-state reach net in
+  `tests/test_visual_states.py` (`test_drift_diff_unequal_opens_diff_with_an_unequal_changed_region`)
+  so the new fixture state can't silently stop reaching an unequal region.
+- **Visual verification (PROMPT.md step 7):** added a new state `drift-diff-unequal` (two
+  turns → middle-compress `[U1,A1]` → `g d` on the still-live drifted A2) and a good/bad
+  post-variant pair (`align-pad` = real fixed code; `align-nopad` = strips the fillers). Both
+  directions discriminate:
+  - `align-nopad` (FAIL): "second question" (the trailing *unchanged* region) sits at y≈176 on
+    the right but y≈249 on the left — the panes float out of step.
+  - `align-pad` (PASS, real code): "second question" sits at y≈249 on **both** panes; the
+    right's shorter changed region (K + a blank filler) occupies the same 2-row height as the
+    left's (U1+A1).
+  Rendered `drift-diff-unequal --variant align-pad`, judged the panes row-aligned → **PASS**.
+  Added the bug to the standing fixture (`tools/agent/visual.py` FIXTURE
+  `task-50-diff-regions-equal-height-aligned` + `scripts/ralph/VISUAL-FIXTURE.md`).
+- `bash scripts/check.sh` green (704 passed, was 702; +2 new). ruff + mypy clean.
+- **Gotcha (bit me while building the visual state):** the Edit-mode message-list `down`
+  navigation **wraps** (last node → index 0). The working `drift-diff` state (2 nodes)
+  reaches its last node by an even count of downs by luck; a 3-node view needs `home` +
+  *exactly* 2 downs, not "press down N times and clamp" (there is no clamp — it wraps).

@@ -65,6 +65,17 @@ async def test_drift_diff_opens_the_full_screen_diff():
     assert (state.get("diff_view") or {}).get("open") is True
 
 
+async def test_drift_diff_unequal_opens_diff_with_an_unequal_changed_region():
+    # The task-50 case: the state must reach the diff AND its changed region must
+    # have differently-sized sides (a verbatim run ⟷ a single K), or the padding
+    # it exercises would never trigger and the fixture would judge nothing.
+    _svg, state = await capture("drift-diff-unequal")
+    diff = state.get("diff_view") or {}
+    assert diff.get("open") is True
+    unequal = [r for r in diff["regions"] if len(r["left"]) != len(r["right"])]
+    assert unequal, "expected a changed region whose two sides differ in row count"
+
+
 @pytest.mark.parametrize(
     "variant,expected",
     [("k-violet", "#a855f7"), ("k-green", "#22c55e")],
@@ -85,6 +96,8 @@ def test_fixture_entries_are_well_formed():
         "range-grey",
         "bar-outer",
         "bar-inner",
+        "align-nopad",
+        "align-pad",
     }
     for entry in FIXTURE:
         assert entry["state"] in STATES

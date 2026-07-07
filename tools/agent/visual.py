@@ -114,6 +114,19 @@ async def _apply_post_variant(app, pilot, variant: str | None) -> None:
                     widget.styles.border_left = ("thick", widget._border_color)
         await pilot.pause()
 
+    if variant in ("align-nopad", "align-pad"):
+        # task-50: a changed region's shorter side is blank-padded so both panes
+        # stay row-aligned. `align-nopad` reproduces the pre-fix misalignment by
+        # stripping the filler rows (the shorter side then floats up and the next
+        # region's rows sit at different y on the two panes); `align-pad` leaves
+        # the real (fixed) padding untouched.
+        if variant == "align-nopad":
+            for pane_id in ("#diff-left", "#diff-right"):
+                for child in list(app.query_one(pane_id).children):
+                    if child.has_class("diff-filler"):
+                        await child.remove()
+        await pilot.pause()
+
 
 # --- Named states: keystroke scripts to reach a screen worth looking at ------
 # Each returns after the app is parked in the target state; the caller then
@@ -193,6 +206,38 @@ async def _state_drift_diff(pilot) -> None:
         await pilot.pause()
 
 
+async def _state_drift_diff_unequal(pilot) -> None:
+    """The two-pane diff where a *changed* region's sides differ in row count:
+    a 2-row verbatim run (left) folds into a single K summary (right).
+
+    Middle-compress [U1,A1] out of a two-turn conversation, then ``g d`` on the
+    still-live later assistant turn A2 — it saw [U1,A1,U2] but the now-view folds
+    [U1,A1] into K, so its diff has one changed region left=[U1,A1] ⟷ right=[K].
+    The task-50 case: the shorter (right) side must be blank-padded so the panes
+    stay row-aligned."""
+    await _submit_turn(pilot, "first question")
+    await _submit_turn(pilot, "second question")
+    await pilot.press("escape")
+    await pilot.pause()
+    await pilot.press("home")  # cursor on U1
+    await pilot.press("v")  # anchor the range
+    await pilot.press("down")  # range = [U1, A1] — NOT the tip
+    await pilot.pause()
+    await _compress_selection(pilot)  # c, ctrl+d, ctrl+s -> K; view [K, U2, A2]
+    # Commit leaves Edit mode; anchor at the top K, then walk down to the drifted
+    # last turn A2 (extra presses clamp at the final node).
+    await pilot.press("home")  # K (index 0)
+    await pilot.pause()
+    for _ in range(2):
+        await pilot.press("down")  # -> U2 -> A2 (nav wraps, so step exactly)
+        await pilot.pause()
+    await pilot.press("g")
+    await pilot.pause()
+    await pilot.press("d")
+    for _ in range(3):
+        await pilot.pause()
+
+
 async def _state_k_inspector(pilot) -> None:
     """A committed K *selected* so the detail inspector renders its folded
     originals split — the task-38 case (the inspector's message-bearing split
@@ -227,6 +272,7 @@ STATES: dict[str, Callable[[object], Awaitable[None]]] = {
     "k-inspector": _state_k_inspector,
     "range-selection": _state_range_selection,
     "drift-diff": _state_drift_diff,
+    "drift-diff-unequal": _state_drift_diff_unequal,
 }
 
 
@@ -272,6 +318,19 @@ FIXTURE: list[dict] = [
         ),
         "bad": "bar-outer",
         "good": "bar-inner",
+    },
+    {
+        "bug": "task-50-diff-regions-equal-height-aligned",
+        "state": "drift-diff-unequal",
+        "intent": (
+            "In the two-pane context diff, each region must occupy equal vertical "
+            "space on both sides. Where a 2-row verbatim run on the left folds into "
+            "a single K summary on the right, the shorter (right) side is blank-"
+            "padded so the following unchanged row sits at the SAME y on both panes "
+            "— the two panes must stay row-aligned, not float out of step."
+        ),
+        "bad": "align-nopad",
+        "good": "align-pad",
     },
     # task-39 (K bar colour) is intentionally NOT the primary fixture bug — it is a
     # one-line palette assertion (ctx_snapshot colors:) that needs no vision. It is

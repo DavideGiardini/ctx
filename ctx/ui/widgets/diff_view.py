@@ -27,6 +27,23 @@ from textual.widgets import Static
 from ctx.core.reconstruction import DiffRegion
 from ctx.ui.widgets.message_row import MessageRow
 
+# Uniform height (rows) each overview row/placeholder/filler occupies, so a
+# region's blank-padded shorter side lines up with its taller side and the
+# *next* region stays row-aligned across the two panes (task 50). Fixed rather
+# than content-driven precisely so the padding count is deterministic; drill
+# rows stay auto-height (full untruncated content, single region, no alignment).
+OVERVIEW_ROW_HEIGHT = 2
+
+
+def region_slot_count(region: DiffRegion) -> int:
+    """Vertical row-slots a diff region occupies in *each* overview pane.
+
+    Both panes render this many slots for the region — the taller side's row
+    count — so the shorter side is blank-padded to match and the following
+    region still lines up. An unchanged region's two sides are equal already,
+    so this is just their shared length."""
+    return max(len(region.left), len(region.right))
+
 
 class DiffView(Vertical):
     """Full-screen two-pane context-drift diff (compact rows, aligned by id)."""
@@ -77,6 +94,11 @@ class DiffView(Vertical):
         padding: 0 1;
         margin: 0 0 1 0;
     }
+    /* Blank filler padding the shorter side of a changed region up to the
+       taller side's slot count (task 50). Shares the row footprint (height set
+       inline to OVERVIEW_ROW_HEIGHT + this margin) but carries no content and
+       is never a cursor target. */
+    DiffView .diff-filler { margin: 0 0 1 0; }
     DiffView #diff-drill { display: none; }
     """
 
@@ -104,23 +126,46 @@ class DiffView(Vertical):
         *,
         changed: bool,
         truncate: bool = True,
+        pad_to: int | None = None,
     ) -> list[MessageRow]:
         """Mount one region-side's nodes as compact rows, returning the rows.
 
         A changed region with an empty side (a pure add/remove) mounts a muted
         placeholder so the asymmetry is visible; placeholders are not tracked for
-        the cursor (there is no row to walk to)."""
+        the cursor (there is no row to walk to).
+
+        When ``pad_to`` is given (the overview), every row/placeholder is pinned
+        to :data:`OVERVIEW_ROW_HEIGHT` and the side is blank-padded with filler
+        rows up to ``pad_to`` slots, so a region occupies equal vertical space in
+        both panes and following regions stay aligned (task 50). Fillers carry no
+        content and are never cursor targets (like the ``(none)`` placeholder)."""
         rows: list[MessageRow] = []
+        occupied = 0
         if not nodes:
             if changed:
-                await pane.mount(Static("(none)", classes="diff-empty"))
-            return rows
-        for node in nodes:
-            row = MessageRow(
-                node, truncate=truncate, classes="changed" if changed else ""
-            )
-            await pane.mount(row)
-            rows.append(row)
+                placeholder = Static("(none)", classes="diff-empty")
+                await pane.mount(placeholder)
+                if pad_to is not None:
+                    placeholder.styles.height = OVERVIEW_ROW_HEIGHT
+                occupied = 1
+        else:
+            for node in nodes:
+                row = MessageRow(
+                    node, truncate=truncate, classes="changed" if changed else ""
+                )
+                await pane.mount(row)
+                if pad_to is not None:
+                    # Override the per-role truncation max (system caps at 1) so
+                    # every overview row is exactly one uniform slot tall.
+                    row.styles.height = OVERVIEW_ROW_HEIGHT
+                    row.styles.max_height = OVERVIEW_ROW_HEIGHT
+                rows.append(row)
+            occupied = len(nodes)
+        if pad_to is not None:
+            for _ in range(pad_to - occupied):
+                filler = Static("", classes="diff-filler")
+                await pane.mount(filler)
+                filler.styles.height = OVERVIEW_ROW_HEIGHT
         return rows
 
     async def show(self, regions: list[DiffRegion], warning: bool) -> None:
@@ -144,8 +189,13 @@ class DiffView(Vertical):
         self._region_rows = []
         self._changed_indices = []
         for i, region in enumerate(regions):
-            left_rows = await self._mount_side(left_pane, region.left, changed=region.changed)
-            right_rows = await self._mount_side(right_pane, region.right, changed=region.changed)
+            slots = region_slot_count(region)
+            left_rows = await self._mount_side(
+                left_pane, region.left, changed=region.changed, pad_to=slots
+            )
+            right_rows = await self._mount_side(
+                right_pane, region.right, changed=region.changed, pad_to=slots
+            )
             self._region_rows.append([*left_rows, *right_rows])
             if region.changed:
                 self._changed_indices.append(i)
