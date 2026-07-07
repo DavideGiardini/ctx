@@ -65,7 +65,12 @@
   contiguous run of nodes sharing `compressed_into = K` with `K`, in place.
 - **Draft** — the AI-generated (or blank, for manual) candidate summary shown in
   the compression editor before commit. Streamed from the active model; discarding
-  it mutates nothing.
+  it mutates nothing. The draft call sends the editable prompt as the **system**
+  message and the **whole active-line conversation** (model-facing forms) as one
+  user message, with the range being compressed wrapped in `<compress_this>`
+  markers — so the model sees the context before *and* after the range and knows
+  exactly what to summarize (ADR-0016 A#6). *(Supersedes the earlier "draft sees
+  only the range" scope.)*
 - **Commit** — the single graph mutation that turns a draft into a real
   compression node `K` and sets `compressed_into` on the folded range.
 - **Compression editor** — the left-pane surface for *creating* a compression:

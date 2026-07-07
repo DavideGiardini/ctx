@@ -28,10 +28,11 @@ diff view exists** — the task order enforces this; do not reorder.
   `K.meta = {"prompt": <str, "" for manual>, "range": [<ordered folded child ids>]}`;
   `E.meta = {"target": <K.id>, "anchor": <active_leaf_id at expand time>}`;
   assistant nodes gain `meta["ctx_hash"]` in 3b (task 17).
-- **Default compression prompt (exact text, ADR-0016 A#1):** "Preserve the facts,
+- **Default compression prompt:** was A#1's exact text ("Preserve the facts,
   decisions, entities, and open threads needed for the conversation to continue
-  coherently." Core constant in 3a; becomes `compression.default_prompt` config in
-  task 18.
+  coherently."), a core constant in 3a promoted to `compression.default_prompt` in
+  task 18. **ADR-0016 A#6 (task 47) supersedes that exact text** with a marker-aware
+  scaffold+preserve-intent *system* prompt — see A#6 before touching it.
 - **H2 invariant:** `commit_compression` / `expand_compression` / `draft_compression`
   must raise while a turn is streaming (`ConversationCore.streaming`, task 3); the UI
   additionally refuses the actions while `_stream_worker` runs (`ctx/ui/app.py:75`).
@@ -154,6 +155,104 @@ diffs in git history. One line each below so open tasks can still resolve their
 - [x] 44 — UI: incremental message-list reconcile (kill the refresh flash)
 
 - [x] 45 — Verify the polished compression UI end-to-end (qa-tester + visual)
+
+### Phase 3f — post-loop bug fixes (2026-07-07)
+
+> Filed from first-hand user testing after the Sprint 3 loop. Three bugs, settled by
+> a grill: (2) the compression **draft** produced nonsense ("you haven't provided the
+> nodes to compress yet") because it replayed *only* the range as bare turns + a
+> trailing instruction — so a range that leads with an assistant turn reads as the
+> model's own words plus a naked meta-request. **Read ADR-0016 Amendment #6** before
+> tasks 46–48: the draft is reframed to send the editable prompt as the **system**
+> message and the **whole active-line** transcript (`current_view`, model-facing
+> forms) as one user message with the range wrapped in `<compress_this>…</compress_this>`
+> markers. This **overrides Q10c** and **supersedes A#1's exact default-prompt text**
+> (both settled — do not re-litigate). (1) is a visual selection-bar bug; (3) is
+> VSCode-style synced scrolling in the diff view. Order is priority (2 → 1 → 3);
+> deps noted inline.
+
+- [x] 46 — Core: `build_compression_transcript` helper (full spec in `PRD-done.md`)
+
+- [ ] 47 — **Core+config: reframe `draft_compression` + rewrite the default prompt**
+      (dep: 46) — rework `ConversationCore.draft_compression`
+      (`ctx/core/conversation.py:585`) per ADR-0016 A#6: build the provider call as
+      **system** message = the passed `prompt` (already the editor's full prompt) and a
+      single **user** message = `build_compression_transcript(self.current_view(), <range ids>, self._workspace.read_file)`
+      — i.e. the whole active line with the selected range marked, no longer just the
+      range. Keep the existing guards (`_validate_compress_range`, H2 streaming refusal,
+      no-op `on_usage`/Q10b). **Refuse when the marked span renders empty** (raise
+      `ValueError` before any provider call → the UI already breadcrumbs core
+      `ValueError`s). Rewrite `DEFAULT_COMPRESSION_PROMPT` (`ctx/core/config.py:17`,
+      re-exported from `conversation.py`) to the marker-aware **scaffold + preserve-intent**
+      system prompt from A#6 (mentions `<compress_this>`; still one editable block).
+      Update any test asserting the *old literal* prompt text (e.g. in
+      `tests/test_conversation.py`); tests importing the constant are fine. The UI
+      call site (`app.py:_draft_compression_worker`, passes `start_id,end_id,prompt`)
+      does **not** change. _Acceptance:_ code-blind test flow for the new
+      `draft_compression` behavior — tests assert the emitted messages are exactly
+      `[system=prompt, user=transcript]`, the user message contains both the marked
+      range and surrounding context, and an empty marked span raises `ValueError`
+      before the provider is touched. Green `scripts/check.sh`.
+
+- [ ] 48 — **UI: drop the zero-token interrupted node on cancel** — when a stream is
+      cancelled (`Ctrl+C`) having produced **no** tokens, the empty assistant node must
+      not linger as a phantom `▌` row. In the stream-cancel path (`app.py`
+      `_stream_response` CancelledError handler / `on_worker_state_changed` CANCELLED,
+      ~`app.py:1455`/`1477`), when `assistant_node.content == ""` rewind the tip to the
+      preceding user turn via the existing core `rewind` (append-only keeps the empty
+      node as an invisible abandoned tail — never a hard delete) and reconcile the
+      message list (`MessageList.reconcile`). A **partial** stream (any tokens) is left
+      exactly as today (keeps its text, stays on the line). _Acceptance:_ qa-tester /
+      Pilot: after cancelling a zero-token stream, `describe_state()`/snapshot shows the
+      assistant node gone and the active tip back at the user turn; after cancelling a
+      stream that streamed ≥1 token, the (partial) assistant node remains with its text.
+      Deterministic floor: a Pilot test using a blocking/cancellable provider asserting
+      the node count / active-leaf before vs after cancel. Green `scripts/check.sh`.
+
+- [ ] 49 — **UI (visual): colored left bar on an inner `MessageRow` wrapper** — fix the
+      selection-bar bleed: when a range spans multiple rows, the grey bridge between two
+      selected rows currently also shows the **upper node's colored left bar** running
+      through the gap (the `border-left` draws through the `range-continues-below`
+      bottom padding — `message_list.css:74-77`, `message_row.py:69`). Restructure
+      `MessageRow` (`ctx/ui/widgets/message_row.py`) so the role-colored `border_left`
+      (and the cursor/selection `thick` variant set in `MessageWidget._refresh_border`,
+      `message_list.py:75`) lives on an **inner wrapper** around the meta-slot+content,
+      while the **outer** row carries the grey `range-selected` background and the bridge
+      padding — so the bridged gap has **no** colored bar. Must not regress the diff /
+      inspector panes (they mount `MessageRow` too) or the normal per-row bar.
+      _Acceptance:_ **visual** — with a multi-node range selected (`v` + extend), the grey
+      gap between two selected rows shows **no** colored left bar; each node's colored bar
+      stops at its own content; holds even when both neighbours share a role/color.
+      Render via `tools/agent/visual.py` and look (PROMPT.md step 7). Deterministic
+      floor: `MessageWidget` still gets `range-continues-below`/`range-selected`;
+      a Pilot/snapshot test that the border is applied to the inner wrapper (not the
+      outer row). Green `scripts/check.sh`.
+
+- [ ] 50 — **UI (visual): `DiffView` equal-height aligned regions** — the two diff panes
+      must stay row-aligned by region. In `DiffView` (`ctx/ui/widgets/diff_view.py`,
+      `show`/`_mount_side`), for each **changed** region whose two sides have different
+      row counts (a verbatim run ⟷ a single `K` summary), pad the **shorter** side with
+      blank filler rows so both panes occupy equal vertical space for that region and the
+      *next* region still lines up. Use a uniform overview row height so the filler count
+      is deterministic (`taller_rows − shorter_rows`). Filler rows are not cursor targets
+      (mirror the existing `(none)` placeholder handling). _Acceptance:_ **visual** —
+      scrolled to any position, an unchanged region's left/right rows sit at the same y,
+      and a changed region's shorter side is blank-padded so following regions stay
+      aligned. Render via `tools/agent/visual.py` and look. Deterministic floor: a unit
+      test on the filler-count helper (per-region `max(len(left),len(right))` on both
+      sides) or a Pilot assertion that both panes hold equal row+filler counts per
+      region. Green `scripts/check.sh`.
+
+- [ ] 51 — **UI: `DiffView` locked bidirectional scroll + region-nav scrolls both**
+      (dep: 50) — couple the two panes' vertical scroll: a wheel / pageup / pagedown in
+      **either** `VerticalScroll` (`#diff-left`/`#diff-right`, and the drill panes) moves
+      the other to the same offset, and `set_cursor` (`diff_view.py:185`) scrolls **both**
+      panes to the cursored region (today it scrolls only the left `cursored[0]`). No
+      feedback loop (guard re-entrant scroll syncs). _Acceptance:_ qa-tester / Pilot:
+      after scrolling one pane or moving the region cursor (`up`/`down`), both panes report
+      the **same** `scroll_y`. Deterministic floor: a Pilot test asserting
+      `left.scroll_offset.y == right.scroll_offset.y` after a scroll and after a
+      region-cursor move. Green `scripts/check.sh`.
 
 ## Out of scope
 - **Nested compression** (compressing a range containing a K) — Q7: the flat guard

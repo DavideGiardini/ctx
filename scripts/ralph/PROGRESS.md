@@ -2778,3 +2778,37 @@ Git history is the source of truth for *what changed*; this file captures the
   PASS green-bar.
 - No regressions found → no follow-up tasks filed. **This was the last open PRD task —
   Sprint 3 (compression & spatial navigation, 3a–3e) is complete.**
+
+## 2026-07-07 — Task 46: `build_compression_transcript` helper (Phase 3f start)
+- Pure, framework-free renderer added to `ctx/core/context.py` next to `build_context`
+  (no new imports; `load_file` injected → stays testable without I/O). Renders a
+  `list[Node]` as one plain-text transcript: each `goes_to_model()` node becomes a
+  `"{Role}:\n{body}"` block in node order (user/assistant → content by role; a
+  `context` node → its loaded file body, NOT the "Included:" label; a committed `K` →
+  its summary). Non-model nodes (system/expand) and empty-body blocks emit nothing —
+  the exact set `build_context` skips. The contiguous in-range blocks (ids in
+  `range_ids`) are bracketed by `<compress_this>`/`</compress_this>` marker lines
+  (module constants `OPEN_/CLOSE_COMPRESS_MARKER`); before/after blocks sit outside.
+- **Design decision (documented in the docstring + spec, adjudicable):** context and
+  compression nodes are labeled `User:` — their *model-facing* role (build_context
+  routes both as user). Bodies are plain text with NO `<context_import>`/
+  `<conversation_summary>` XML wrapper (A#6: "imports as file bodies, K's as their
+  summaries"). Empty marked span still emits both markers as an adjacent empty pair so
+  task 47 can detect it and raise `ValueError` before any provider call.
+- Not wired anywhere yet — task 47 (`draft_compression` reframe) is the sole consumer.
+  Read ADR-0016 Amendment #6 before 47/48.
+- Tests: code-blind flow (PROMPT.md step 4). Stub (signature+docstring+`NotImplementedError`)
+  → `test-spec-author` given ONLY the interface + prose intent → 7 tests collected clean
+  and failed red on `NotImplementedError` → implemented to green. `tests/specs/
+  compression_transcript.md` (C1–C7) + `tests/test_compression_transcript.py`: range
+  between markers (C1), before/after outside (C2), context file body not label (C3), K
+  summary (C4), system dropped (C5), role labels + node order (C6), empty marked span =
+  adjacent empty markers (C7). All 7 earn their place (one per acceptance item + 2 edge
+  invariants); deletion test applied, none pruned.
+- Verification: pure core logic, not wired to any UI/runtime surface this iteration
+  (step 7) → no qa-tester, no visual; the code-blind tests + green gate ARE the
+  verification. `bash scripts/check.sh` green (701 passed, was 694; +7 new). ruff + mypy
+  clean.
+- Note: the uncommitted CONTEXT.md / ADR-0016 (A#6) / PRD.md (Phase 3f filing) working-tree
+  changes were the phase-3f setup left in place; folded into this commit as the phase's
+  first landing.

@@ -475,3 +475,47 @@ commands are removed, not repaired.** `c` opens the compression draft editor on 
 ":compress/:expand map to slash commands" note. The "entering Insert clears the selection"
 invariant is intentional and unchanged — it is *why* commands can't carry a selection. Future
 selection-dependent verbs (branch, delete, rewind) follow the same rule: bind a key, not a command.
+
+## Amendment #6 — the draft call sees the whole conversation with the range marked (2026-07-07)
+
+Post-loop user testing surfaced a compression that produced a nonsense draft — the model
+replied *"you haven't provided the nodes you want me to compress yet."* Root cause: the 3a/3b
+draft rendered **only the selected range** through `build_context` and then appended the
+instruction as the *last* user message (the "Q10c invariant": *the draft sees exactly what the
+model sees, as replayed turns*). When a range starts with an assistant turn — the common case,
+you compress the assistant's long answer — the request reads to the model as *its own prior
+words* followed by a naked meta-instruction, with **nothing framed as the material to
+summarize**. Emptiness (an interrupted, zero-token turn `build_context` silently drops) made it
+worse but was not the cause; a non-empty range failed the same way.
+
+**Resolution (user decision, this grill).** A draft call is reframed:
+
+1. **The instruction is the *system* message**, not a trailing user turn. The user-editable
+   prompt (editor Top split, seeded from `compression.default_prompt`) *is* the whole system
+   prompt — both its fixed **scaffold** ("summarize only the content between `<compress_this>`
+   and `</compress_this>`; use the rest of the conversation as context, do not summarize it")
+   and its **preserve-intent** clause ("preserve the facts, decisions, entities, and open
+   threads needed for the conversation to continue coherently"). The user sees and may edit the
+   whole thing — including deleting the marker mechanics, at their own risk ("power over
+   protection", consistent with A#1's opt-out).
+2. **The user message is the *whole active-line* transcript** — `current_view` (root→tip, each
+   node in its model-facing form: imports as file bodies, committed `K`s as their summaries) —
+   with the target range wrapped in `<compress_this>…</compress_this>`. This is **one** user
+   message, so it never leads with a bare assistant turn, and the model sees the **before**
+   context (to understand the chunk) *and* the **after** context (to know which open threads
+   actually continued — the point of "preserve open threads", and a real quality win for middle
+   compression; for a tip compression there is simply nothing after the markers).
+3. **A draft is refused when the marked span renders empty** (breadcrumb, no provider call).
+
+**This overrides Q10c.** The draft no longer sees *only the range* — it deliberately sees the
+whole conversation. Content-fidelity (model-facing forms) is preserved; the "only the range"
+scope is not. It also **supersedes A#1's exact default-prompt text**: the default is rewritten
+to the scaffold+intent system prompt above (still `compression.default_prompt`, still stamped on
+`K.meta["prompt"]` at commit). Reconstruction, `ctx_hash`, and the diff view are unaffected —
+this changes only how a *draft* is elicited, never what a committed `K` folds or how context is
+rebuilt.
+
+A related UX fix rides along (not an ADR-level decision): a **zero-token interrupted turn is
+dropped on cancel** — the tip rewinds to the user turn, leaving the empty assistant node as an
+invisible abandoned tail (append-only, never a hard delete). A *partial* stream keeps its text.
+This removes the phantom `▌` node that looked like real content but rendered empty.

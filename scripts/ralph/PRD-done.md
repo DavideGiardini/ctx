@@ -978,3 +978,22 @@ become new `- [ ]` tasks" instruction. Not blockers for the Sprint 3 feature set
       `tools/agent/visual.py`, `Read` each PNG, and confirm the corrected appearance;
       re-run `scripts/ralph/VISUAL-FIXTURE.md` and confirm both directions still
       discriminate. Any regression filed as a follow-up task.
+
+### Phase 3f — post-loop bug fixes (2026-07-07)
+
+- [x] 46 — **Core: `build_compression_transcript` helper** — add a pure function to
+      `ctx/core/context.py` (framework-free, alongside `build_context`) that renders a
+      `list[Node]` as **one plain-text transcript string** with each node in its
+      model-facing form (reuse `build_context`'s per-role/-type rules: user/assistant
+      by role; a `context` node → its loaded file body via the injected `load_file`,
+      not the "Included:" label; a committed `K` → its summary; nodes that
+      `not goes_to_model()` are dropped), labeling each block by role (e.g.
+      `User:`/`Assistant:`). A given contiguous **id-range** (the nodes being
+      compressed) is wrapped in `<compress_this>` / `</compress_this>` marker lines.
+      `load_file` is injected (same signature as `build_context`) so it stays pure. Not
+      wired anywhere yet (task 47 uses it). _Acceptance:_ code-blind test flow
+      (PROMPT.md step 4): signatures+docstring → `test-spec-author` → red → green.
+      Tests assert: the marked range appears between the two markers; before/after
+      nodes appear outside them; a `context` node contributes its file body; a `K`
+      contributes its summary; a dropped (system) node emits nothing. Green
+      `scripts/check.sh`.
