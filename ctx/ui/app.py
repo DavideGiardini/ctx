@@ -88,6 +88,9 @@ class ChatApp(App):
             self._repo, provider or LiteLLMProvider(), workspace=self._workspace
         )
         self._stream_worker: Worker | None = None
+        # The assistant node the live turn-stream writes into, tracked so a
+        # zero-token cancel can drop the phantom empty node (task 48).
+        self._streaming_node: Node | None = None
         # The in-flight draft worker (``Ctrl+D``) and the prompt of the last
         # draft that actually ran. ``""`` means no draft ran → a manual commit
         # (Q4); ``Ctrl+S`` records this prompt on the committed K.
@@ -1352,6 +1355,7 @@ class ChatApp(App):
         self._refresh_token_ui()
         if self.mode == "insert":
             self._lock_inspector_to_last()
+        self._streaming_node = assistant_node
         self._stream_worker = self._stream_response(assistant_node)
 
     def _update_model_label(self) -> None:
@@ -1481,6 +1485,31 @@ class ChatApp(App):
             WorkerState.ERROR,
         ):
             self._stream_worker = None
+            node = self._streaming_node
+            self._streaming_node = None
+            if (
+                event.state is WorkerState.CANCELLED
+                and node is not None
+                and node.content == ""
+            ):
+                # A zero-token cancel leaves an empty assistant node at the tip
+                # rendered as a phantom ▌ row — drop it (task 48). A partial
+                # stream (any tokens) is left exactly as-is.
+                self._drop_interrupted_node(node)
             # The assistant node now carries its full text — its weight (and the
             # context-basis share of every other node) only just became real.
             self._refresh_token_ui()
+
+    @work(name="drop_interrupted")
+    async def _drop_interrupted_node(self, node: Node) -> None:
+        """Retire a zero-token interrupted assistant node from the live view.
+
+        Rewinds the active tip back to the node's preceding user turn via the
+        core ``rewind`` — append-only, so the empty node lingers as an invisible
+        abandoned tail, never a hard delete — then reconciles the message list so
+        the phantom ``▌`` row disappears and the tip is back at the user turn."""
+        if node.prev_id is None:
+            return
+        self.core.rewind(node.prev_id)
+        await self._rebuild_message_list()
+        self._refresh_token_ui()

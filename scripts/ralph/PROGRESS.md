@@ -2859,3 +2859,24 @@ Git history is the source of truth for *what changed*; this file captures the
 - Gotcha for a future iteration: the empty-span check depends on task 46's helper emitting an
   adjacent empty marker pair for an empty span — if that helper's marker format changes, the
   partition-based check here must move in lockstep.
+
+## 2026-07-07 — Task 48: drop the zero-token interrupted node on cancel
+- What: cancelling a turn-stream that produced **no** tokens no longer leaves the empty
+  assistant node as a phantom `▌` row. In `ChatApp` (`ctx/ui/app.py`): track the streaming
+  assistant node in `self._streaming_node` (set at submit, read+cleared in
+  `on_worker_state_changed`); in the CANCELLED branch, if `node.content == ""`, spawn a new
+  `@work` `_drop_interrupted_node` that `core.rewind(node.prev_id)` (append-only — the empty
+  node stays as an invisible abandoned tail) then `_rebuild_message_list()`. A partial stream
+  (≥1 token) is untouched.
+- Tests: new `tests/test_app_cancel_empty_node.py` — 2 Pilot tests (the mandatory deterministic
+  floor): zero-token cancel drops the node + tip back at the user turn; partial cancel keeps the
+  node with its text. Red/green confirmed (zero-token test fails when the drop call is stubbed;
+  partial test stays green — so it isn't a rubber stamp).
+- Verification: pure state-change behavior, no visual/layout surface → the Pilot floor IS the
+  verification (step 7); did NOT spawn qa-tester (adds nothing, risks the in-process-cache wedge).
+- **Gotcha (important for future cancel/stream Pilot tests):** `pilot.pause()` alone does NOT
+  advance a worker blocked in an `await` (e.g. our blocking provider on an `asyncio.Event`) to its
+  CANCELLED state — it stayed RUNNING for 200+ pauses. You must `await worker.wait()` after
+  `.cancel()` to let the cancellation propagate; `worker.wait()` re-raises `WorkerCancelled` on a
+  cancelled worker, so wrap it in `contextlib.suppress(WorkerCancelled)` (see `_cancel_and_settle`).
+- `bash scripts/check.sh` green (700 passed). ruff + mypy clean.

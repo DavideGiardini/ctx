@@ -173,21 +173,7 @@ diffs in git history. One line each below so open tasks can still resolve their
 
 - [x] 46 — Core: `build_compression_transcript` helper (full spec in `PRD-done.md`)
 - [x] 47 — Core+config: reframe `draft_compression` + rewrite the default prompt (full spec in `PRD-done.md`)
-
-- [ ] 48 — **UI: drop the zero-token interrupted node on cancel** — when a stream is
-      cancelled (`Ctrl+C`) having produced **no** tokens, the empty assistant node must
-      not linger as a phantom `▌` row. In the stream-cancel path (`app.py`
-      `_stream_response` CancelledError handler / `on_worker_state_changed` CANCELLED,
-      ~`app.py:1455`/`1477`), when `assistant_node.content == ""` rewind the tip to the
-      preceding user turn via the existing core `rewind` (append-only keeps the empty
-      node as an invisible abandoned tail — never a hard delete) and reconcile the
-      message list (`MessageList.reconcile`). A **partial** stream (any tokens) is left
-      exactly as today (keeps its text, stays on the line). _Acceptance:_ qa-tester /
-      Pilot: after cancelling a zero-token stream, `describe_state()`/snapshot shows the
-      assistant node gone and the active tip back at the user turn; after cancelling a
-      stream that streamed ≥1 token, the (partial) assistant node remains with its text.
-      Deterministic floor: a Pilot test using a blocking/cancellable provider asserting
-      the node count / active-leaf before vs after cancel. Green `scripts/check.sh`.
+- [x] 48 — UI: drop the zero-token interrupted node on cancel (full spec in `PRD-done.md`)
 
 - [ ] 49 — **UI (visual): colored left bar on an inner `MessageRow` wrapper** — fix the
       selection-bar bleed: when a range spans multiple rows, the grey bridge between two
