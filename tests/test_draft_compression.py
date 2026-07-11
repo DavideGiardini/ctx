@@ -9,42 +9,11 @@ do — only what the contract says it must do.
 import asyncio
 
 import pytest
+from conftest import BlockingProvider, RecordingProvider
 
 from ctx.core.context import CLOSE_COMPRESS_MARKER, OPEN_COMPRESS_MARKER
 from ctx.core.conversation import DEFAULT_COMPRESSION_PROMPT, ConversationCore
 from ctx.core.provider import Usage
-
-# --- test doubles -----------------------------------------------------------
-
-class RecordingProvider:
-    """Captures the exact messages list it is handed and streams canned tokens."""
-
-    def __init__(self, tokens):
-        self._tokens = list(tokens)
-        self.called = False
-        self.captured = None  # the messages list, or None if never invoked
-
-    async def stream(self, messages, *args, **kwargs):
-        self.called = True
-        self.captured = messages
-        for tok in self._tokens:
-            yield tok
-
-
-class BlockingProvider:
-    """Keeps core.streaming True until released (for the H2 guard test)."""
-
-    def __init__(self):
-        self._release = asyncio.Event()
-
-    def release(self):
-        self._release.set()
-
-    async def stream(self, *args, **kwargs):
-        yield "thinking"
-        await self._release.wait()
-        yield "done"
-
 
 # --- helpers ----------------------------------------------------------------
 
@@ -195,7 +164,8 @@ async def test_range_validation_before_provider_call(repo, workspace, test_provi
 
 async def test_draft_during_live_stream_raises(repo, workspace, test_provider):
     # C129 (H2 guard)
-    blocker = BlockingProvider()
+    gate = asyncio.Event()
+    blocker = BlockingProvider(["thinking"], gate)
     core = _core(repo, workspace, blocker)
     u1, a1 = core.submit("kick off the assistant")
     agen = core.stream(a1)
@@ -205,7 +175,7 @@ async def test_draft_during_live_stream_raises(repo, workspace, test_provider):
         with pytest.raises(ValueError):
             await _drain(core.draft_compression(u1.id, u1.id))
     finally:
-        blocker.release()
+        gate.set()
         await agen.aclose()
 
 

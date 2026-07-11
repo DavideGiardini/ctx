@@ -21,27 +21,12 @@ The oracle is the acceptance criterion, asserted through the public
 provider (for the next turn's context).
 """
 
+from conftest import RecordingProvider
 from textual.widgets import TextArea
 
 from ctx.core.provider import TestProvider as CannedProvider
 from ctx.ui.app import ChatApp
 from ctx.ui.widgets.input_bar import InputBar
-
-
-class _RecordingProvider:
-    """Canned provider that captures the messages of the *last* stream call."""
-
-    def __init__(self, tokens: list[str]) -> None:
-        self._tokens = tokens
-        self.last_messages: list[dict] | None = None
-
-    async def stream(self, messages, model, on_usage=None):  # type: ignore[no-untyped-def]
-        self.last_messages = messages
-        for token in self._tokens:
-            yield token
-
-    async def check_connectivity(self, model):  # type: ignore[no-untyped-def]
-        return True
 
 
 def _app(repo, workspace, provider=None) -> ChatApp:
@@ -125,7 +110,7 @@ async def test_expand_survives_restart(repo, workspace):
 
 
 async def test_next_turn_sees_children_verbatim_after_expand(repo, workspace):
-    provider = _RecordingProvider(["reply"])
+    provider = RecordingProvider(["reply"])
     app = _app(repo, workspace, provider=provider)
     async with app.run_test() as pilot:
         await _two_turns(app)
@@ -138,7 +123,7 @@ async def test_next_turn_sees_children_verbatim_after_expand(repo, workspace):
         await app.on_input_bar_submitted(InputBar.Submitted("third"))
         await app.workers.wait_for_complete()
 
-        blob = "\n".join(str(m.get("content", "")) for m in provider.last_messages)
+        blob = "\n".join(str(m.get("content", "")) for m in provider.captured)
         assert "<conversation_summary>" not in blob
         assert "THE SUMMARY TEXT" not in blob
         # The original turns' text is present again.

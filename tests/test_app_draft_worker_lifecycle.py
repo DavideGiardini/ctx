@@ -16,32 +16,12 @@ a gate) keeps the draft worker live while the test drives the UI.
 
 import asyncio
 
+from conftest import BlockingProvider
 from textual.widgets import TextArea
 
 from ctx.core.provider import TestProvider as CannedProvider
 from ctx.ui.app import ChatApp
 from ctx.ui.widgets.input_bar import InputBar
-
-
-class _BlockingProvider:
-    """Yields its ``before`` tokens, then blocks on ``gate`` before ``AFTER``.
-
-    Models an LLM suspended mid-stream so a consuming draft worker stays live
-    (PENDING/RUNNING) while the test drives the editor.
-    """
-
-    def __init__(self, before: list[str], gate: asyncio.Event) -> None:
-        self._before = before
-        self._gate = gate
-
-    async def stream(self, messages, model, on_usage=None):  # type: ignore[no-untyped-def]
-        for token in self._before:
-            yield token
-        await self._gate.wait()
-        yield "AFTER"
-
-    async def check_connectivity(self, model):  # type: ignore[no-untyped-def]
-        return (True, "ok")
 
 
 def _app(repo, workspace) -> ChatApp:
@@ -69,7 +49,7 @@ async def _open_editor_on_full_range(pilot) -> None:
 async def _start_blocked_draft(app, pilot, gate) -> None:
     """Swap in the blocking provider, Ctrl+D, and wait until the draft is live
     with its partial token rendered (so the worker is genuinely mid-stream)."""
-    app.core._provider = _BlockingProvider(["partial"], gate)
+    app.core._provider = BlockingProvider(["partial"], gate)
     await pilot.press("ctrl+d")
     for _ in range(200):
         if (

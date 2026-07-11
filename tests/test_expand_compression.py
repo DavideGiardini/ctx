@@ -10,6 +10,7 @@ expand *event* node E). Assertions are on observable API only.
 import asyncio
 
 import pytest
+from conftest import BlockingProvider
 
 from ctx.core.conversation import ConversationCore
 from ctx.models.nodes import Node
@@ -38,22 +39,6 @@ def _view_ids(core):
 
 def _has_compression(core):
     return any(n.node_type == "compression" for n in core.current_view())
-
-
-class BlockingProvider:
-    """Provider whose stream stalls on a gate after emitting `before` tokens."""
-
-    def __init__(self, before, gate):
-        self._before, self._gate = before, gate
-
-    async def stream(self, messages, model, on_usage=None):
-        for t in self._before:
-            yield t
-        await self._gate.wait()
-        yield "AFTER"  # never reached in tests
-
-    async def check_connectivity(self, model):
-        return (True, "ok")
 
 
 # ---------------------------------------------------------------------------

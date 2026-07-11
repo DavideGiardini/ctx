@@ -14,39 +14,12 @@ asserted through ``app.core`` (K's meta) and the public editor state.
 
 import asyncio
 
+from conftest import BlockingProvider, ErroringProvider
 from textual.widgets import TextArea
 
 from ctx.core.provider import TestProvider as CannedProvider
 from ctx.ui.app import ChatApp
 from ctx.ui.widgets.input_bar import InputBar
-
-
-class _BlockingProvider:
-    """Yields ``before`` tokens, then blocks on ``gate`` — keeps a draft live."""
-
-    def __init__(self, before: list[str], gate: asyncio.Event) -> None:
-        self._before = before
-        self._gate = gate
-
-    async def stream(self, messages, model, on_usage=None):  # type: ignore[no-untyped-def]
-        for token in self._before:
-            yield token
-        await self._gate.wait()
-        yield "AFTER"
-
-    async def check_connectivity(self, model):  # type: ignore[no-untyped-def]
-        return (True, "ok")
-
-
-class _ErroringProvider:
-    """Raises mid-stream so the draft worker takes its failure path."""
-
-    async def stream(self, messages, model, on_usage=None):  # type: ignore[no-untyped-def]
-        raise RuntimeError("boom")
-        yield ""  # pragma: no cover — makes this an async generator
-
-    async def check_connectivity(self, model):  # type: ignore[no-untyped-def]
-        return (True, "ok")
 
 
 def _app(repo, workspace) -> ChatApp:
@@ -86,7 +59,7 @@ async def test_manual_commit_after_cancelled_draft_stamps_empty_prompt(repo, wor
         # Draft with a custom prompt, then cancel the live worker via Esc.
         app.query_one("#compress-prompt", TextArea).text = "focus on the decisions"
         gate = asyncio.Event()
-        app.core._provider = _BlockingProvider(["partial"], gate)
+        app.core._provider = BlockingProvider(["partial"], gate)
         await pilot.press("ctrl+d")
         for _ in range(200):
             if app._draft_worker is not None and not app._draft_worker.is_finished:
@@ -120,7 +93,7 @@ async def test_manual_commit_after_failed_draft_stamps_empty_prompt(repo, worksp
         await _open_editor_on_full_range(pilot)
 
         app.query_one("#compress-prompt", TextArea).text = "focus on the decisions"
-        app.core._provider = _ErroringProvider()
+        app.core._provider = ErroringProvider()
         await pilot.press("ctrl+d")
         await app.workers.wait_for_complete()
 
