@@ -16,70 +16,23 @@ a gate) keeps the draft worker live while the test drives the UI.
 
 import asyncio
 
+from conftest import BlockingProvider
+from pilot_helpers import open_editor_on_range, two_turns, wait_until
 from textual.widgets import TextArea
-
-from ctx.core.provider import TestProvider as CannedProvider
-from ctx.ui.app import ChatApp
-from ctx.ui.widgets.input_bar import InputBar
-
-
-class _BlockingProvider:
-    """Yields its ``before`` tokens, then blocks on ``gate`` before ``AFTER``.
-
-    Models an LLM suspended mid-stream so a consuming draft worker stays live
-    (PENDING/RUNNING) while the test drives the editor.
-    """
-
-    def __init__(self, before: list[str], gate: asyncio.Event) -> None:
-        self._before = before
-        self._gate = gate
-
-    async def stream(self, messages, model, on_usage=None):  # type: ignore[no-untyped-def]
-        for token in self._before:
-            yield token
-        await self._gate.wait()
-        yield "AFTER"
-
-    async def check_connectivity(self, model):  # type: ignore[no-untyped-def]
-        return (True, "ok")
-
-
-def _app(repo, workspace) -> ChatApp:
-    return ChatApp(
-        provider=CannedProvider(["ok"]),
-        workspace=workspace,
-        storage=repo,
-    )
-
-
-async def _two_turns(app) -> None:
-    await app.on_input_bar_submitted(InputBar.Submitted("first"))
-    await app.workers.wait_for_complete()
-    await app.on_input_bar_submitted(InputBar.Submitted("second"))
-    await app.workers.wait_for_complete()
-
-
-async def _open_editor_on_full_range(pilot) -> None:
-    await pilot.press("escape")  # → Edit mode
-    await pilot.press("home")  # cursor on the first node
-    await pilot.press("v", "down", "down", "down")  # range = all 4 nodes (ends at tip)
-    await pilot.press("c")  # open the draft editor
 
 
 async def _start_blocked_draft(app, pilot, gate) -> None:
     """Swap in the blocking provider, Ctrl+D, and wait until the draft is live
     with its partial token rendered (so the worker is genuinely mid-stream)."""
-    app.core._provider = _BlockingProvider(["partial"], gate)
+    app.core._provider = BlockingProvider(["partial"], gate)
     await pilot.press("ctrl+d")
-    for _ in range(200):
-        if (
-            app._draft_worker is not None
-            and not app._draft_worker.is_finished
-            and app.query_one("#compress-output", TextArea).text == "partial"
-        ):
-            break
-        await pilot.pause()
-    assert app._draft_worker is not None and not app._draft_worker.is_finished
+    live = await wait_until(
+        pilot,
+        lambda: app._draft_worker is not None
+        and not app._draft_worker.is_finished
+        and app.query_one("#compress-output", TextArea).text == "partial",
+    )
+    assert live
 
 
 def _compression_nodes(app) -> list[dict]:
@@ -92,11 +45,11 @@ def _hint_shown(app, needle: str) -> bool:
     return hint is not None and needle in hint.lower()
 
 
-async def test_commit_mid_draft_is_refused(repo, workspace):
-    app = _app(repo, workspace)
+async def test_commit_mid_draft_is_refused(app_factory):
+    app = app_factory()
     async with app.run_test() as pilot:
-        await _two_turns(app)
-        await _open_editor_on_full_range(pilot)
+        await two_turns(app)
+        await open_editor_on_range(pilot)
         gate = asyncio.Event()
         await _start_blocked_draft(app, pilot, gate)
 
@@ -111,11 +64,11 @@ async def test_commit_mid_draft_is_refused(repo, workspace):
         await app.workers.wait_for_complete()
 
 
-async def test_esc_cancels_a_live_draft(repo, workspace):
-    app = _app(repo, workspace)
+async def test_esc_cancels_a_live_draft(app_factory):
+    app = app_factory()
     async with app.run_test() as pilot:
-        await _two_turns(app)
-        await _open_editor_on_full_range(pilot)
+        await two_turns(app)
+        await open_editor_on_range(pilot)
         gate = asyncio.Event()
         await _start_blocked_draft(app, pilot, gate)
         worker = app._draft_worker
@@ -131,13 +84,13 @@ async def test_esc_cancels_a_live_draft(repo, workspace):
         await app.workers.wait_for_complete()
 
 
-async def test_close_cancels_a_live_worker(repo, workspace):
+async def test_close_cancels_a_live_worker(app_factory):
     # The close seam itself (used by future conversation-switch paths, not just
     # Esc) must cancel a live worker before dropping the reference.
-    app = _app(repo, workspace)
+    app = app_factory()
     async with app.run_test() as pilot:
-        await _two_turns(app)
-        await _open_editor_on_full_range(pilot)
+        await two_turns(app)
+        await open_editor_on_range(pilot)
         gate = asyncio.Event()
         await _start_blocked_draft(app, pilot, gate)
         worker = app._draft_worker
@@ -156,13 +109,13 @@ async def test_close_cancels_a_live_worker(repo, workspace):
         await app.workers.wait_for_complete()
 
 
-async def test_reopened_editor_summary_is_clean_after_orphan(repo, workspace):
+async def test_reopened_editor_summary_is_clean_after_orphan(app_factory):
     # Without the cancel-on-close fix, the orphaned worker unblocks and writes
     # its draft into the RE-OPENED editor's Summary. With the fix it is dead.
-    app = _app(repo, workspace)
+    app = app_factory()
     async with app.run_test() as pilot:
-        await _two_turns(app)
-        await _open_editor_on_full_range(pilot)
+        await two_turns(app)
+        await open_editor_on_range(pilot)
         gate = asyncio.Event()
         await _start_blocked_draft(app, pilot, gate)
 

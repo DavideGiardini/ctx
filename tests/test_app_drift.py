@@ -15,41 +15,21 @@ while ``A1``'s did not. With the config off, no node drifts.
 
 import json
 
-from textual.widgets import Static, TextArea
+from pilot_helpers import compress_range, turn
+from textual.widgets import Static
 
 import ctx.core.config
-from ctx.core.provider import TestProvider as CannedProvider
-from ctx.ui.app import ChatApp
-from ctx.ui.widgets.input_bar import InputBar
 from ctx.ui.widgets.message_list import MessageWidget
-
-
-def _app(repo, workspace) -> ChatApp:
-    return ChatApp(
-        provider=CannedProvider(["ok"]),
-        workspace=workspace,
-        storage=repo,
-    )
-
-
-async def _turn(app, text: str) -> None:
-    await app.on_input_bar_submitted(InputBar.Submitted(text))
-    await app.workers.wait_for_complete()
 
 
 async def _drift_scenario(app, pilot) -> None:
     """U1,A1 → compress [U1,A1] → U2,A2 → expand K (the acceptance setup)."""
-    await _turn(app, "first")  # → U1, A1
+    await turn(app, "first")  # → U1, A1
 
     # Compress the whole tip range [U1, A1] into one K via the draft editor.
-    await pilot.press("escape")  # → Edit mode
-    await pilot.press("home")  # cursor on U1
-    await pilot.press("v", "down")  # range = [U1, A1]
-    await pilot.press("c")  # open the draft editor
-    app.query_one("#compress-output", TextArea).text = "SUMMARY"
-    await pilot.press("ctrl+s")  # commit → view = [K], Edit mode, no selection
+    await compress_range(app, pilot, "SUMMARY", downs=1)
 
-    await _turn(app, "second")  # → K, U2, A2 (A2 saw K in context)
+    await turn(app, "second")  # → K, U2, A2 (A2 saw K in context)
 
     # Re-enter Edit, land on K (first node), and expand it with the 13b key.
     if app.mode == "edit":
@@ -60,8 +40,8 @@ async def _drift_scenario(app, pilot) -> None:
     await pilot.press("x")  # expand → view = [U1, A1, U2, A2]
 
 
-async def test_expanded_turn_drifts_and_prior_turn_does_not(repo, workspace):
-    app = _app(repo, workspace)
+async def test_expanded_turn_drifts_and_prior_turn_does_not(app_factory):
+    app = app_factory()
     async with app.run_test() as pilot:
         await _drift_scenario(app, pilot)
 
@@ -81,12 +61,12 @@ async def test_expanded_turn_drifts_and_prior_turn_does_not(repo, workspace):
         assert str(a1_w.query_one(".drift", Static).render()) == ""
 
 
-async def test_no_drift_marker_when_config_disabled(repo, workspace, monkeypatch, tmp_path):
+async def test_no_drift_marker_when_config_disabled(app_factory, monkeypatch, tmp_path):
     config_path = tmp_path / "config.json"
     config_path.write_text(json.dumps({"ui": {"show_context_drift": False}}))
     monkeypatch.setattr(ctx.core.config, "CONFIG_PATH", config_path)
 
-    app = _app(repo, workspace)
+    app = app_factory()
     async with app.run_test() as pilot:
         await _drift_scenario(app, pilot)
 
@@ -97,7 +77,7 @@ async def test_no_drift_marker_when_config_disabled(repo, workspace, monkeypatch
 
 
 async def test_gd_diff_is_noop_on_drifted_turn_when_config_disabled(
-    repo, workspace, monkeypatch, tmp_path
+    app_factory, monkeypatch, tmp_path
 ):
     """With drift display off, ``g d`` on a drifted assistant turn opens nothing.
 
@@ -109,7 +89,7 @@ async def test_gd_diff_is_noop_on_drifted_turn_when_config_disabled(
     config_path.write_text(json.dumps({"ui": {"show_context_drift": False}}))
     monkeypatch.setattr(ctx.core.config, "CONFIG_PATH", config_path)
 
-    app = _app(repo, workspace)
+    app = app_factory()
     async with app.run_test() as pilot:
         await _drift_scenario(app, pilot)  # view = [U1, A1, U2, A2], A2 drifted
 

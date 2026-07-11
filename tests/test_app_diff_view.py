@@ -14,42 +14,22 @@ now-view is ``[U1,A1,U2]``, so ``g d`` on ``A2`` shows one changed region
 ``left=[K]`` ⟷ ``right=[U1,A1]``.
 """
 
+from pilot_helpers import compress_range, turn
 from textual.containers import VerticalScroll
 from textual.widgets import TextArea
 
-from ctx.core.provider import TestProvider as CannedProvider
-from ctx.ui.app import ChatApp
 from ctx.ui.widgets.compression_editor import CompressionEditor
 from ctx.ui.widgets.diff_view import DiffView
-from ctx.ui.widgets.input_bar import InputBar
 from ctx.ui.widgets.message_list import MessageList
-
-
-def _app(repo, workspace) -> ChatApp:
-    return ChatApp(
-        provider=CannedProvider(["ok"]),
-        workspace=workspace,
-        storage=repo,
-    )
-
-
-async def _turn(app, text: str) -> None:
-    await app.on_input_bar_submitted(InputBar.Submitted(text))
-    await app.workers.wait_for_complete()
 
 
 async def _drift_scenario(app, pilot) -> None:
     """U1,A1 → compress [U1,A1] → U2,A2 → expand K, then select A2."""
-    await _turn(app, "first")  # → U1, A1
+    await turn(app, "first")  # → U1, A1
 
-    await pilot.press("escape")  # → Edit
-    await pilot.press("home")  # cursor on U1
-    await pilot.press("v", "down")  # range = [U1, A1]
-    await pilot.press("c")  # open the draft editor
-    app.query_one("#compress-output", TextArea).text = "SUMMARY"
-    await pilot.press("ctrl+s")  # commit → view = [K]
+    await compress_range(app, pilot, "SUMMARY", downs=1)  # commit → view = [K]
 
-    await _turn(app, "second")  # → K, U2, A2 (A2 saw K)
+    await turn(app, "second")  # → K, U2, A2 (A2 saw K)
 
     if app.mode == "edit":
         await pilot.press("escape")  # → Insert
@@ -68,8 +48,8 @@ async def _middle_compress_scenario(app, pilot) -> tuple[str, str]:
     compress. This exercises task 22's deleted tip guard: the range [U1,A1] does
     NOT end at the active leaf (A2), yet now folds.
     """
-    await _turn(app, "first")  # → U1, A1
-    await _turn(app, "second")  # → U2, A2; view = [U1, A1, U2, A2]
+    await turn(app, "first")  # → U1, A1
+    await turn(app, "second")  # → U2, A2; view = [U1, A1, U2, A2]
 
     view0 = app.core.nodes
     u1, a1 = view0[0].id, view0[1].id
@@ -92,8 +72,8 @@ def _k_id(app) -> str:
     return str(next(n.id for n in app.core.all_nodes() if n.node_type == "compression"))
 
 
-async def test_gd_on_drifted_assistant_opens_diff_region(repo, workspace):
-    app = _app(repo, workspace)
+async def test_gd_on_drifted_assistant_opens_diff_region(app_factory):
+    app = app_factory()
     async with app.run_test() as pilot:
         await _drift_scenario(app, pilot)
         assert app._get_selected_node().role == "assistant"
@@ -116,7 +96,7 @@ async def test_gd_on_drifted_assistant_opens_diff_region(repo, workspace):
         assert app.describe_state()["deep_dive"]["breadcrumb"][-1].startswith("Diff")
 
 
-async def test_diff_is_fullscreen_two_pane_compact_rows(repo, workspace):
+async def test_diff_is_fullscreen_two_pane_compact_rows(app_factory):
     """Task 37: `g d` opens a full-screen two-pane diff whose panes render the
     turn's context as compact `MessageRow`s (not a plain-text dump). Opening it
     hides the body panes it replaces (the left inspector + input area); `Ctrl+o`
@@ -125,7 +105,7 @@ async def test_diff_is_fullscreen_two_pane_compact_rows(repo, workspace):
     from ctx.ui.widgets.detail_inspector import DetailInspector
     from ctx.ui.widgets.message_row import MessageRow
 
-    app = _app(repo, workspace)
+    app = app_factory()
     async with app.run_test() as pilot:
         await _drift_scenario(app, pilot)
         a2 = app._get_selected_node()
@@ -155,8 +135,8 @@ async def test_diff_is_fullscreen_two_pane_compact_rows(repo, workspace):
         assert app.query_one("#input-area").display is True
 
 
-async def test_diff_warning_on_tampered_ctx_hash(repo, workspace):
-    app = _app(repo, workspace)
+async def test_diff_warning_on_tampered_ctx_hash(app_factory):
+    app = app_factory()
     async with app.run_test() as pilot:
         await _drift_scenario(app, pilot)
 
@@ -169,8 +149,8 @@ async def test_diff_warning_on_tampered_ctx_hash(repo, workspace):
         assert diff["warning"] is True
 
 
-async def test_ctrl_o_restores_live_view(repo, workspace):
-    app = _app(repo, workspace)
+async def test_ctrl_o_restores_live_view(app_factory):
+    app = app_factory()
     async with app.run_test() as pilot:
         await _drift_scenario(app, pilot)
         await pilot.press("g", "d")
@@ -183,8 +163,8 @@ async def test_ctrl_o_restores_live_view(repo, workspace):
         assert app.query_one(MessageList).display is True
 
 
-async def test_gd_on_non_drifted_assistant_does_nothing(repo, workspace):
-    app = _app(repo, workspace)
+async def test_gd_on_non_drifted_assistant_does_nothing(app_factory):
+    app = app_factory()
     async with app.run_test() as pilot:
         await _drift_scenario(app, pilot)
         # A1 (index 1) never drifted; g d there must not open the diff.
@@ -209,8 +189,8 @@ def _drill_text(app) -> tuple[str, str]:
     return _side("#diff-drill-left"), _side("#diff-drill-right")
 
 
-async def test_enter_drills_into_cursored_region(repo, workspace):
-    app = _app(repo, workspace)
+async def test_enter_drills_into_cursored_region(app_factory):
+    app = app_factory()
     async with app.run_test() as pilot:
         await _drift_scenario(app, pilot)
         await pilot.press("g", "d")  # diff overview on A2
@@ -236,8 +216,8 @@ async def test_enter_drills_into_cursored_region(repo, workspace):
         assert "first" in right and "ok" in right
 
 
-async def test_ctrl_o_from_drill_returns_to_overview(repo, workspace):
-    app = _app(repo, workspace)
+async def test_ctrl_o_from_drill_returns_to_overview(app_factory):
+    app = app_factory()
     async with app.run_test() as pilot:
         await _drift_scenario(app, pilot)
         await pilot.press("g", "d")
@@ -254,8 +234,8 @@ async def test_ctrl_o_from_drill_returns_to_overview(repo, workspace):
         assert app.query_one(MessageList).display is False
 
 
-async def test_i_from_drill_exits_all_the_way(repo, workspace):
-    app = _app(repo, workspace)
+async def test_i_from_drill_exits_all_the_way(app_factory):
+    app = app_factory()
     async with app.run_test() as pilot:
         await _drift_scenario(app, pilot)
         await pilot.press("g", "d")
@@ -271,8 +251,8 @@ async def test_i_from_drill_exits_all_the_way(repo, workspace):
 
 # --- task 22: middle compress makes an earlier turn drift ---------------------
 
-async def test_middle_compress_earlier_turn_drifts(repo, workspace):
-    app = _app(repo, workspace)
+async def test_middle_compress_earlier_turn_drifts(app_factory):
+    app = app_factory()
     async with app.run_test() as pilot:
         u1, a1 = await _middle_compress_scenario(app, pilot)
         # The selected turn is the drifted A2 (last node of the folded view).
@@ -293,7 +273,7 @@ async def test_middle_compress_earlier_turn_drifts(repo, workspace):
 # --- task 50: equal-height aligned regions (blank-padded shorter side) --------
 
 
-async def test_diff_regions_are_row_aligned_across_panes(repo, workspace):
+async def test_diff_regions_are_row_aligned_across_panes(app_factory):
     """Task 50: a changed region whose two sides differ in row count must occupy
     equal vertical space in both panes — the shorter side is blank-padded with
     filler rows. Here the changed region is [U1,A1] (2 rows, left) ⟷ [K] (1 row,
@@ -303,7 +283,7 @@ async def test_diff_regions_are_row_aligned_across_panes(repo, workspace):
 
     from ctx.ui.widgets.diff_view import DiffView
 
-    app = _app(repo, workspace)
+    app = app_factory()
     async with app.run_test() as pilot:
         await _middle_compress_scenario(app, pilot)  # cursor on drifted A2
         await pilot.press("g", "d")
@@ -332,7 +312,7 @@ async def _two_region_drift_scenario(app, pilot) -> None:
     diff overflows the pane and holds two changed regions (one near the top, one
     lower) — enough to exercise a manual scroll and a region-cursor jump."""
     for i in range(8):
-        await _turn(app, f"turn {i}")
+        await turn(app, f"turn {i}")
 
     await pilot.press("escape")  # → Edit
     view = app.core.nodes  # U0,A0,U1,A1,...,U7,A7
@@ -353,11 +333,11 @@ async def _two_region_drift_scenario(app, pilot) -> None:
     await pilot.press("g", "d")
 
 
-async def test_diff_panes_scroll_locked_and_region_nav_scrolls_both(repo, workspace):
+async def test_diff_panes_scroll_locked_and_region_nav_scrolls_both(app_factory):
     """Task 51: the two overview panes share one vertical offset. Scrolling one
     pane moves the other to match, and a region-cursor move (`down`) scrolls both
     panes to the cursored region — after either, they report the same scroll_y."""
-    app = _app(repo, workspace)
+    app = app_factory()
     async with app.run_test() as pilot:
         await _two_region_drift_scenario(app, pilot)
         await pilot.pause()
@@ -391,10 +371,10 @@ async def test_diff_panes_scroll_locked_and_region_nav_scrolls_both(repo, worksp
 # (promoted from scripts/ralph/probes/test_review_hazards.py).
 
 
-async def test_c_in_diff_view_is_a_noop(repo, workspace):
+async def test_c_in_diff_view_is_a_noop(app_factory):
     """`c` while the diff view is open must not open the compression editor
     over the diff."""
-    app = _app(repo, workspace)
+    app = app_factory()
     async with app.run_test() as pilot:
         await _drift_scenario(app, pilot)
         await pilot.press("g", "d")
@@ -406,10 +386,10 @@ async def test_c_in_diff_view_is_a_noop(repo, workspace):
         assert app.describe_state()["diff_view"]["open"] is True
 
 
-async def test_v_in_diff_view_does_not_anchor_and_first_esc_pops(repo, workspace):
+async def test_v_in_diff_view_does_not_anchor_and_first_esc_pops(app_factory):
     """`v` while the diff is open must not set a range anchor, so the first Esc
     pops the diff rather than clearing an invisible selection (dead keypress)."""
-    app = _app(repo, workspace)
+    app = app_factory()
     async with app.run_test() as pilot:
         await _drift_scenario(app, pilot)
         await pilot.press("g", "d")
@@ -422,10 +402,10 @@ async def test_v_in_diff_view_does_not_anchor_and_first_esc_pops(repo, workspace
         assert app.describe_state()["diff_view"]["open"] is False
 
 
-async def test_x_in_diff_view_does_not_mutate(repo, workspace):
+async def test_x_in_diff_view_does_not_mutate(app_factory):
     """`x` (expand) while a diff is open must not mutate the graph or append a
     breadcrumb under the open diff."""
-    app = _app(repo, workspace)
+    app = app_factory()
     async with app.run_test() as pilot:
         await _middle_compress_scenario(app, pilot)  # cursor on drifted A2
         await pilot.press("g", "d")
@@ -438,10 +418,10 @@ async def test_x_in_diff_view_does_not_mutate(repo, workspace):
         assert app.describe_state()["diff_view"]["open"] is True
 
 
-async def test_c_then_commit_in_diff_commits_nothing(repo, workspace):
+async def test_c_then_commit_in_diff_commits_nothing(app_factory):
     """Full damage path: `c` then `Ctrl+S` while the diff is open must not
     commit a range-of-one K on the drifted turn."""
-    app = _app(repo, workspace)
+    app = app_factory()
     async with app.run_test() as pilot:
         await _drift_scenario(app, pilot)
         await pilot.press("g", "d")
@@ -467,8 +447,8 @@ async def _double_compress_and_dive(app, pilot) -> None:
     so A2 drifts — the `g d` diff branch is genuinely reachable on it (the test
     asserts the drift, so it can only pass because the dive gate blocks it, not
     because the turn happens to be undrifted)."""
-    await _turn(app, "first")  # → U1, A1
-    await _turn(app, "second")  # → U2, A2
+    await turn(app, "first")  # → U1, A1
+    await turn(app, "second")  # → U2, A2
 
     # compress [U1, A1] → K1
     await pilot.press("escape")
@@ -497,11 +477,11 @@ async def _double_compress_and_dive(app, pilot) -> None:
     await pilot.press("down")  # A2
 
 
-async def test_diff_does_not_open_inside_deep_dive(repo, workspace):
+async def test_diff_does_not_open_inside_deep_dive(app_factory):
     """Task 30 decision: diff and deep-dive are mutually exclusive. `g d` on a
     drifted *frame* assistant turn while diving must NOT open a diff inside the
     dive — the dive stays active and its breadcrumb gains no "Diff" entry."""
-    app = _app(repo, workspace)
+    app = app_factory()
     async with app.run_test() as pilot:
         await _double_compress_and_dive(app, pilot)
 
@@ -520,10 +500,10 @@ async def test_diff_does_not_open_inside_deep_dive(repo, workspace):
         assert app.query_one(DiffView).display is False
 
 
-async def test_ctrl_o_from_diff_restores_cursor_and_inspector(repo, workspace):
+async def test_ctrl_o_from_diff_restores_cursor_and_inspector(app_factory):
     """Task 30 (2): `Ctrl+o` from a diff opened in the live view restores the
     pre-diff cursor *and* the inspector's node, not just the pane display."""
-    app = _app(repo, workspace)
+    app = app_factory()
     async with app.run_test() as pilot:
         await _drift_scenario(app, pilot)  # cursor on the drifted turn A2
         before = app.describe_state()

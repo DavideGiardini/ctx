@@ -11,38 +11,18 @@ inspector's ``NodeView``/``splits_visible`` (the split *contents* are an inspect
 detail describe_state omits).
 """
 
+from pilot_helpers import open_editor_on_range, two_turns
 from textual.widgets import TextArea
 
 from ctx.core.conversation import DEFAULT_COMPRESSION_PROMPT
-from ctx.core.provider import TestProvider as CannedProvider
-from ctx.ui.app import ChatApp
 from ctx.ui.widgets.detail_inspector import DetailInspector
-from ctx.ui.widgets.input_bar import InputBar
 
 
-def _app(repo, workspace) -> ChatApp:
-    return ChatApp(provider=CannedProvider(["ok"]), workspace=workspace, storage=repo)
-
-
-async def _two_turns(app) -> None:
-    await app.on_input_bar_submitted(InputBar.Submitted("first"))
-    await app.workers.wait_for_complete()
-    await app.on_input_bar_submitted(InputBar.Submitted("second"))
-    await app.workers.wait_for_complete()
-
-
-async def _open_editor_on_full_range(pilot) -> None:
-    await pilot.press("escape")  # → Edit mode
-    await pilot.press("home")  # cursor on the first node
-    await pilot.press("v", "down", "down", "down")  # range = all 4 nodes (ends at tip)
-    await pilot.press("c")  # open the draft editor
-
-
-async def test_drafted_k_inspector_shows_prompt_originals_summary(repo, workspace):
-    app = _app(repo, workspace)
+async def test_drafted_k_inspector_shows_prompt_originals_summary(app_factory):
+    app = app_factory()
     async with app.run_test() as pilot:
-        await _two_turns(app)
-        await _open_editor_on_full_range(pilot)
+        await two_turns(app)
+        await open_editor_on_range(pilot)
 
         # Draft (Ctrl+D) so the committed K carries a non-empty prompt.
         await pilot.press("ctrl+d")
@@ -70,11 +50,11 @@ async def test_drafted_k_inspector_shows_prompt_originals_summary(repo, workspac
         ]
 
 
-async def test_manual_k_inspector_hides_empty_prompt_split(repo, workspace):
-    app = _app(repo, workspace)
+async def test_manual_k_inspector_hides_empty_prompt_split(app_factory):
+    app = app_factory()
     async with app.run_test() as pilot:
-        await _two_turns(app)
-        await _open_editor_on_full_range(pilot)
+        await two_turns(app)
+        await open_editor_on_range(pilot)
 
         app.query_one("#compress-output", TextArea).text = "MANUAL SUMMARY"
         await pilot.press("ctrl+s")  # manual commit → prompt == ""
@@ -90,14 +70,14 @@ async def test_manual_k_inspector_hides_empty_prompt_split(repo, workspace):
         assert inspector.splits_visible() == ["content", "output"]
 
 
-async def test_k_inspector_originals_split_renders_compact_rows(repo, workspace):
+async def test_k_inspector_originals_split_renders_compact_rows(app_factory):
     """Task 38: the Originals (content) split renders the folded children as the
     shared compact MessageRows — not a plain markdown-bold text dump — and a
     visible divider sits between the three splits."""
-    app = _app(repo, workspace)
+    app = app_factory()
     async with app.run_test() as pilot:
-        await _two_turns(app)
-        await _open_editor_on_full_range(pilot)
+        await two_turns(app)
+        await open_editor_on_range(pilot)
 
         app.query_one("#compress-output", TextArea).text = "SUMMARY"
         await pilot.press("ctrl+s")  # commit -> K folding all 4 nodes
@@ -115,11 +95,11 @@ async def test_k_inspector_originals_split_renders_compact_rows(repo, workspace)
         assert inspector.query_one("#detail-content").styles.border_bottom[0]
 
 
-async def test_number_keys_maximize_k_splits(repo, workspace):
-    app = _app(repo, workspace)
+async def test_number_keys_maximize_k_splits(app_factory):
+    app = app_factory()
     async with app.run_test() as pilot:
-        await _two_turns(app)
-        await _open_editor_on_full_range(pilot)
+        await two_turns(app)
+        await open_editor_on_range(pilot)
 
         app.query_one("#compress-output", TextArea).text = "SUMMARY"
         await pilot.press("ctrl+s")

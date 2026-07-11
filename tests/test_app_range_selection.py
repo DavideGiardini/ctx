@@ -8,28 +8,16 @@ reported ``nodes`` array, in view order — 13i) and the ``.range-selected`` CSS
 class the qa-tester harness can query.
 """
 
-from ctx.core.provider import TestProvider as CannedProvider
-from ctx.ui.app import ChatApp
-from ctx.ui.widgets.input_bar import InputBar
+from pilot_helpers import turn, two_turns
+
 from ctx.ui.widgets.message_list import MessageWidget
 
 
-async def _four_node_app(repo, workspace) -> ChatApp:
-    return ChatApp(
-        provider=CannedProvider(["ok"]),
-        workspace=workspace,
-        storage=repo,
-    )
-
-
-async def test_v_then_down_down_selects_three_contiguous_ids(repo, workspace):
-    app = await _four_node_app(repo, workspace)
+async def test_v_then_down_down_selects_three_contiguous_ids(app_factory):
+    app = app_factory()
     async with app.run_test() as pilot:
         # Two turns → four nodes [u1, a1, u2, a2].
-        await app.on_input_bar_submitted(InputBar.Submitted("first"))
-        await app.workers.wait_for_complete()
-        await app.on_input_bar_submitted(InputBar.Submitted("second"))
-        await app.workers.wait_for_complete()
+        await two_turns(app)
 
         view_ids = [n.id for n in app.core.nodes]
         assert len(view_ids) == 4
@@ -52,17 +40,14 @@ async def test_v_then_down_down_selects_three_contiguous_ids(repo, workspace):
         assert not outside.has_class("range-selected")
 
 
-async def test_range_selection_uses_hover_style_and_bridges_gaps(repo, workspace):
+async def test_range_selection_uses_hover_style_and_bridges_gaps(app_factory):
     """Task 41: a selected run wears the grey hover background (not solid blue)
     with a bold (``thick``) role-colored left bar, and bridges the inter-row gaps
     so it reads as one contiguous block — the interior rows carry the
     ``range-continues-*`` classes, the run's edges do not."""
-    app = await _four_node_app(repo, workspace)
+    app = app_factory()
     async with app.run_test() as pilot:
-        await app.on_input_bar_submitted(InputBar.Submitted("first"))
-        await app.workers.wait_for_complete()
-        await app.on_input_bar_submitted(InputBar.Submitted("second"))
-        await app.workers.wait_for_complete()
+        await two_turns(app)
 
         view_ids = [n.id for n in app.core.nodes]
         assert len(view_ids) == 4
@@ -98,11 +83,10 @@ async def test_range_selection_uses_hover_style_and_bridges_gaps(repo, workspace
         assert outside._row_body().styles.border_left[0] == "tall"
 
 
-async def test_esc_clears_range_and_stays_in_edit(repo, workspace):
-    app = await _four_node_app(repo, workspace)
+async def test_esc_clears_range_and_stays_in_edit(app_factory):
+    app = app_factory()
     async with app.run_test() as pilot:
-        await app.on_input_bar_submitted(InputBar.Submitted("first"))
-        await app.workers.wait_for_complete()
+        await turn(app, "first")
 
         await pilot.press("escape")  # → Edit mode
         await pilot.press("v", "down")
@@ -116,11 +100,10 @@ async def test_esc_clears_range_and_stays_in_edit(repo, workspace):
             assert not widget.has_class("range-selected")
 
 
-async def test_v_alone_is_range_of_one(repo, workspace):
-    app = await _four_node_app(repo, workspace)
+async def test_v_alone_is_range_of_one(app_factory):
+    app = app_factory()
     async with app.run_test() as pilot:
-        await app.on_input_bar_submitted(InputBar.Submitted("only turn"))
-        await app.workers.wait_for_complete()
+        await turn(app, "only turn")
 
         await pilot.press("escape")  # → Edit mode, cursor on the last node
         await pilot.press("v")
@@ -130,15 +113,12 @@ async def test_v_alone_is_range_of_one(repo, workspace):
         assert state["range_selection"] == [state["selected_index"]]
 
 
-async def test_down_at_bottom_edge_does_not_wrap(repo, workspace):
+async def test_down_at_bottom_edge_does_not_wrap(app_factory):
     """Task 13e: extending down from the last node clamps — it must not wrap to
     index 0 and swallow the whole conversation."""
-    app = await _four_node_app(repo, workspace)
+    app = app_factory()
     async with app.run_test() as pilot:
-        await app.on_input_bar_submitted(InputBar.Submitted("first"))
-        await app.workers.wait_for_complete()
-        await app.on_input_bar_submitted(InputBar.Submitted("second"))
-        await app.workers.wait_for_complete()
+        await two_turns(app)
 
         view_ids = [n.id for n in app.core.nodes]
         assert len(view_ids) == 4
@@ -150,14 +130,11 @@ async def test_down_at_bottom_edge_does_not_wrap(repo, workspace):
         assert app.describe_state()["range_selection"] == [len(view_ids) - 1]
 
 
-async def test_up_at_top_edge_does_not_wrap(repo, workspace):
+async def test_up_at_top_edge_does_not_wrap(app_factory):
     """Task 13e: extending up from the first node clamps at index 0."""
-    app = await _four_node_app(repo, workspace)
+    app = app_factory()
     async with app.run_test() as pilot:
-        await app.on_input_bar_submitted(InputBar.Submitted("first"))
-        await app.workers.wait_for_complete()
-        await app.on_input_bar_submitted(InputBar.Submitted("second"))
-        await app.workers.wait_for_complete()
+        await two_turns(app)
 
         await pilot.press("escape")
         await pilot.press("home")  # cursor on the first node
@@ -166,14 +143,11 @@ async def test_up_at_top_edge_does_not_wrap(repo, workspace):
         assert app.describe_state()["range_selection"] == [0]
 
 
-async def test_in_bounds_extension_unchanged(repo, workspace):
+async def test_in_bounds_extension_unchanged(app_factory):
     """Normal in-bounds extension is unaffected by the clamp."""
-    app = await _four_node_app(repo, workspace)
+    app = app_factory()
     async with app.run_test() as pilot:
-        await app.on_input_bar_submitted(InputBar.Submitted("first"))
-        await app.workers.wait_for_complete()
-        await app.on_input_bar_submitted(InputBar.Submitted("second"))
-        await app.workers.wait_for_complete()
+        await two_turns(app)
 
         await pilot.press("escape")
         await pilot.press("home")

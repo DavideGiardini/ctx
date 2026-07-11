@@ -7,28 +7,9 @@ intent; assertions trace to contract Expect clauses, never to assumed internals.
 import asyncio
 
 import pytest
+from conftest import BlockingProvider
 
 from ctx.core.conversation import ConversationCore
-
-# --- helper provider for the streaming guard (C100) -------------------------
-
-class BlockingProvider:
-    """Yields `before` tokens, then blocks on an unset gate so the stream stays
-    live (core.streaming True) while we probe commit_compression."""
-
-    def __init__(self, before, gate):
-        self._before = before
-        self._gate = gate
-
-    async def stream(self, messages, model, on_usage=None):
-        for t in self._before:
-            yield t
-        await self._gate.wait()
-        yield "AFTER"  # never reached
-
-    async def check_connectivity(self, model):
-        return (True, "ok")
-
 
 # --- helpers ----------------------------------------------------------------
 

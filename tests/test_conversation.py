@@ -19,6 +19,7 @@ import asyncio
 import sqlite3
 
 import pytest
+from conftest import BlockingProvider
 
 from ctx.core.config import DEFAULT_MODEL
 from ctx.core.conversation import MAX_TITLE_LENGTH, ConversationCore
@@ -98,27 +99,6 @@ class SaveCountingStorage:
 
     def get_last(self):
         return self._inner.get_last()
-
-
-class BlockingProvider:
-    """Yields its first tokens, then blocks awaiting `gate` before the next token.
-
-    Models a slow LLM suspended mid-stream so a consuming task can be cancelled
-    while it is waiting for the next token (the realistic mid-stream cancel).
-    """
-
-    def __init__(self, before, gate):
-        self._before = before          # tokens to yield before blocking
-        self._gate = gate              # an asyncio.Event that is never set
-
-    async def stream(self, messages, model, on_usage=None):
-        for t in self._before:
-            yield t
-        await self._gate.wait()        # suspend here until cancelled
-        yield "AFTER"                  # never reached
-
-    async def check_connectivity(self, model):
-        return (True, "ok")
 
 
 async def _collect(agen):

@@ -2,11 +2,11 @@ You are one iteration of an autonomous Ralph loop working on the `ctx` codebase.
 This is a FRESH session — you remember nothing from prior iterations. Your memory
 is the PRD file, `scripts/ralph/PROGRESS.md`, and git history. Read them.
 
-Operate as the autonomous engineer described in `AGENTS.md` (NOT professor mode).
+Operate as the autonomous engineer described in `CLAUDE.md` (NOT professor mode).
 
 ## Do exactly one task this iteration
 
-1. **Orient.** Read `AGENTS.md`, the PRD file at the path in the `PRD_FILE`
+1. **Orient.** Read `CLAUDE.md`, the PRD file at the path in the `PRD_FILE`
    environment variable (fallback `scripts/ralph/PRD.md`), and the tail of
    `scripts/ralph/PROGRESS.md`. Skim recent `git log` for what already happened.
    Read the `docs/decisions/` note your task cites (e.g. "Ref: 0014 #2") — it holds
@@ -17,7 +17,7 @@ Operate as the autonomous engineer described in `AGENTS.md` (NOT professor mode)
 
 3. **Plan, and decide your test strategy.** Before editing code, write a short plan
    in your output: the approach and the specific files you'll touch (follow
-   "Designing new modules" in `AGENTS.md` — deep modules, core framework-free,
+   "Designing new modules" in `CLAUDE.md` — deep modules, core framework-free,
    deletion test before abstraction). Then decide whether the task warrants *new*
    tests:
    - The task's **_Acceptance:_ criterion in the PRD is the mandatory floor** — you

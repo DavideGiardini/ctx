@@ -12,9 +12,7 @@ Two layers:
   to ``--%``/approximate without crashing.
 """
 
-from ctx.core.provider import TestProvider as CannedProvider
 from ctx.core.provider import Usage
-from ctx.ui.app import ChatApp
 from ctx.ui.widgets.app_header import AppHeader
 from ctx.ui.widgets.input_bar import InputBar
 
@@ -35,13 +33,9 @@ def test_gauge_renders_tilde_only_when_approximate_and_numeric():
 
 
 async def test_gauge_approximate_until_anchored_then_stale_after_include(
-    repo, workspace
+    app_factory
 ):
-    app = ChatApp(
-        provider=CannedProvider(["Hi", " there"], usage=_SANE_USAGE),
-        workspace=workspace,
-        storage=repo,
-    )
+    app = app_factory(tokens=["Hi", " there"], usage=_SANE_USAGE)
     async with app.run_test():
         # Before any turn: no provider anchor → the gauge is an estimate.
         assert app.describe_state()["context_gauge"]["approximate"] is True
@@ -59,18 +53,14 @@ async def test_gauge_approximate_until_anchored_then_stale_after_include(
 
 
 async def test_gauge_clears_tilde_on_second_turn_with_reused_usage_object(
-    repo, workspace
+    app_factory
 ):
     # A provider that reports the SAME Usage object on every turn (the QA
     # harness's module-level singleton, and any provider that caches one Usage).
     # The fresh-anchor decision must not hinge on Usage object identity: turn 2
     # adds nodes, so the gauge goes stale, and must clear again once the turn's
     # (re-adopted) usage anchors the new node set.
-    app = ChatApp(
-        provider=CannedProvider(["ok"], usage=_SANE_USAGE),
-        workspace=workspace,
-        storage=repo,
-    )
+    app = app_factory(usage=_SANE_USAGE)
     async with app.run_test():
         await app.on_input_bar_submitted(InputBar.Submitted("first turn"))
         await app.workers.wait_for_complete()
@@ -84,12 +74,8 @@ async def test_gauge_clears_tilde_on_second_turn_with_reused_usage_object(
         assert app.describe_state()["context_gauge"]["approximate"] is False
 
 
-async def test_unknown_model_gauge_degrades_to_placeholder(repo, workspace):
-    app = ChatApp(
-        provider=CannedProvider(["ok"], usage=_SANE_USAGE),
-        workspace=workspace,
-        storage=repo,
-    )
+async def test_unknown_model_gauge_degrades_to_placeholder(app_factory):
+    app = app_factory(usage=_SANE_USAGE)
     async with app.run_test():
         app.core.model = "totally/nonexistent-model-xyz"
         gauge = app.describe_state()["context_gauge"]

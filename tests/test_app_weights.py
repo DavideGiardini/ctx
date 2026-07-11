@@ -9,19 +9,13 @@ implementation: model-bound turns carry a numeric percentage, the default
 reaches the model) carries no weight.
 """
 
-from ctx.core.provider import TestProvider as CannedProvider
-from ctx.ui.app import ChatApp
 from ctx.ui.widgets.input_bar import InputBar
 
 
 async def test_user_and_assistant_nodes_have_numeric_context_basis_weights(
-    repo, workspace
+    app_factory
 ):
-    app = ChatApp(
-        provider=CannedProvider(["Hello", " there", ", friend!"]),
-        workspace=workspace,
-        storage=repo,
-    )
+    app = app_factory(tokens=["Hello", " there", ", friend!"])
     async with app.run_test():
         await app.on_input_bar_submitted(InputBar.Submitted("what is a deep module?"))
         await app.workers.wait_for_complete()
@@ -43,12 +37,8 @@ async def test_user_and_assistant_nodes_have_numeric_context_basis_weights(
     assert abs(sum(present) - 100) <= 2
 
 
-async def test_system_breadcrumb_carries_no_weight(repo, workspace):
-    app = ChatApp(
-        provider=CannedProvider(["ok"]),
-        workspace=workspace,
-        storage=repo,
-    )
+async def test_system_breadcrumb_carries_no_weight(app_factory):
+    app = app_factory()
     async with app.run_test():
         await app.on_input_bar_submitted(InputBar.Submitted("hello"))
         await app.workers.wait_for_complete()

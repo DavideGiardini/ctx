@@ -20,16 +20,6 @@ from test_app_drift import _drift_scenario
 from textual.widgets import TextArea
 
 import ctx.core.reconstruction as reconstruction_mod
-from ctx.core.provider import TestProvider as CannedProvider
-from ctx.ui.app import ChatApp
-
-
-def _app(repo, workspace) -> ChatApp:
-    return ChatApp(
-        provider=CannedProvider(["ok"]),
-        workspace=workspace,
-        storage=repo,
-    )
 
 
 class _Counter:
@@ -45,8 +35,8 @@ class _Counter:
         return self._real(*args, **kwargs)
 
 
-async def test_consecutive_snapshots_do_not_recompute(repo, workspace, monkeypatch):
-    app = _app(repo, workspace)
+async def test_consecutive_snapshots_do_not_recompute(app_factory, monkeypatch):
+    app = app_factory()
     async with app.run_test() as pilot:
         await _drift_scenario(app, pilot)  # view = [U1, A1, U2, A2], A2 drifted
 
@@ -63,8 +53,8 @@ async def test_consecutive_snapshots_do_not_recompute(repo, workspace, monkeypat
         assert counter.count == after_first
 
 
-async def test_new_commit_invalidates_cache(repo, workspace, monkeypatch):
-    app = _app(repo, workspace)
+async def test_new_commit_invalidates_cache(app_factory, monkeypatch):
+    app = app_factory()
     async with app.run_test() as pilot:
         await _drift_scenario(app, pilot)  # view = [U1, A1, U2, A2]
 

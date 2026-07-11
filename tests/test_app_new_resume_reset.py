@@ -18,85 +18,38 @@ mode switch) has no Pilot key equivalent.
 
 import asyncio
 
-from textual.widgets import TextArea
-
-from ctx.core.provider import TestProvider as CannedProvider
-from ctx.ui.app import ChatApp
-from ctx.ui.widgets.input_bar import InputBar
-
-
-class _BlockingProvider:
-    """Yields its ``before`` tokens, then blocks on ``gate`` before ``AFTER``.
-
-    Keeps a consuming draft worker live (PENDING/RUNNING) while the test drives
-    the switch, modelling the "draft still streaming" race.
-    """
-
-    def __init__(self, before: list[str], gate: asyncio.Event) -> None:
-        self._before = before
-        self._gate = gate
-
-    async def stream(self, messages, model, on_usage=None):  # type: ignore[no-untyped-def]
-        for token in self._before:
-            yield token
-        await self._gate.wait()
-        yield "AFTER"
-
-    async def check_connectivity(self, model):  # type: ignore[no-untyped-def]
-        return (True, "ok")
-
-
-def _app(repo, workspace) -> ChatApp:
-    return ChatApp(provider=CannedProvider(["ok"]), workspace=workspace, storage=repo)
-
-
-async def _two_turns(app) -> None:
-    await app.on_input_bar_submitted(InputBar.Submitted("first"))
-    await app.workers.wait_for_complete()
-    await app.on_input_bar_submitted(InputBar.Submitted("second"))
-    await app.workers.wait_for_complete()
-
-
-async def _compress_full_tip_range(app, pilot, summary: str) -> None:
-    await pilot.press("escape")  # → Edit mode
-    await pilot.press("home")  # cursor on the first node
-    await pilot.press("v", "down", "down", "down")  # range = all 4 nodes (ends at tip)
-    await pilot.press("c")  # open the draft editor
-    app.query_one("#compress-output", TextArea).text = summary
-    await pilot.press("ctrl+s")  # commit → one K in the view
+from conftest import BlockingProvider
+from pilot_helpers import (
+    compress_range,
+    open_editor_on_range,
+    select_tip_in_edit,
+    two_turns,
+    wait_until,
+)
 
 
 async def _enter_deep_dive(app, pilot) -> None:
-    await _two_turns(app)
-    await _compress_full_tip_range(app, pilot, "SUMMARY")
-    # A commit clears the selection; bounce out and back to re-select the K tip.
-    await pilot.press("escape")  # → Insert
-    await pilot.press("escape")  # → Edit, selects the tip (K)
+    await two_turns(app)
+    await compress_range(app, pilot, "SUMMARY")
+    # A commit clears the selection; re-select the K tip before diving.
+    await select_tip_in_edit(app, pilot)
     assert app._get_selected_node().node_type == "compression"
     await pilot.press("g", "d")
     await pilot.pause()
     assert app.describe_state()["deep_dive"]["active"] is True
 
 
-async def _open_editor_on_full_range(pilot) -> None:
-    await pilot.press("escape")  # → Edit mode
-    await pilot.press("home")
-    await pilot.press("v", "down", "down", "down")
-    await pilot.press("c")  # open the draft editor
-
-
 async def _start_blocked_draft(app, pilot, gate) -> None:
-    app.core._provider = _BlockingProvider(["partial"], gate)
+    app.core._provider = BlockingProvider(["partial"], gate)
     await pilot.press("ctrl+d")
-    for _ in range(200):
-        if app._draft_worker is not None and not app._draft_worker.is_finished:
-            break
-        await pilot.pause()
-    assert app._draft_worker is not None and not app._draft_worker.is_finished
+    live = await wait_until(
+        pilot, lambda: app._draft_worker is not None and not app._draft_worker.is_finished
+    )
+    assert live
 
 
-async def test_new_resets_a_live_deep_dive(repo, workspace):
-    app = _app(repo, workspace)
+async def test_new_resets_a_live_deep_dive(app_factory):
+    app = app_factory()
     async with app.run_test() as pilot:
         await _enter_deep_dive(app, pilot)
 
@@ -113,8 +66,8 @@ async def test_new_resets_a_live_deep_dive(repo, workspace):
         assert "read-only" not in state["footer"]
 
 
-async def test_resume_resets_a_live_deep_dive(repo, workspace, monkeypatch):
-    app = _app(repo, workspace)
+async def test_resume_resets_a_live_deep_dive(app_factory, monkeypatch):
+    app = app_factory()
     async with app.run_test() as pilot:
         await _enter_deep_dive(app, pilot)
         conv_id = app.core.conversation_id
@@ -135,11 +88,11 @@ async def test_resume_resets_a_live_deep_dive(repo, workspace, monkeypatch):
         assert state["nodes"][0]["node_type"] == "compression"
 
 
-async def test_new_closes_an_open_editor_without_committing(repo, workspace):
-    app = _app(repo, workspace)
+async def test_new_closes_an_open_editor_without_committing(app_factory):
+    app = app_factory()
     async with app.run_test() as pilot:
-        await _two_turns(app)
-        await _open_editor_on_full_range(pilot)
+        await two_turns(app)
+        await open_editor_on_range(pilot)
         assert app.describe_state()["compression_editor"]["open"] is True
 
         await app._handle_new_command()
@@ -151,11 +104,11 @@ async def test_new_closes_an_open_editor_without_committing(repo, workspace):
         assert not any(n["node_type"] == "compression" for n in state["nodes"])
 
 
-async def test_new_cancels_a_live_draft_worker(repo, workspace):
-    app = _app(repo, workspace)
+async def test_new_cancels_a_live_draft_worker(app_factory):
+    app = app_factory()
     async with app.run_test() as pilot:
-        await _two_turns(app)
-        await _open_editor_on_full_range(pilot)
+        await two_turns(app)
+        await open_editor_on_range(pilot)
         gate = asyncio.Event()
         await _start_blocked_draft(app, pilot, gate)
         worker = app._draft_worker

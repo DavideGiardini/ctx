@@ -16,47 +16,11 @@ keypress still changes app state (the editor closes on Esc).
 
 import asyncio
 
+from conftest import BlockingProvider
+from pilot_helpers import open_editor_on_range, two_turns, wait_until_streaming
 from textual.widgets import TextArea
 
-from ctx.core.provider import TestProvider as CannedProvider
-from ctx.ui.app import ChatApp
 from ctx.ui.widgets.input_bar import InputBar
-
-
-class _BlockingProvider:
-    """Yields its first tokens, then blocks on ``gate`` before the next token.
-
-    Models an LLM suspended mid-stream so ``core.streaming`` stays True while the
-    test drives the editor — the realistic "commit while a turn is in flight".
-    """
-
-    def __init__(self, before: list[str], gate: asyncio.Event) -> None:
-        self._before = before
-        self._gate = gate
-
-    async def stream(self, messages, model, on_usage=None):  # type: ignore[no-untyped-def]
-        for token in self._before:
-            yield token
-        await self._gate.wait()
-        yield "AFTER"
-
-    async def check_connectivity(self, model):  # type: ignore[no-untyped-def]
-        return (True, "ok")
-
-
-def _app(repo, workspace) -> ChatApp:
-    return ChatApp(
-        provider=CannedProvider(["ok"]),
-        workspace=workspace,
-        storage=repo,
-    )
-
-
-async def _two_turns(app) -> None:
-    await app.on_input_bar_submitted(InputBar.Submitted("first"))
-    await app.workers.wait_for_complete()
-    await app.on_input_bar_submitted(InputBar.Submitted("second"))
-    await app.workers.wait_for_complete()
 
 
 def _compression_nodes(app) -> list[dict]:
@@ -69,26 +33,19 @@ def _hint_shown(app, needle: str) -> bool:
     return hint is not None and needle in hint.lower()
 
 
-async def test_commit_while_streaming_breadcrumbs_and_stays_responsive(repo, workspace):
+async def test_commit_while_streaming_breadcrumbs_and_stays_responsive(app_factory):
     # Trigger (2): a real turn is streaming (H2 guard) — `c` has no streaming
     # gate, so the editor opens fine and Ctrl+S then hits the guard.
-    app = _app(repo, workspace)
+    app = app_factory()
     async with app.run_test() as pilot:
-        await _two_turns(app)
-        await pilot.press("escape")
-        await pilot.press("home")
-        await pilot.press("v", "down", "down", "down")  # valid tip range
-        await pilot.press("c")
+        await two_turns(app)
+        await open_editor_on_range(pilot)  # valid tip range
         app.query_one("#compress-output", TextArea).text = "SUMMARY"
 
         gate = asyncio.Event()
-        app.core._provider = _BlockingProvider(["x"], gate)
+        app.core._provider = BlockingProvider(["x"], gate)
         await app.on_input_bar_submitted(InputBar.Submitted("third"))
-        for _ in range(200):
-            if app.core.streaming:
-                break
-            await pilot.pause()
-        assert app.core.streaming
+        await wait_until_streaming(app, pilot)
 
         await pilot.press("ctrl+s")
 
@@ -103,11 +60,11 @@ async def test_commit_while_streaming_breadcrumbs_and_stays_responsive(repo, wor
         await app.workers.wait_for_complete()
 
 
-async def test_commit_range_containing_k_breadcrumbs_and_stays_responsive(repo, workspace):
+async def test_commit_range_containing_k_breadcrumbs_and_stays_responsive(app_factory):
     # Trigger (3): a range that contains an already-committed K (Q7 flat guard).
-    app = _app(repo, workspace)
+    app = app_factory()
     async with app.run_test() as pilot:
-        await _two_turns(app)
+        await two_turns(app)
 
         # First fold a valid tip suffix (last two nodes) into a K.
         await pilot.press("escape")

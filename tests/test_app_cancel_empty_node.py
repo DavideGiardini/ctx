@@ -16,10 +16,10 @@ the test cancels it (cancelling the consuming worker, never ``athrow`` — see
 import asyncio
 import contextlib
 
+from conftest import BlockingProvider
+from pilot_helpers import wait_until
 from textual.worker import WorkerCancelled
 
-from ctx.core.provider import TestProvider as CannedProvider
-from ctx.ui.app import ChatApp
 from ctx.ui.widgets.input_bar import InputBar
 
 
@@ -35,53 +35,23 @@ async def _cancel_and_settle(app) -> None:
         await worker.wait()
 
 
-class _BlockingProvider:
-    """Yields its ``before`` tokens, then blocks forever on ``gate``.
-
-    Models an LLM suspended mid-stream so the consuming turn worker stays live
-    (RUNNING) while the test cancels it. ``before=[]`` models a stream cancelled
-    before a single token arrives.
-    """
-
-    def __init__(self, before: list[str], gate: asyncio.Event) -> None:
-        self._before = before
-        self._gate = gate
-
-    async def stream(self, messages, model, on_usage=None):  # type: ignore[no-untyped-def]
-        for token in self._before:
-            yield token
-        await self._gate.wait()
-        yield "AFTER"
-
-    async def check_connectivity(self, model):  # type: ignore[no-untyped-def]
-        return (True, "ok")
-
-
-def _app(repo, workspace) -> ChatApp:
-    return ChatApp(
-        provider=CannedProvider(["ok"]),
-        workspace=workspace,
-        storage=repo,
-    )
-
-
 async def _submit_blocked(app, pilot, before: list[str], gate: asyncio.Event) -> None:
     """Swap in the blocking provider, submit a turn, and wait until the stream
     worker is live with its ``before`` tokens rendered onto the assistant node."""
-    app.core._provider = _BlockingProvider(before, gate)
+    app.core._provider = BlockingProvider(before, gate)
     await app.on_input_bar_submitted(InputBar.Submitted("hello"))
     want = "".join(before)
-    for _ in range(200):
+
+    def _live() -> bool:
         node = app._streaming_node
-        if (
+        return (
             app._stream_worker is not None
             and not app._stream_worker.is_finished
             and node is not None
             and node.content == want
-        ):
-            break
-        await pilot.pause()
-    assert app._stream_worker is not None and not app._stream_worker.is_finished
+        )
+
+    assert await wait_until(pilot, _live)
 
 
 def _nodes(app) -> list[dict]:
@@ -89,8 +59,8 @@ def _nodes(app) -> list[dict]:
     return nodes
 
 
-async def test_zero_token_cancel_drops_the_empty_node(repo, workspace):
-    app = _app(repo, workspace)
+async def test_zero_token_cancel_drops_the_empty_node(app_factory):
+    app = app_factory()
     async with app.run_test() as pilot:
         gate = asyncio.Event()
         await _submit_blocked(app, pilot, before=[], gate=gate)
@@ -113,8 +83,8 @@ async def test_zero_token_cancel_drops_the_empty_node(repo, workspace):
         await app.workers.wait_for_complete()
 
 
-async def test_partial_cancel_keeps_the_node(repo, workspace):
-    app = _app(repo, workspace)
+async def test_partial_cancel_keeps_the_node(app_factory):
+    app = app_factory()
     async with app.run_test() as pilot:
         gate = asyncio.Event()
         await _submit_blocked(app, pilot, before=["partial"], gate=gate)
