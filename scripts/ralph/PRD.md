@@ -1,203 +1,120 @@
-# PRD — Sprint 3: Compression & spatial navigation (3a + 3b)
+# PRD — Shared Pilot test scaffolding (conftest extraction)
 
 ## Goal
-Build ctx's primary differentiator (Product Concept §4): select a contiguous range of
-nodes, AI-draft (or hand-write) a compression node `K` that the model sees *instead of*
-the folded originals, navigate compression depth (deep-dive), and — in the 3b half —
-compress **any** range (including the middle) made honest by per-turn context
-reconstruction and a git-diff-style context view on drifted AI nodes. The design is
-fully settled: **ADR-0016 Amendments #1–#3** (`docs/decisions/0016-…md`) and the
-roadmap's S3 decisions Q1–Q14 + H1–H6 (`docs/Sprint Roadmap.md`). `CONTEXT.md:20-70`
-holds the domain glossary (K, folded children, event nodes, deep-dive, drift). Phase
-3a (tasks 1–13) ships safe tip-suffix compression; phase 3b (tasks 14–23) adds
-`created_seq`, event-enumeration resolution, reconstruction, the diff view, and
-finally removes the tip guard. **Middle compression must never be live before the
-diff view exists** — the task order enforces this; do not reorder.
+Extract the ~420 lines of Pilot test scaffolding duplicated across the
+`tests/test_app_*.py` family into shared homes, so the suite has one copy of each
+helper instead of ~19 hand-synced ones (already diverging — see the inconsistent
+`if mode == "edit": escape` workarounds). This is the "Test choreography helpers"
+item from `docs/Code Quality Review 2026-07.md` and the first step of ctx0 Roadmap
+Phase 1: the turn-lifecycle work that follows will add new Pilot tests, and they
+must be written against shared helpers, not a 20th copy of the duplication.
 
 ## Constraints / notes
-- **Read ADR-0016 (all three amendments) in any iteration touching compression
-  semantics.** It is the rationale the one-line tasks can't carry. Roadmap S3 bullets
-  Q1–Q14/H1–H6 are the decision record; do not re-litigate settled points.
-- **Architecture** (`AGENTS.md` "Designing new modules"): `ctx/core/*` stays
-  framework-free (zero `textual`); UI is a thin adapter; deep modules; no new Protocol
-  seams (single implementations). `mutants/` is a mutmut mirror — never edit it.
-- **K and E are OFF-LINE nodes**: `prev_id=None`, added straight to
-  `ConversationCore._graph`, **never** via `_append_to_line`
-  (`ctx/core/conversation.py:161`). The `prev_id` chain is never mutated.
-- **Canonical meta keys** (H1/H5 — do not improvise):
-  `K.meta = {"prompt": <str, "" for manual>, "range": [<ordered folded child ids>]}`;
-  `E.meta = {"target": <K.id>, "anchor": <active_leaf_id at expand time>}`;
-  assistant nodes gain `meta["ctx_hash"]` in 3b (task 17).
-- **Default compression prompt:** was A#1's exact text ("Preserve the facts,
-  decisions, entities, and open threads needed for the conversation to continue
-  coherently."), a core constant in 3a promoted to `compression.default_prompt` in
-  task 18. **ADR-0016 A#6 (task 47) supersedes that exact text** with a marker-aware
-  scaffold+preserve-intent *system* prompt — see A#6 before touching it.
-- **H2 invariant:** `commit_compression` / `expand_compression` / `draft_compression`
-  must raise while a turn is streaming (`ConversationCore.streaming`, task 3); the UI
-  additionally refuses the actions while `_stream_worker` runs (`ctx/ui/app.py:75`).
-- **Keys (settled, revised 2026-07-03):** `v` anchor+extend selection (Edit mode) ·
-  `c` opens the draft editor · `Ctrl+D` draft/re-draft · `Ctrl+S` commit · `Esc`
-  cancel · `x` expands the selected K (Edit mode, task 13b) · `g d` deep-dive / diff
-  view · `Ctrl+o` pop one level · `i` exits any full-screen inspection to Insert at
-  the live tip. **Selection-dependent actions are Edit-mode keys ONLY, never slash
-  commands** (user decision 2026-07-03): the InputBar needs Insert mode and entering
-  Insert clears the selection, so a command can never act on a selected node. The
-  3a-shipped `/compress`/`/expand` commands are removed by task 13b — this supersedes
-  the earlier ":compress/:expand map to slash commands" note (record in ADR-0016).
-  Update footer hints (`ctx/ui/widgets/app_footer.py:9` `_HINTS`) whenever keys are
-  added.
-- **Code-blind test flow** (PROMPT.md step 4) for new/changed core behavior:
-  signatures + docstrings + stubs → `test-spec-author` with interface + prose intent →
-  red → implement to green. Authored tests are fixed. Reuse `tests/conftest.py`
-  fixtures (`make_node`, `stub_loader`, `test_provider`, `varying_provider`, `repo`,
-  `workspace`). Async-cancel tests: never `athrow` into the generator — use a blocking
-  provider and cancel the consuming task (see `tests/specs/conversation.md` precedent).
-- **UI tasks: a deterministic Pilot test is the mandatory acceptance floor**
-  (`App.run_test()` asserting `describe_state()` fields — template:
-  `tests/test_app_gauge.py`). The qa-tester harness runs in-process with `ctx.*`
-  cached (cannot see this iteration's edits) and cannot perceive layout/spacing —
-  it confirms committed behavior and asserts on snapshot state only.
-- **`StoragePort` rule:** if `save`/`load` signatures shift, the `SaveCountingStorage`
-  double (`tests/test_conversation.py:70`) moves in lockstep. Task 14 only adds a
-  column riding `Node` — signatures should not change.
-- **Do not edit** `docs/Sprint Roadmap.md`; ADR edits only where a task says so.
-  Never touch `main`/`develop`, never hand-edit `uv.lock`, never commit `.ctx/`/`.env`.
+- **Behavior-preserving refactor only.** No product code (`ctx/**`) changes. No new
+  test cases, no deleted test cases — every task's floor is: the same tests are
+  collected and all pass. Capture the collected count with
+  `uv run pytest --collect-only -q | tail -1` *before* migrating and compare after.
+- **Placement (decided, don't relitigate):** fixtures and provider double *classes*
+  go in `tests/conftest.py` (the pattern exists — `_VaryingProvider` already lives
+  there); keystroke-choreography *functions* go in a new importable
+  `tests/pilot_helpers.py` (plain functions don't belong in conftest, which is not
+  meant to be imported from).
+- Shared helpers are used by many files, so give them real docstrings; keep names
+  un-prefixed (`BlockingProvider`, not `_BlockingProvider`) since they are now a
+  shared surface.
+- **Deadlock trap (must go in `BlockingProvider`'s docstring):** an always-blocking
+  provider must never be used for setup turns that fully drain — a turn awaited to
+  completion against a gate that is never set deadlocks the whole pytest run. Setup
+  turns use the default scripted provider; the blocking one is only for the turn
+  under test.
+- Migrate mechanically; do NOT "improve" test logic while moving it. Where an
+  existing copy genuinely diverges from the common shape, either parameterize the
+  shared helper (preferred when the divergence is one knob, e.g. range width) or
+  leave that copy in place — never force-fit.
+- No qa-tester runs needed anywhere in this PRD: test-only changes have no runtime
+  surface; `scripts/check.sh` green IS the verification.
+- `tests/README.md` documents conventions; task 4 updates it so future sessions
+  know the shared scaffolding exists.
 
 ## Tasks
-Top-to-bottom by priority; the loop always takes the topmost unchecked task.
-Dependencies noted; every prerequisite sits above its dependent.
 
-### Completed — phases 3a–3d (tasks 1–32, full specs in `PRD-done.md`)
+- [ ] **1. Shared provider doubles in `tests/conftest.py`** — Add `BlockingProvider`
+      (unify the two flavors: core tests construct `(tokens, gate)` and pass it to
+      `ConversationCore`; Pilot tests construct `(before, gate)` and hot-swap it via
+      `app.core._provider` — one class with one signature can serve both),
+      `RecordingProvider` (captures the messages of the last `stream` call), and
+      `ErroringProvider` (raises mid-stream). Include the deadlock warning in
+      `BlockingProvider`'s docstring (see Constraints). Migrate all local copies:
+      Pilot `_BlockingProvider` in `test_app_cancel_empty_node.py`,
+      `test_app_draft_worker_lifecycle.py`, `test_app_draft_prompt_reset.py` (which
+      also holds `_ErroringProvider`), `test_app_new_resume_reset.py`,
+      `test_app_commit_failures.py`; core `BlockingProvider` in
+      `test_conversation.py`, `test_commit_compression.py`,
+      `test_expand_compression.py`, `test_draft_compression.py`;
+      `_RecordingProvider` in `test_app_compress_payload.py`, `test_app_expand.py`,
+      and core `RecordingProvider` in `test_draft_compression.py`.
+      _Acceptance:_ `grep -rn "class _\?BlockingProvider\|class _\?RecordingProvider\|class _\?ErroringProvider" tests/ --include="test_*.py"`
+      returns nothing (the classes exist only in `conftest.py`); collected test
+      count identical to before; `bash scripts/check.sh` green.
 
-Compression, context-transparency, and post-sprint hardening are shipped. The
-**full original task text + acceptance criteria** are archived in
-[`PRD-done.md`](PRD-done.md); the per-task narrative is in `PROGRESS.md` and the
-diffs in git history. One line each below so open tasks can still resolve their
-`deps:` / "task-N" references — look up the number in `PRD-done.md` for detail.
+- [ ] **2. Shared app factory in `tests/conftest.py`** — Add an `app_factory`
+      fixture (built on the existing `repo`/`workspace` fixtures) returning a
+      function that constructs `ChatApp` with a `TestProvider(["ok"])` default and
+      covers the observed variations: injectable provider instance, or scripted
+      tokens + usage (e.g. `test_app_draft_compression.py` uses scripted tokens with
+      `Usage(12, 5, 17)`). Migrate the 19 `def _app` copies (list in
+      `docs/Code Quality Review 2026-07.md` §Test choreography helpers; find them
+      with `grep -rn "def _app" tests/`), the misnamed async `_four_node_app` in
+      `test_app_range_selection.py`, and the inlined `ChatApp(...)` constructions in
+      `test_app_gauge.py` / `test_app_weights.py` where per-test usage scripting
+      maps cleanly onto the factory.
+      _Acceptance:_ `grep -rn "def _app\b" tests/` returns nothing; collected test
+      count identical to before; `bash scripts/check.sh` green.
 
-**Phase 3a — safe tip compression + spatial navigation**
-- [x] 1 — Core: compression node type + `build_context` rendering
-- [x] 2 — Core: `current_view()` resolves compression folds
-- [x] 3 — Core: `commit_compression` + the `streaming` flag (H2)
-- [x] 4 — Core: `expand_compression`
-- [x] 5 — Core: `draft_compression`
-- [x] 6 — UI: range selection (`v` anchor + extend)
-- [x] 7 — UI: draft editor opens/edits/cancels
-- [x] 8 — UI: Commit (`Ctrl+S`) + K rendering in the message list
-- [x] 9 — UI: draft streaming (`Ctrl+D`)
-- [x] 10 — UI: committed-K inspector 3-split
-- [x] 11 — UI: `/expand`
-- [x] 12 — UI: deep-dive (`g d` / `Ctrl+o`)
-- [x] 13 — Phase 3a end-to-end verification (qa-tester)
-- [x] 13a — UI: commit failures breadcrumb, not crash + soft-lock
-- [x] 13b — UI: expand becomes an Edit-mode key; remove selection-dependent slash cmds
-- [x] 13c — Test: a committed K's summary reaches the provider on the next turn
-- [x] 13d — UI: commit/close must not orphan a running draft worker
-- [x] 13e — UI: range extension clamps at the list edges, not wrap
-- [x] 13f — UI: `/new` and `/resume` reset compression UI state
-- [x] 13g — Core: resume keeps the title; rewind rejects off-line nodes
-- [x] 13h — UI: deep-dive/editor interaction hardening (Esc order, seam bypass)
-- [x] 13i — Polish: editor footer hints, blank-prompt fallback, `range_selection`
+- [ ] **3. Turn/submit choreography in `tests/pilot_helpers.py`** — Create the
+      module with: `two_turns(app)` (submit "first"/"second" via
+      `on_input_bar_submitted` + `wait_for_complete` — the shape duplicated in ~15
+      files), `turn(app, text)` (single-turn variant, in `test_app_drift.py` /
+      `test_app_diff_view.py`), and `wait_until_streaming(app, pilot)` replacing the
+      copy-pasted bounded `pilot.pause()` spin loops (`_submit_blocked` in
+      `test_app_cancel_empty_node.py`, `_start_blocked_draft` in
+      `test_app_draft_worker_lifecycle.py` / `test_app_new_resume_reset.py`, inlined
+      loops in `test_app_draft_prompt_reset.py` / `test_app_commit_failures.py` —
+      keep the bounded-iterations shape; a wait that can hang forever is worse than
+      the duplication). Migrate all users; `test_app_range_selection.py` inlines the
+      two submits without a helper — migrate it too.
+      _Acceptance:_ `grep -rn "def _two_turns\|def _turn\b" tests/` returns nothing;
+      collected test count identical to before; `bash scripts/check.sh` green.
 
-**Phase 3b — middle compression + context transparency**
-- [x] 14 — Core: `created_seq` column + migration
-- [x] 15 — Core: event-enumeration resolution (H3)
-- [x] 16 — Core: `context_at_generation` + drift predicate
-- [x] 17 — Core: `ctx_hash` per-turn tripwire (H4)
-- [x] 18 — Config: `compression.default_prompt` + `ui.show_context_drift` (Q13)
-- [x] 19 — UI: drift indicator (`Δ`)
-- [x] 20 — UI: diff view overview (full-screen)
-- [x] 21 — UI: diff drill-down
-- [x] 22 — Enable middle compression (delete the 3a tip guard)
-- [x] 23 — Sprint 3 end-to-end verification (qa-tester)
-
-**Phase 3c — follow-ups from the task-23 end-to-end pass**
-- [x] 24 — Gate `g d` diff-view on `ui.show_context_drift`
-- [x] 25 — Fix drift `Δ` marker vs. weight-% layout
-- [x] 26 — QA tooling: surface Sprint 3 state in `snapshot.py::render()`
-
-**Phase 3d — hardening from the post-sprint review**
-- [x] 27 — UI: diff view inherits the deep-dive read-only gates
-- [x] 28 — Core: close the H2 submit→first-tick window; add UI commit stream guard
-- [x] 29 — Test: extend the ctx_hash oracle to middle compression
-- [x] 30 — UI: diff/deep-dive exclusivity + cursor restore after a nested diff
-- [x] 31 — UI: gate the remaining direct `add_node` appenders
-- [x] 32 — Perf: cache the per-refresh drift computation
-
-### Phase 3e — UI polish + review-verified fixes (2026-07-04)
-
-> Filed from a second review pass (8-angle code review of `develop...feat/compression`
-> + a `qa-tester` behavioral pass driving the real TUI) plus first-hand user testing of
-> the compression UI. Every item was verified either by reading (correctness bugs) or by
-> screenshot/snapshot in the running app (all UI items CONFIRMED-BROKEN). Two design
-> decisions are settled and must not be re-litigated: **the diff view is a full-screen,
-> two-pane replacement** (left = context as-of generation, right = now), both panes
-> rendering **the same compact two-line node rows as the main conversation** — never
-> plain-text dumps (user, 2026-07-04); and **`g d` stays overloaded** (deep-dive a K /
-> diff a drifted assistant turn) — no change to its dispatch. Tasks 33–35 are
-> correctness (land before merge); 36 is the keystone the diff/inspector rework builds
-> on; keep the order. NOT re-filed here (already recorded above / deferred): the
-> `_drift_signature` active-line collision (latent until S4 branching) and the
-> `expand_compression` unguarded `k.meta["range"]` KeyError (§"NOT filed" item (d)).
-
-- [x] 33 — Core: fix the stuck `_streaming` flag on a pre-stream failure
-- [x] 34 — Core: `build_context` never emits two adjacent same-role messages
-- [x] 35 — UI: reset `_last_drafted_prompt` on draft cancel/failure
-- [x] 36 — UI: extract a shared compact message-row renderer (`MessageRow`)
-- [x] 37 — UI: rebuild the diff view as a full-screen two-pane node diff
-- [x] 38 — UI: inspector splits render compact rows + visible dividers
-- [x] 39 — UI: compression node color = context color
-- [x] 40 — UI: blank-line separation before a compression node
-- [x] 41 — UI: range selection uses hover styling, bridged across gaps
-- [x] 42 — UI: transient hints leave the conversation graph
-- [x] 43 — UI: no weight on non-model nodes; silent invalid keys; contextual footer
-- [x] 44 — UI: incremental message-list reconcile (kill the refresh flash)
-
-- [x] 45 — Verify the polished compression UI end-to-end (qa-tester + visual)
-
-### Phase 3f — post-loop bug fixes (2026-07-07)
-
-> Filed from first-hand user testing after the Sprint 3 loop. Three bugs, settled by
-> a grill: (2) the compression **draft** produced nonsense ("you haven't provided the
-> nodes to compress yet") because it replayed *only* the range as bare turns + a
-> trailing instruction — so a range that leads with an assistant turn reads as the
-> model's own words plus a naked meta-request. **Read ADR-0016 Amendment #6** before
-> tasks 46–48: the draft is reframed to send the editable prompt as the **system**
-> message and the **whole active-line** transcript (`current_view`, model-facing
-> forms) as one user message with the range wrapped in `<compress_this>…</compress_this>`
-> markers. This **overrides Q10c** and **supersedes A#1's exact default-prompt text**
-> (both settled — do not re-litigate). (1) is a visual selection-bar bug; (3) is
-> VSCode-style synced scrolling in the diff view. Order is priority (2 → 1 → 3);
-> deps noted inline.
-
-- [x] 46 — Core: `build_compression_transcript` helper (full spec in `PRD-done.md`)
-- [x] 47 — Core+config: reframe `draft_compression` + rewrite the default prompt (full spec in `PRD-done.md`)
-- [x] 48 — UI: drop the zero-token interrupted node on cancel (full spec in `PRD-done.md`)
-
-- [x] 49 — UI (visual): colored left bar on an inner `MessageRow` wrapper (full spec in `PRD-done.md`)
-
-- [x] 50 — **UI (visual): `DiffView` equal-height aligned regions** (full spec in `PRD-done.md`)
-
-- [x] 51 — UI: `DiffView` locked bidirectional scroll + region-nav scrolls both (full spec in `PRD-done.md`)
+- [ ] **4. Compress-via-editor choreography in `tests/pilot_helpers.py`** — Add:
+      `open_editor_on_range(pilot, *, downs=3)` (escape → home → `v` + `downs`×down
+      → `c`; form B), `compress_range(app, pilot, summary, *, downs=3)` (form A =
+      form B + set `#compress-output` text + `ctrl+s`), and
+      `select_tip_in_edit(app, pilot)` (the mode-guarded double-escape that
+      replaces the inconsistent `if mode == "edit": escape` workarounds). The
+      `downs` knob absorbs the 2-node variants (`test_app_drift.py`,
+      `test_app_diff_view.py`). Migrate the extracted helpers
+      (`_compress_full_tip_range`, `_open_editor_on_full_range`,
+      `_select_k_in_edit`, `_select_tip_in_edit`) and the inlined copies in
+      `test_app_footer_context.py`, `test_app_transient_hints.py`,
+      `test_app_reconcile.py`, `test_app_compression_editor.py`,
+      `test_app_range_selection.py`, `test_app_commit_failures.py`. Leave genuinely
+      divergent choreography alone (e.g. `test_app_diff_view.py`'s
+      `_middle_compress_scenario` compressing a non-tip range, and
+      `test_app_reconcile.py`'s trailing-range navigation) — parameterize only if
+      it stays one obvious knob. Then document the shared scaffolding (conftest
+      fixtures + `pilot_helpers`) in `tests/README.md` so future sessions reuse
+      instead of re-declaring.
+      _Acceptance:_ `grep -rn "def _compress_full_tip_range\|def _open_editor_on_full_range\|def _select_k_in_edit\|def _select_tip_in_edit" tests/`
+      returns nothing; `tests/README.md` names both shared-scaffolding homes;
+      collected test count identical to before; `bash scripts/check.sh` green.
 
 ## Out of scope
-- **Nested compression** (compressing a range containing a K) — Q7: the flat guard
-  stays; the breadcrumb stack is built general but depth stays 1. Post-3b follow-on.
-- **Inline folding `zo`/`zc`/`zR`/`zM`** — dropped (Q8); the Center split + deep-dive
-  cover it.
-- **Branching UI / S4** — `rewind` stays core-only; `E.meta.anchor` is written but
-  unused until S4; abandoned-tail visibility is an S4 question.
-- **Import snapshots / source-file drift in the diff** (S5) — pre-S5 the diff renders
-  imports live on both sides; the `ctx_hash` warning is the only drift signal. Do not
-  build snapshot storage.
-- **A colon-command (`:`) input mode** — the roadmap's `:compress`/`:expand` map to
-  Edit-mode keys (`c` / `x`), NOT slash commands (revised 2026-07-03, task 13b).
-- **In-app config editing** — `compression.default_prompt` is hand-edited JSON.
-- **`Ctrl+C` copies instead of cancelling while a TextArea/Input has focus** (the
-  footer's "^C Cancel" is false there — Textual's TextArea binds ctrl+c to copy).
-  Pre-existing for the InputBar, more visible with the editor; known + deferred to a
-  future keybinding pass (review 2026-07-03).
-- **RAG/semantic anything**; `created_seq` before task 14; edits to
-  `docs/Sprint Roadmap.md`; the `mutants/` tree; `main`/`develop`; `uv.lock` by hand;
-  committing `.ctx/`/`.env`.
+- Any change under `ctx/**` — this PRD touches only `tests/` (and `tests/README.md`).
+- The turn-lifecycle work itself (core `end_turn`, submit refusal, UI convergence,
+  cancel coverage) — that is Phase 1's main body, done in-conversation after this
+  loop, NOT here.
+- New test cases or coverage improvements — same tests before and after.
+- `tools/agent/**` (the qa-tester harness) — untouched.
+- The `HarnessApp`-based files (`test_visual_states.py`, `test_message_row.py`,
+  `test_message_list_meta_layout.py`) — they don't share these shapes; leave them.
