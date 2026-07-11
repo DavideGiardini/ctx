@@ -1,38 +1,91 @@
-MessageWidget {
+/* Shared compact-row styling — targets MessageRow so it also applies to the
+   MessageWidget subclass (list rows) and to rows mounted in the diff/inspector
+   panes (tasks 37/38). */
+MessageRow {
     height: auto;
-    padding: 0 1 0 2;
     margin: 0 0 1 0;
     overflow: hidden hidden;
 }
-MessageWidget.pass-start {
-    margin-top: 1;
-}
-MessageWidget.system {
-    text-style: italic;
-}
-MessageWidget.context {
-    text-style: italic;
-}
-MessageWidget .content {
+/* The inner wrapper carries the role-colored left bar (set in Python) plus the
+   row's own padding; the outer row carries only the selection background and
+   bridge padding, so a bridged gap shows no colored bar (task 49). */
+MessageRow .row-body {
+    height: auto;
+    padding: 0 1 0 2;
     overflow: hidden hidden;
 }
-MessageWidget Static {
+MessageRow.system {
+    text-style: italic;
+}
+MessageRow.context {
+    text-style: italic;
+}
+MessageRow .content {
+    overflow: hidden hidden;
+}
+MessageRow Static {
     padding: 0;
 }
-MessageWidget Markdown {
+MessageRow Markdown {
     padding: 0;
 }
-MessageWidget Markdown > MarkdownParagraph {
+MessageRow Markdown > MarkdownParagraph {
     margin: 0;
 }
-MessageWidget .weight {
+/* The drift glyph and weight % share one right-docked row so they flow
+   side-by-side (Δ left of %) instead of both docking to the same edge and
+   overlapping into "2Δ%" (task 25). */
+MessageRow .meta-slot {
     dock: right;
+    width: auto;
+    height: 1;
+    layout: horizontal;
+}
+MessageRow .weight {
     width: auto;
     height: 1;
     color: $text-muted;
 }
+MessageRow .drift {
+    width: auto;
+    height: 1;
+    margin: 0 1 0 0;
+    color: $text-muted;
+}
+/* Kind glyph (≡) marking a compression summary — shares the context-green bar,
+   so this glyph is what tells a summary apart from an imported file (task 39). */
+MessageRow .kind {
+    width: auto;
+    height: 1;
+    margin: 0 1 0 0;
+    color: $text-muted;
+}
+
+/* List-only interaction state (cursor / range selection / pass margins). */
+MessageWidget.pass-start {
+    margin-top: 1;
+}
 MessageWidget.selected {
     background: $surface-lighten-1;
+}
+/* Range selection wears the same grey hover background as the cursor (the bold
+   role-colored left bar is set in Python) — a multi-node run reads as one
+   highlighted block, not a separate solid-blue mode (task 41). */
+MessageWidget.range-selected {
+    background: $surface-lighten-1;
+}
+/* Bridge the inter-row gap inside a selected run so the highlight is one
+   continuous grey block: the upper row absorbs its separator as grey padding
+   and the lower row drops its (pass-start) top margin. The bridge padding is on
+   the *outer* row, outside the inner body's colored bar, so the gap is pure grey
+   with no bar bleeding through it (task 49). Must follow .pass-start so the
+   zeroed top margin wins at equal specificity (task 41). */
+MessageWidget.range-continues-below {
+    margin-bottom: 0;
+    padding-bottom: 1;
+}
+MessageWidget.range-continues-above {
+    margin-top: 0;
 }
 MessageList {
     scrollbar-size: 1 1;

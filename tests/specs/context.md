@@ -149,6 +149,18 @@ Given `[context with meta {"source_path": ""}, user "after"]` → build does not
 contains a `role=="user"` dict with content `"after"`; nothing is marked as imported for the
 empty-source node. (Distinguishes "no source" from `source_path is None`.)
 
+**C24. A dropped node (system) between user-side items does NOT break coalescing.**
+*(added 2026-07-03, Sprint 3 task 1; revised 2026-07-06, task 34.)* A node that does
+not reach the model (`goes_to_model()` False — e.g. a system breadcrumb) emits nothing
+and does **not** act as a boundary: user-side material before it merges with user-side
+material after it. Given `[user "u1", system "note", user "u2"]` → ONE `role=="user"`
+dict holding "u1" then "u2", separated by a blank line. This upholds the role-alternation
+output invariant (no two adjacent same-role dicts) that strict providers require; the
+earlier "dropped node is a boundary" rule violated it by emitting two adjacent user
+dicts. The compression-summary rendering and its merging with adjacent user material
+are contracted in `tests/specs/compression_node.md`. See also
+`tests/specs/context_role_alternation.md` for the invariant.
+
 ## Adjudication notes
 - **A1 (wrapper token):** marker is `context_import`, source path is an attribute. Assert
   substrings, never byte-exact format.

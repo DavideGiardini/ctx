@@ -84,6 +84,9 @@ class SaveCountingStorage:
     def load(self, cid):
         return self._inner.load(cid)
 
+    def get_title(self, cid):
+        return self._inner.get_title(cid)
+
     def get_model(self, cid):
         return self._inner.get_model(cid)
 
@@ -1416,3 +1419,486 @@ def test_c80_resume_dangling_active_leaf_falls_back_to_last(
     core.resume_conversation(cid)
     # Fall back to the last stored node (n3) as the tip: full stored line, not empty.
     assert [n.id for n in core.current_view()] == [n1.id, n2.id, n3.id]
+
+
+# ---------------------------------------------------------------------------
+# current_view() compression folding (ADR-0016 Q1) — C81..C90
+# ---------------------------------------------------------------------------
+
+
+def _view_core(repo, test_provider, workspace):
+    """Build a ConversationCore with a no-op canned provider for view tests."""
+    return ConversationCore(repo, test_provider([]), workspace)
+
+
+def _chain(*nodes):
+    """Link nodes into a prev_id chain (nodes[0] is root) and return them."""
+    for prev, cur in zip(nodes, nodes[1:], strict=False):
+        cur.prev_id = prev.id
+    return nodes
+
+
+# C81
+def test_c81_no_compression_identical_to_walk(repo, test_provider, workspace, make_node):
+    a = make_node(content="what is a monad")
+    b = make_node(role="assistant", content="a monoid in the category of endofunctors")
+    c = make_node(content="explain that for humans")
+    _chain(a, b, c)
+
+    core = _view_core(repo, test_provider, workspace)
+    core._graph = {n.id: n for n in (a, b, c)}
+    core._active_leaf_id = c.id
+
+    view = core.current_view()
+    assert [n.id for n in view] == [a.id, b.id, c.id]
+    assert [n.node_type for n in view] == ["message", "message", "message"]
+
+
+# C82
+def test_c82_folded_tip_ends_with_k(repo, test_provider, workspace, make_node):
+    a = make_node(content="first question")
+    b = make_node(role="assistant", content="first answer")
+    c = make_node(content="tail that gets folded")
+    _chain(a, b, c)
+    k = make_node(
+        role="compression",
+        content="summary of tail",
+        node_type="compression",
+        meta={"prompt": "", "range": [c.id]},
+    )
+    c.compressed_into = k.id
+
+    core = _view_core(repo, test_provider, workspace)
+    core._graph = {n.id: n for n in (a, b, c, k)}
+    core._active_leaf_id = c.id
+
+    view = core.current_view()
+    assert [n.id for n in view] == [a.id, b.id, k.id]
+    assert [n.node_type for n in view] == ["message", "message", "compression"]
+
+
+# C83
+def test_c83_append_after_folded_tip(repo, test_provider, workspace, make_node):
+    a = make_node(content="opening line")
+    b = make_node(role="assistant", content="reply")
+    c = make_node(content="folded tip node")
+    _chain(a, b, c)
+    k = make_node(
+        role="compression",
+        content="folded summary",
+        node_type="compression",
+        meta={"prompt": "", "range": [c.id]},
+    )
+    c.compressed_into = k.id
+
+    # New node is chained from the REAL leaf c (not K) and becomes the tip.
+    new = make_node(content="brand new message after folding")
+    new.prev_id = c.id
+
+    core = _view_core(repo, test_provider, workspace)
+    core._graph = {n.id: n for n in (a, b, c, k, new)}
+    core._active_leaf_id = new.id
+
+    view = core.current_view()
+    assert [n.id for n in view] == [a.id, b.id, k.id, new.id]
+    assert view[-1].id == new.id
+    # K stays off the line.
+    assert k.prev_id is None
+
+
+# C84
+def test_c84_middle_fold_in_place(repo, test_provider, workspace, make_node):
+    a = make_node(content="anchor before run")
+    b = make_node(role="assistant", content="folded 1")
+    c = make_node(content="folded 2")
+    d = make_node(role="assistant", content="folded 3")
+    e = make_node(content="anchor after run")
+    _chain(a, b, c, d, e)
+    k = make_node(
+        role="compression",
+        content="middle summary",
+        node_type="compression",
+        meta={"prompt": "", "range": [b.id, c.id, d.id]},
+    )
+    for child in (b, c, d):
+        child.compressed_into = k.id
+
+    core = _view_core(repo, test_provider, workspace)
+    core._graph = {n.id: n for n in (a, b, c, d, e, k)}
+    core._active_leaf_id = e.id
+
+    view = core.current_view()
+    assert [n.id for n in view] == [a.id, k.id, e.id]
+    assert [n.node_type for n in view] == ["message", "compression", "message"]
+
+
+# C85
+def test_c85_two_independent_compressions(repo, test_provider, workspace, make_node):
+    a = make_node(content="head")
+    b = make_node(role="assistant", content="run1 a")
+    c = make_node(content="run1 b")
+    d = make_node(role="assistant", content="unfolded middle")
+    e = make_node(content="run2 folded")
+    f = make_node(role="assistant", content="surviving tail")
+    _chain(a, b, c, d, e, f)
+    k1 = make_node(
+        role="compression",
+        content="summary one",
+        node_type="compression",
+        meta={"prompt": "", "range": [b.id, c.id]},
+    )
+    k2 = make_node(
+        role="compression",
+        content="summary two",
+        node_type="compression",
+        meta={"prompt": "", "range": [e.id]},
+    )
+    b.compressed_into = k1.id
+    c.compressed_into = k1.id
+    e.compressed_into = k2.id  # f left unfolded → surviving tail after K2
+
+    core = _view_core(repo, test_provider, workspace)
+    core._graph = {n.id: n for n in (a, b, c, d, e, f, k1, k2)}
+    core._active_leaf_id = f.id
+
+    view = core.current_view()
+    assert [n.id for n in view] == [a.id, k1.id, d.id, k2.id, f.id]
+    assert [n.node_type for n in view] == [
+        "message", "compression", "message", "compression", "message",
+    ]
+
+
+# C86
+def test_c86_single_node_fold(repo, test_provider, workspace, make_node):
+    a = make_node(content="before")
+    b = make_node(role="assistant", content="the only folded node")
+    c = make_node(content="after")
+    _chain(a, b, c)
+    k = make_node(
+        role="compression",
+        content="single summary",
+        node_type="compression",
+        meta={"prompt": "", "range": [b.id]},
+    )
+    b.compressed_into = k.id
+
+    core = _view_core(repo, test_provider, workspace)
+    core._graph = {n.id: n for n in (a, b, c, k)}
+    core._active_leaf_id = c.id
+
+    view = core.current_view()
+    assert [n.id for n in view] == [a.id, k.id, c.id]
+    assert [n.node_type for n in view] == ["message", "compression", "message"]
+
+
+# C87
+def test_c87_dangling_compressed_into_treated_as_unfolded(
+    repo, test_provider, workspace, make_node
+):
+    a = make_node(content="alpha")
+    b = make_node(role="assistant", content="points at a missing K")
+    c = make_node(content="gamma")
+    _chain(a, b, c)
+    b.compressed_into = "missing-compression-id-not-in-graph"
+
+    core = _view_core(repo, test_provider, workspace)
+    core._graph = {n.id: n for n in (a, b, c)}  # no K stored
+    core._active_leaf_id = c.id
+
+    view = core.current_view()
+    assert [n.id for n in view] == [a.id, b.id, c.id]
+    assert [n.node_type for n in view] == ["message", "message", "message"]
+
+
+# C88
+def test_c88_empty_conversation(repo, test_provider, workspace):
+    core = _view_core(repo, test_provider, workspace)
+    core._graph = {}
+    core._active_leaf_id = None
+
+    assert core.current_view() == []
+
+
+# C89
+def test_c89_save_reload_roundtrip_fold(repo, test_provider, workspace, make_node):
+    cid = "conv-fold-roundtrip"
+    a = make_node(content="persisted head", conversation_id=cid)
+    b = make_node(role="assistant", content="persisted folded 1", conversation_id=cid)
+    c = make_node(content="persisted folded 2", conversation_id=cid)
+    d = make_node(role="assistant", content="persisted folded 3", conversation_id=cid)
+    e = make_node(content="persisted tail", conversation_id=cid)
+    _chain(a, b, c, d, e)
+    k = make_node(
+        role="compression",
+        content="persisted summary",
+        node_type="compression",
+        conversation_id=cid,
+        meta={"prompt": "", "range": [b.id, c.id, d.id]},
+    )
+    for child in (b, c, d):
+        child.compressed_into = k.id
+
+    repo.save(cid, "roundtrip", [a, b, c, d, e, k], active_leaf_id=e.id)
+
+    core = _view_core(repo, test_provider, workspace)
+    core.resume_conversation(cid)
+
+    view = core.current_view()
+    assert [n.id for n in view] == [a.id, k.id, e.id]
+    assert [n.node_type for n in view] == ["message", "compression", "message"]
+
+
+# C90
+def test_c90_root_fold_view_starts_with_k(repo, test_provider, workspace, make_node):
+    a = make_node(content="folded root 1")
+    b = make_node(role="assistant", content="folded root 2")
+    c = make_node(content="surviving tail")
+    _chain(a, b, c)
+    k = make_node(
+        role="compression",
+        content="head summary",
+        node_type="compression",
+        meta={"prompt": "", "range": [a.id, b.id]},
+    )
+    a.compressed_into = k.id
+    b.compressed_into = k.id
+
+    core = _view_core(repo, test_provider, workspace)
+    core._graph = {n.id: n for n in (a, b, c, k)}
+    core._active_leaf_id = c.id
+
+    view = core.current_view()
+    assert [n.id for n in view] == [k.id, c.id]
+    assert [n.node_type for n in view] == ["compression", "message"]
+    assert view[0].prev_id is None
+
+
+# ---------------------------------------------------------------------------
+# Task 15: event-enumeration resolution (ADR-0016 A#2/H3 now-rule). Resolution
+# reads K/E event nodes + K.meta["range"], never child compressed_into pointers
+# (A#3 §3). C97/C98 discriminate the two mechanisms; C99 guards re-compression.
+# ---------------------------------------------------------------------------
+
+
+# C97 — a child carries compressed_into pointing at a REAL K in the graph, but
+# that K's range does not cover the child (range ⊄ line) → the child is NOT
+# folded. Resolution ignores the stale pointer; only the event range decides.
+def test_c97_stale_compressed_into_with_real_k_not_folded(
+    repo, test_provider, workspace, make_node
+):
+    a = make_node(content="alpha")
+    b = make_node(role="assistant", content="carries a stale pointer")
+    c = make_node(content="gamma")
+    _chain(a, b, c)
+    k = make_node(
+        role="compression",
+        content="folds something off this line",
+        node_type="compression",
+        meta={"prompt": "", "range": ["orphan-id-not-on-line"]},
+    )
+    b.compressed_into = k.id  # stale/wrong pointer — enumeration must ignore it
+
+    core = _view_core(repo, test_provider, workspace)
+    core._graph = {n.id: n for n in (a, b, c, k)}
+    core._active_leaf_id = c.id
+
+    view = core.current_view()
+    assert [n.id for n in view] == [a.id, b.id, c.id]
+    assert [n.node_type for n in view] == ["message", "message", "message"]
+
+
+# C98 — folding is driven by K.meta["range"] alone: a child whose id is in the
+# range folds even with compressed_into never set (the pointer is vestigial).
+def test_c98_range_only_folds_without_pointer(
+    repo, test_provider, workspace, make_node
+):
+    a = make_node(content="before")
+    b = make_node(role="assistant", content="folded by range only")
+    c = make_node(content="after")
+    _chain(a, b, c)
+    k = make_node(
+        role="compression",
+        content="range summary",
+        node_type="compression",
+        meta={"prompt": "", "range": [b.id]},
+    )
+    # NB: b.compressed_into stays None — no pointer, only the event range.
+
+    core = _view_core(repo, test_provider, workspace)
+    core._graph = {n.id: n for n in (a, b, c, k)}
+    core._active_leaf_id = c.id
+
+    view = core.current_view()
+    assert [n.id for n in view] == [a.id, k.id, c.id]
+    assert [n.node_type for n in view] == ["message", "compression", "message"]
+
+
+# C99 — expand + re-compress an overlapping range: K′ folds, the expanded K
+# never reappears (its E deactivates it) and stays in the graph (never deleted).
+async def test_c99_expand_then_recompress_overlap(repo, test_provider, workspace):
+    core = ConversationCore(repo, test_provider(["hi"]), workspace)
+    core.setup()
+    _u1, a1 = core.submit("First question")
+    await _collect(core.stream(a1))
+    u2, a2 = core.submit("Second question")
+    await _collect(core.stream(a2))
+    view = core.current_view()
+    k = core.commit_compression(view[0].id, view[-1].id, "whole summary")
+    core.expand_compression(k.id)
+    # Re-compress the tail [u2, a2] — an overlap with K's now-inactive range.
+    k2 = core.commit_compression(u2.id, a2.id, "tail summary")
+
+    view = core.current_view()
+    view_ids = [n.id for n in view]
+    assert k2.id in view_ids
+    assert k.id not in view_ids  # the expanded K must not resurrect
+    assert k.id in core._graph  # ...but it is preserved (append-only)
+
+
+# ---------------------------------------------------------------------------
+# Task 13g: resume must not clobber the title; rewind must reject off-line
+# nodes (ADR-0016 Q1). Documented additions per the task-10 precedent — the
+# scenarios come from the PRD task, not the implementation.
+# ---------------------------------------------------------------------------
+
+
+# C91 — compress the whole tip → save → resume → the stored title survives a
+# further persist (the folded view has no user turn, so the old derive-from-view
+# path blanked it and the next persist() overwrote the stored title for good).
+async def test_c91_resume_whole_tip_folded_keeps_stored_title(
+    repo, test_provider, workspace
+):
+    original = "The original opening question"
+    core = ConversationCore(repo, test_provider(["hi"]), workspace)
+    core.setup()
+    _u1, a1 = core.submit(original)
+    await _collect(core.stream(a1))
+    _u2, a2 = core.submit("A follow-up question")
+    await _collect(core.stream(a2))
+    cid = core.conversation_id
+    view = core.current_view()
+    core.commit_compression(view[0].id, view[-1].id, "summary of everything")
+    assert core.conversation_title == original  # commit leaves the title alone
+
+    fresh = ConversationCore(repo, test_provider(["hi"]), workspace)
+    fresh.resume_conversation(cid)
+    assert fresh.conversation_title == original
+    fresh.persist()  # the write that used to clobber the stored title with ""
+
+    fresh2 = ConversationCore(repo, test_provider(["hi"]), workspace)
+    fresh2.resume_conversation(cid)
+    assert fresh2.conversation_title == original
+
+
+# C92 — when the stored title IS empty, resume derives from the raw line, not
+# the folded (user-less) view. Whole conversation folded, stored title blanked.
+async def test_c92_resume_empty_stored_title_derives_from_raw_line(
+    repo, test_provider, workspace
+):
+    core = ConversationCore(repo, test_provider(["hi"]), workspace)
+    core.setup()
+    _u1, a1 = core.submit("Raw line first user turn")
+    await _collect(core.stream(a1))
+    _u2, a2 = core.submit("Second turn")
+    await _collect(core.stream(a2))
+    cid = core.conversation_id
+    view = core.current_view()
+    core.commit_compression(view[0].id, view[-1].id, "summary")
+    core.conversation_title = ""  # force resume down the derivation branch
+    core.persist()
+
+    fresh = ConversationCore(repo, test_provider(["hi"]), workspace)
+    fresh.resume_conversation(cid)
+    assert fresh.conversation_title == "Raw line first user turn"
+
+
+# C93 — partly folded, empty stored title: derivation picks the FIRST user turn
+# on the raw line (even though it is folded), never a later turn that happens to
+# be the folded view's first user node. Graph built directly to place a prefix
+# fold the 3a tip guard would otherwise forbid (S4/task 22 territory).
+def test_c93_resume_partly_folded_derives_first_raw_user(
+    repo, test_provider, workspace, make_node
+):
+    cid = "conv-c93"
+    u1 = make_node(role="user", content="Alpha original title", conversation_id=cid)
+    a1 = make_node(role="assistant", content="answer one", conversation_id=cid)
+    u2 = make_node(role="user", content="Beta a later turn", conversation_id=cid)
+    a2 = make_node(role="assistant", content="answer two", conversation_id=cid)
+    _chain(u1, a1, u2, a2)
+    k = make_node(
+        role="compression",
+        content="summary of the head",
+        node_type="compression",
+        conversation_id=cid,
+        meta={"prompt": "", "range": [u1.id, a1.id]},
+    )
+    u1.compressed_into = k.id
+    a1.compressed_into = k.id
+    repo.save(cid, "", [u1, a1, u2, a2, k], active_leaf_id=a2.id)
+
+    core = ConversationCore(repo, test_provider(["hi"]), workspace)
+    core.resume_conversation(cid)
+    # The folded view's first user node is u2 ("Beta…"); the raw line's is u1.
+    assert core.conversation_title == "Alpha original title"
+
+
+# C94 — rewind(K.id) raises and leaves the graph unmutated. K is in the view but
+# off the prev_id line; rewinding to it would collapse the view to [K] and land K
+# on the line on the next submit (Q1).
+async def test_c94_rewind_to_compression_node_raises(repo, test_provider, workspace):
+    core = ConversationCore(repo, test_provider(["hi"]), workspace)
+    core.setup()
+    _u1, a1 = core.submit("First question")
+    await _collect(core.stream(a1))
+    _u2, a2 = core.submit("Second question")
+    await _collect(core.stream(a2))
+    view = core.current_view()
+    k = core.commit_compression(view[0].id, view[-1].id, "summary")
+    leaf_before = core._active_leaf_id
+    view_before = [n.id for n in core.current_view()]
+    ids_before = set(core._graph)
+    with pytest.raises(ValueError):
+        core.rewind(k.id)
+    assert core._active_leaf_id == leaf_before
+    assert [n.id for n in core.current_view()] == view_before
+    assert set(core._graph) == ids_before
+
+
+# C95 — rewind to a folded child raises (folded children are on the raw line but
+# rejected for now; guards the enumeration fold clause in rewind).
+async def test_c95_rewind_to_folded_child_raises(repo, test_provider, workspace):
+    core = ConversationCore(repo, test_provider(["hi"]), workspace)
+    core.setup()
+    u1, a1 = core.submit("First question")
+    await _collect(core.stream(a1))
+    _u2, a2 = core.submit("Second question")
+    await _collect(core.stream(a2))
+    view = core.current_view()
+    core.commit_compression(view[0].id, view[-1].id, "summary")
+    leaf_before = core._active_leaf_id
+    with pytest.raises(ValueError):
+        core.rewind(u1.id)  # u1 is folded (compressed_into set)
+    assert core._active_leaf_id == leaf_before
+
+
+# C96 — rewind(E.id) raises: an expand event node is off the line (prev_id=None)
+# and never a rewind target.
+async def test_c96_rewind_to_expand_event_raises(repo, test_provider, workspace):
+    core = ConversationCore(repo, test_provider(["hi"]), workspace)
+    core.setup()
+    _u1, a1 = core.submit("First question")
+    await _collect(core.stream(a1))
+    _u2, a2 = core.submit("Second question")
+    await _collect(core.stream(a2))
+    view = core.current_view()
+    k = core.commit_compression(view[0].id, view[-1].id, "summary")
+    core.expand_compression(k.id)
+    e_id = next(
+        n.id for n in core._graph.values() if n.node_type == "expand"
+    )
+    leaf_before = core._active_leaf_id
+    view_before = [n.id for n in core.current_view()]
+    with pytest.raises(ValueError):
+        core.rewind(e_id)
+    assert core._active_leaf_id == leaf_before
+    assert [n.id for n in core.current_view()] == view_before

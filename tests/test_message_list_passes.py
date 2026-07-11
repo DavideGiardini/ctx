@@ -35,6 +35,21 @@ def test_context_before_assistant_groups_with_the_human():
     assert _pass_starts(roles) == [False, False, True]
 
 
+def test_compression_after_assistant_starts_a_new_pass():
+    # A K folding a range that ended in an assistant reply lands on the same
+    # (assistant) side it inherits, but must still detach from the reply above
+    # it (task 40): it is its own block.
+    roles = ["user", "assistant", "compression"]
+    assert _pass_starts(roles) == [False, True, True]
+
+
+def test_leading_compression_is_never_a_pass_start():
+    # index 0 is never a start; the following human query legitimately begins its
+    # own pass (K sits on the assistant side).
+    roles = ["compression", "user"]
+    assert _pass_starts(roles) == [False, True]
+
+
 def test_single_node_is_never_a_pass_start():
     assert _pass_starts(["user"]) == [False]
 

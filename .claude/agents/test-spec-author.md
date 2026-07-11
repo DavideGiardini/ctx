@@ -47,6 +47,16 @@ interface; boundary/edge cases (empty, single, duplicate, ordering); invariants 
 must always hold; and each error condition with *when* it fires and *what* is raised
 or returned. Number every item so tests can cite it.
 
+**Respect the scope budget the orchestrator gives you.** The breadth above is the
+default for full-module coverage. But when the orchestrator says this is a *small* or
+*scoped* change (e.g. "~15 lines of product code", "one guard clause", "a CSS tweak")
+or asks for *minimal* / *fewest* tests, size the contract to the change: enumerate
+only the behaviors a realistic regression to *this* change could break, not the
+module's entire surface. A few high-value items beat an exhaustive list. Apply the
+deletion test to every item — if dropping it loses no meaningful coverage, don't
+write it. Padding a small change with a large contract is a defect; call out when
+you've deliberately scoped down and why.
+
 Write the **Expect** as a concrete, checkable assertion about observable
 output/state — not "it works." Never phrase an expectation as "whatever the function
 returns"; that is a tautology and defeats the purpose.
@@ -57,7 +67,9 @@ Given an (adjudicated) contract, **write the complete test file to
 `Write(tests/**)`). If — and only if — your Write is denied, fall back to returning the
 full file content as text in a single fenced code block, and the orchestrator persists
 those bytes verbatim. Either way the deliverable is one complete file. Rules:
-- One or more tests per contract item; **cite the item id in a comment** (`# C3`).
+- Roughly one test per contract item (**cite the item id in a comment**, `# C3`);
+  don't split one behavior into many near-duplicate tests, and under a scope budget
+  prefer covering several related items in one focused test over many tiny ones.
 - Reuse the conftest fixtures you were told about; don't rebuild them.
 - Every assertion's expected value must trace to a contract **Expect** — never to a
   value you assume the implementation produces.

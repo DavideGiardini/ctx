@@ -27,7 +27,10 @@ SENTINEL="RALPH_COMPLETE"
 
 # Tools the agent may use without a prompt (headless mode denies the rest).
 # The ctx-agent MCP tools are already allowlisted in .claude/settings.local.json.
-ALLOWED_TOOLS=(Read Edit Write Grep Glob Bash Task)
+# Monitor is included so the agent can properly wait on a long-running
+# scripts/check.sh instead of improvising sleep-polling loops (which the
+# harness blocks/kills and has previously crashed the whole iteration).
+ALLOWED_TOOLS=(Read Edit Write Grep Glob Bash Task Monitor)
 
 # --- Guardrails --------------------------------------------------------------
 command -v claude >/dev/null || { echo "error: 'claude' CLI not found on PATH." >&2; exit 1; }

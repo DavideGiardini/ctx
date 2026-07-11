@@ -30,6 +30,18 @@ Hold every task to all five rules:
    For UI/behavior tasks, write the criterion as the snapshot/state qa-tester
    should observe (e.g. "after `/export`, snapshot shows a system message
    'Exported to …'"). No acceptance criterion → not a task yet.
+
+   **For *visual* UI tasks (color, layout, spacing, alignment, "reads as one
+   block"), the acceptance MUST state the visible outcome** as a VLM-checkable
+   sentence (a reference widget, a mock, or a one-line description of what the
+   rendered result should look like) — because `qa-tester` **cannot perceive
+   appearance**, only queryable proxies. Deciding *what right looks like* is the
+   spec's job (yours, here); deciding *how to check it* is the implementing agent's
+   job (it renders the app with `tools/agent/visual.py` and looks — see PROMPT.md
+   step 7). This split is the guard against the loop's original blind spot: an agent
+   that both implements *and* picks its own success proxy will pick one it passes.
+   Still name a deterministic floor (a snapshot field / CSS class / unit test) so
+   the check has a regression net under the picture.
 5. **Respects the architecture.** Follow the "Designing new modules" guidance in
    `AGENTS.md` (deep modules, core stays framework-free, seams only on a second
    real implementation). New domain logic lands in `ctx/core/*`; the UI is a thin
@@ -72,6 +84,14 @@ Write `scripts/ralph/PRD.md` following the shape of `scripts/ralph/PRD.template.
 exactly (Goal, Constraints/notes, Tasks as `- [ ]` with **bold title** — what —
 _Acceptance:_, Out of scope). Each task line must be self-contained enough that a
 fresh agent who reads only the PRD, `AGENTS.md`, and `PROGRESS.md` can execute it.
+
+**The PRD is a live worklist, not an archive — it stays lean.** The loop re-reads
+the whole file every iteration, so completed-task text is pure context tax. Per
+PROMPT.md step 8, when a task finishes the loop moves its full body to
+`scripts/ralph/PRD-done.md` and leaves a one-line `- [x] <N> — <title>` entry under
+a "## Completed" ledger. So: write open tasks in full; never let finished-task
+prose pile up in `PRD.md`. If you inherit a PRD already bloated with done tasks,
+prune it the same way before running the loop.
 Then tell the user how to run it:
 ```
 git switch -c feat/<name>     # if not already on a feature branch

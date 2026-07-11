@@ -28,19 +28,25 @@ diff view exists** — the task order enforces this; do not reorder.
   `K.meta = {"prompt": <str, "" for manual>, "range": [<ordered folded child ids>]}`;
   `E.meta = {"target": <K.id>, "anchor": <active_leaf_id at expand time>}`;
   assistant nodes gain `meta["ctx_hash"]` in 3b (task 17).
-- **Default compression prompt (exact text, ADR-0016 A#1):** "Preserve the facts,
+- **Default compression prompt:** was A#1's exact text ("Preserve the facts,
   decisions, entities, and open threads needed for the conversation to continue
-  coherently." Core constant in 3a; becomes `compression.default_prompt` config in
-  task 18.
+  coherently."), a core constant in 3a promoted to `compression.default_prompt` in
+  task 18. **ADR-0016 A#6 (task 47) supersedes that exact text** with a marker-aware
+  scaffold+preserve-intent *system* prompt — see A#6 before touching it.
 - **H2 invariant:** `commit_compression` / `expand_compression` / `draft_compression`
   must raise while a turn is streaming (`ConversationCore.streaming`, task 3); the UI
   additionally refuses the actions while `_stream_worker` runs (`ctx/ui/app.py:75`).
-- **Keys (settled):** `v` anchor+extend selection (Edit mode) · `c` or `/compress`
-  opens the draft editor · `Ctrl+D` draft/re-draft · `Ctrl+S` commit · `Esc` cancel ·
-  `/expand` · `g d` deep-dive / diff view · `Ctrl+o` pop one level · `i` exits any
-  full-screen inspection to Insert at the live tip. The roadmap's `:expand`/`:compress`
-  colon notation maps to slash commands (ctx has no colon infrastructure). Update
-  footer hints (`ctx/ui/widgets/app_footer.py:9` `_HINTS`) whenever keys are added.
+- **Keys (settled, revised 2026-07-03):** `v` anchor+extend selection (Edit mode) ·
+  `c` opens the draft editor · `Ctrl+D` draft/re-draft · `Ctrl+S` commit · `Esc`
+  cancel · `x` expands the selected K (Edit mode, task 13b) · `g d` deep-dive / diff
+  view · `Ctrl+o` pop one level · `i` exits any full-screen inspection to Insert at
+  the live tip. **Selection-dependent actions are Edit-mode keys ONLY, never slash
+  commands** (user decision 2026-07-03): the InputBar needs Insert mode and entering
+  Insert clears the selection, so a command can never act on a selected node. The
+  3a-shipped `/compress`/`/expand` commands are removed by task 13b — this supersedes
+  the earlier ":compress/:expand map to slash commands" note (record in ADR-0016).
+  Update footer hints (`ctx/ui/widgets/app_footer.py:9` `_HINTS`) whenever keys are
+  added.
 - **Code-blind test flow** (PROMPT.md step 4) for new/changed core behavior:
   signatures + docstrings + stubs → `test-spec-author` with interface + prose intent →
   red → implement to green. Authored tests are fixed. Reuse `tests/conftest.py`
@@ -62,357 +68,118 @@ diff view exists** — the task order enforces this; do not reorder.
 Top-to-bottom by priority; the loop always takes the topmost unchecked task.
 Dependencies noted; every prerequisite sits above its dependent.
 
-### Phase 3a — safe tip compression + spatial navigation
+### Completed — phases 3a–3d (tasks 1–32, full specs in `PRD-done.md`)
 
-- [ ] **1. Core: compression node type + `build_context` rendering** — in
-      `ctx/models/nodes.py`: a `Node.compression(summary, conversation_id, range_ids,
-      prompt="")` factory (`role="compression"`, `node_type="compression"`,
-      `content=summary`, meta per the canonical keys); extend `goes_to_model()`
-      (`nodes.py:46-53`) so `node_type == "compression"` returns True (H6). In
-      `ctx/core/context.py`: render a compression node as
-      `<conversation_summary>\n{content}\n</conversation_summary>` with
-      `node_role="user"` so it coalesces with adjacent user content exactly like
-      `<context_import>` (Q2; no framing/preamble — Q2b). _Acceptance:_ code-blind
-      tests (extend `tests/specs/nodes.md`/`context.md` + test files): factory fields
-      and meta keys; `goes_to_model()` True for K, unchanged for others; rendering
-      wraps + coalesces; a system node between user content still splits coalescing.
-      `scripts/check.sh` green.
+Compression, context-transparency, and post-sprint hardening are shipped. The
+**full original task text + acceptance criteria** are archived in
+[`PRD-done.md`](PRD-done.md); the per-task narrative is in `PROGRESS.md` and the
+diffs in git history. One line each below so open tasks can still resolve their
+`deps:` / "task-N" references — look up the number in `PRD-done.md` for detail.
 
-- [ ] **2. Core: `current_view()` resolves compression folds** _(deps: 1)_ — in
-      `ctx/core/conversation.py:119-138`, after the `prev_id` walk, replace each
-      **maximal contiguous run** of view nodes sharing the same non-None
-      `compressed_into = K` with the `K` node from `_graph`, in place (Q1 —
-      pointer-based 3a resolution; task 15 later swaps the mechanism behind the same
-      signature). Children leave the view; K appears despite `prev_id=None`. The
-      active leaf may itself be folded: the view then ends with K, but
-      `_append_to_line` still chains new nodes from `_active_leaf_id` (unchanged).
-      A `compressed_into` pointing at a missing node → treat as unfolded (defensive,
-      like the existing walk). _Acceptance:_ code-blind tests: tip run folds to K;
-      middle run folds in place; two independent Ks; no-compression view identical to
-      today; append-after-folded-tip chains from the real leaf and the view shows
-      `[..., K, new]`. `scripts/check.sh` green.
+**Phase 3a — safe tip compression + spatial navigation**
+- [x] 1 — Core: compression node type + `build_context` rendering
+- [x] 2 — Core: `current_view()` resolves compression folds
+- [x] 3 — Core: `commit_compression` + the `streaming` flag (H2)
+- [x] 4 — Core: `expand_compression`
+- [x] 5 — Core: `draft_compression`
+- [x] 6 — UI: range selection (`v` anchor + extend)
+- [x] 7 — UI: draft editor opens/edits/cancels
+- [x] 8 — UI: Commit (`Ctrl+S`) + K rendering in the message list
+- [x] 9 — UI: draft streaming (`Ctrl+D`)
+- [x] 10 — UI: committed-K inspector 3-split
+- [x] 11 — UI: `/expand`
+- [x] 12 — UI: deep-dive (`g d` / `Ctrl+o`)
+- [x] 13 — Phase 3a end-to-end verification (qa-tester)
+- [x] 13a — UI: commit failures breadcrumb, not crash + soft-lock
+- [x] 13b — UI: expand becomes an Edit-mode key; remove selection-dependent slash cmds
+- [x] 13c — Test: a committed K's summary reaches the provider on the next turn
+- [x] 13d — UI: commit/close must not orphan a running draft worker
+- [x] 13e — UI: range extension clamps at the list edges, not wrap
+- [x] 13f — UI: `/new` and `/resume` reset compression UI state
+- [x] 13g — Core: resume keeps the title; rewind rejects off-line nodes
+- [x] 13h — UI: deep-dive/editor interaction hardening (Esc order, seam bypass)
+- [x] 13i — Polish: editor footer hints, blank-prompt fallback, `range_selection`
 
-- [ ] **3. Core: `commit_compression` + the `streaming` flag (H2)** _(deps: 1, 2)_ —
-      `ConversationCore.commit_compression(start_id, end_id, summary, prompt="") ->
-      Node`: validate via a private `_validate_compress_range(start_id, end_id)`
-      shared with task 5 — the ids delimit a contiguous slice of `current_view()`;
-      **no node in the slice is `node_type=="compression"`** (Q7 flat guard); **the
-      slice's last node is the active leaf** (the 3a tip guard — removed in task 22,
-      keep it a distinct, deletable check); **raise while `self.streaming`**. Add the
-      `streaming` read-only property: a private flag set True at `stream()` entry
-      (`conversation.py:311`) and cleared in a `finally`. Mutation (pure, no AI —
-      Q3): create K via `Node.compression` (meta range = the slice ids in order, H1),
-      add to `_graph` directly, set `compressed_into=K.id` on each slice node,
-      `persist()`, return K. `ValueError` on any validation failure. _Acceptance:_
-      code-blind tests: view shows K after commit; save→reload resolves identically
-      (K + pointers round-trip — storage already persists them); mid-range (non-tip)
-      rejected; K-in-range rejected; commit during a blocked stream raises (blocking
-      provider + task-cancel pattern); `persist` passes the full graph (children
-      survive). `scripts/check.sh` green.
+**Phase 3b — middle compression + context transparency**
+- [x] 14 — Core: `created_seq` column + migration
+- [x] 15 — Core: event-enumeration resolution (H3)
+- [x] 16 — Core: `context_at_generation` + drift predicate
+- [x] 17 — Core: `ctx_hash` per-turn tripwire (H4)
+- [x] 18 — Config: `compression.default_prompt` + `ui.show_context_drift` (Q13)
+- [x] 19 — UI: drift indicator (`Δ`)
+- [x] 20 — UI: diff view overview (full-screen)
+- [x] 21 — UI: diff drill-down
+- [x] 22 — Enable middle compression (delete the 3a tip guard)
+- [x] 23 — Sprint 3 end-to-end verification (qa-tester)
 
-- [ ] **4. Core: `expand_compression`** _(deps: 3)_ —
-      `ConversationCore.expand_compression(k_id) -> None`: validate K exists, is
-      `node_type=="compression"`, is **active** (some node has `compressed_into ==
-      k_id`), and not `self.streaming`. Mutation (H1 + H5 — 3a writes the 3b-shaped
-      record): append an **E event node** to `_graph`: `node_type="expand"`,
-      `role="expand"` (must stay `goes_to_model() == False` and never render),
-      `prev_id=None`, `conversation_id` set (it must persist), meta per canonical
-      keys (`anchor` = current `_active_leaf_id`); clear `compressed_into` on K's
-      children (read them from `K.meta["range"]`); `persist()`. K itself **stays**
-      in the graph (invisible orphan — never row-deleted, ADR-0016 A#3 §1).
-      _Acceptance:_ code-blind tests: view restores the children in place; E
-      round-trips with target+anchor; K survives reload; re-compressing an
-      overlapping range afterwards creates a valid new K′; expanding an already
-      expanded/unknown K raises; streaming guard raises. `scripts/check.sh` green.
+**Phase 3c — follow-ups from the task-23 end-to-end pass**
+- [x] 24 — Gate `g d` diff-view on `ui.show_context_drift`
+- [x] 25 — Fix drift `Δ` marker vs. weight-% layout
+- [x] 26 — QA tooling: surface Sprint 3 state in `snapshot.py::render()`
 
-- [ ] **5. Core: `draft_compression`** _(deps: 1, 3)_ —
-      `ConversationCore.draft_compression(start_id, end_id, prompt=None) ->
-      AsyncIterator[str]`: same `_validate_compress_range` (incl. streaming guard);
-      render **only the range** via `build_context(range_nodes,
-      self._workspace.read_file)` — the Q10c invariant: each node contributes its
-      model-facing form (raw import → full file; summarized content → its summary);
-      append one final user message carrying the instruction (`prompt` or the
-      DEFAULT_COMPRESSION_PROMPT core constant — exact framing is implementer's
-      choice, record it in PROGRESS.md); stream via `self._provider.stream(messages,
-      self.model, <no-op on_usage>)` so `last_usage`/`calibration`/
-      `usage_generation` are untouched (Q10b — this is a meta-operation, never a
-      gauge anchor). Cancellation-safe: commits nothing, mutates no state (Q3).
-      _Acceptance:_ code-blind tests: yields the provider's tokens; after a full
-      draft, `usage_generation`/`calibration`/`last_usage` unchanged; custom `prompt`
-      reaches the provider's messages (recording provider); range rendered via
-      `build_context` (an import node in range contributes file content, not its
-      "Included:" label); invalid range/streaming raises before any provider call.
-      `scripts/check.sh` green.
+**Phase 3d — hardening from the post-sprint review**
+- [x] 27 — UI: diff view inherits the deep-dive read-only gates
+- [x] 28 — Core: close the H2 submit→first-tick window; add UI commit stream guard
+- [x] 29 — Test: extend the ctx_hash oracle to middle compression
+- [x] 30 — UI: diff/deep-dive exclusivity + cursor restore after a nested diff
+- [x] 31 — UI: gate the remaining direct `add_node` appenders
+- [x] 32 — Perf: cache the per-refresh drift computation
 
-- [ ] **6. UI: range selection (`v` anchor + extend)** _(deps: none hard)_ — Edit-mode
-      vim-style selection (Q5): `v` (new `ChatApp.BINDINGS` entry, `app.py:45-57`)
-      anchors at the selected node; existing `action_up`/`action_down`
-      (`app.py:247,259`) extend the **contiguous** selection between anchor and
-      cursor while the anchor is set; `Esc` clears the anchor first (second Esc =
-      existing behavior, `app.py:149`); entering Insert clears it. New
-      `MessageWidget.set_range_selected(bool)` toggling a `.range-selected` CSS class
-      (pattern: `set_selected`, `message_list.py:70-74`; style it in the widget CSS).
-      Footer: `_HINTS["edit"]` gains the hint. `describe_state()` gains
-      `"range_selection": [<node ids in view order>]` (empty when inactive) — the
-      Pilot floor. _Acceptance:_ Pilot test: enter Edit, press `v`,`down`,`down` →
-      `range_selection` has 3 contiguous ids and the widgets carry
-      `.range-selected`; `Esc` empties it and stays in Edit; single node (`v` alone)
-      = range of one. `scripts/check.sh` green.
+### Phase 3e — UI polish + review-verified fixes (2026-07-04)
 
-- [ ] **7. UI: draft editor opens/edits/cancels** _(deps: 5, 6)_ — new
-      `CompressionEditor` (e.g. `ctx/ui/widgets/compression_editor.py`): a left-pane
-      **2-split** (Q4) — Top: editable `TextArea` prefilled with
-      DEFAULT_COMPRESSION_PROMPT; Bottom: editable `TextArea`, empty; **no Center**
-      (the originals stay highlighted on the right). Shown in place of the
-      `DetailInspector` (the inspector's hidden-subtree compose pattern,
-      `detail_inspector.py:93-107`, is prior art; sibling widget or inspector mode —
-      implementer's choice). Triggers: `c` in Edit mode acts on the active range
-      selection (no anchor → range-of-one on the selected node, Q5); `/compress`
-      (add to `InputBar.COMMANDS`, `input_bar.py:17`, + a branch in
-      `on_input_bar_submitted`, `app.py:542`) requires an active selection, else a
-      system breadcrumb "Select a range first: v in Edit mode". **No auto-stream**
-      (Q4): opening shows prompt + empty output only. `Esc` cancels for free —
-      editor closes, inspector restored, selection preserved. No commit/draft keys
-      yet (tasks 8–9). `describe_state()` gains `"compression_editor": {"open":
-      bool, "prompt": str, "output": str}`. _Acceptance:_ Pilot: select a range,
-      press `c` → editor open with the prefilled default prompt and empty output;
-      `/compress` with no selection → breadcrumb, editor closed; `Esc` restores the
-      inspector and keeps the selection. `scripts/check.sh` green.
+> Filed from a second review pass (8-angle code review of `develop...feat/compression`
+> + a `qa-tester` behavioral pass driving the real TUI) plus first-hand user testing of
+> the compression UI. Every item was verified either by reading (correctness bugs) or by
+> screenshot/snapshot in the running app (all UI items CONFIRMED-BROKEN). Two design
+> decisions are settled and must not be re-litigated: **the diff view is a full-screen,
+> two-pane replacement** (left = context as-of generation, right = now), both panes
+> rendering **the same compact two-line node rows as the main conversation** — never
+> plain-text dumps (user, 2026-07-04); and **`g d` stays overloaded** (deep-dive a K /
+> diff a drifted assistant turn) — no change to its dispatch. Tasks 33–35 are
+> correctness (land before merge); 36 is the keystone the diff/inspector rework builds
+> on; keep the order. NOT re-filed here (already recorded above / deferred): the
+> `_drift_signature` active-line collision (latent until S4 branching) and the
+> `expand_compression` unguarded `k.meta["range"]` KeyError (§"NOT filed" item (d)).
 
-- [ ] **8. UI: Commit (`Ctrl+S`) + K rendering in the message list** _(deps: 3, 7)_ —
-      `Ctrl+S` in the editor with non-empty Bottom calls
-      `core.commit_compression(start, end, summary=Bottom, prompt="")` (`""` because
-      no draft ran yet — task 9 switches it to the last-drafted prompt), closes the
-      editor, clears the selection, rebuilds the message list (children out, one K
-      widget in — the `_handle_resume_command` rebuild path, `app.py:625-649`, is
-      prior art), and calls `_refresh_token_ui()`. Empty Bottom → breadcrumb, no
-      commit. K rendering: add a `"compression"` color to `_DEFAULTS["colors"]`
-      (`ctx/core/config.py:13-38`) + the role branch in `MessageWidget.on_mount`
-      (`message_list.py:55-59`), an entry in `_SIDE`/truncation keys
-      (`message_list.py:21`); weight % needs nothing (S1 counts via
-      `goes_to_model()`; folded children leave the view → 0 automatically, Q9).
-      _Acceptance:_ Pilot end-to-end **manual** compression: select a tip range, `c`,
-      type a summary in Bottom, `Ctrl+S` → `describe_state` nodes show one
-      `node_type=="compression"` node replacing the range with numeric `weight_pct`,
-      `K.meta["prompt"] == ""`; a second app instance on the same DB shows the same
-      resolved view (round-trip). Then qa-tester (verify-feature) confirms the manual
-      flow on the harness. `scripts/check.sh` green.
+- [x] 33 — Core: fix the stuck `_streaming` flag on a pre-stream failure
+- [x] 34 — Core: `build_context` never emits two adjacent same-role messages
+- [x] 35 — UI: reset `_last_drafted_prompt` on draft cancel/failure
+- [x] 36 — UI: extract a shared compact message-row renderer (`MessageRow`)
+- [x] 37 — UI: rebuild the diff view as a full-screen two-pane node diff
+- [x] 38 — UI: inspector splits render compact rows + visible dividers
+- [x] 39 — UI: compression node color = context color
+- [x] 40 — UI: blank-line separation before a compression node
+- [x] 41 — UI: range selection uses hover styling, bridged across gaps
+- [x] 42 — UI: transient hints leave the conversation graph
+- [x] 43 — UI: no weight on non-model nodes; silent invalid keys; contextual footer
+- [x] 44 — UI: incremental message-list reconcile (kill the refresh flash)
 
-- [ ] **9. UI: draft streaming (`Ctrl+D`)** _(deps: 5, 7, 8)_ — `Ctrl+D` in the
-      editor runs a `@work` worker consuming `core.draft_compression(start, end,
-      prompt=<Top text>)` into Bottom (clear first — **re-draft overwrites**, Q4);
-      ignore further `Ctrl+D` while a draft streams; `Esc` during a draft cancels the
-      worker and keeps the editor open (second `Esc` closes). Track the last-drafted
-      prompt; `Ctrl+S` now passes it as `prompt` (still `""` if the user never
-      drafted — manual mode, Q4). _Acceptance:_ Pilot with a canned provider: `c` →
-      `Ctrl+D` → Bottom fills with the canned tokens; `usage_generation`/
-      `calibration` unchanged (Q10b assert); edit Top, `Ctrl+D` again → Bottom
-      overwritten; `Ctrl+S` → committed `K.meta["prompt"]` equals the drafted Top
-      text. `scripts/check.sh` green.
+- [x] 45 — Verify the polished compression UI end-to-end (qa-tester + visual)
 
-- [ ] **10. UI: committed-K inspector 3-split** _(deps: 8)_ — first a small core
-      accessor: `ConversationCore.folded_children(k_id) -> list[Node]` (ordered per
-      `K.meta["range"]`, from `_graph`; `[]` for unknown ids — children are not in
-      `current_view()`, Q8). Then: cursor on a K node → the left inspector shows the
-      3-split (Q4): Top = `K.meta["prompt"]` read-only, **hidden when empty** (the
-      existing empty-state rule); Center = the folded originals, read-only,
-      scrollable; Bottom = the summary (`K.content`). Extend `NodeView`
-      (`detail_inspector.py:23-31`) + `_node_view()` (`app.py:196-205`) as needed;
-      the `#detail-context` 3-split (`detail_inspector.py:47-51,93-107`) is the
-      pattern. _Acceptance:_ Pilot: select a drafted K → inspector state shows
-      prompt/originals/summary populated; a manual K (empty prompt) hides Top;
-      `1`/`2`/`3` maximize still works on the splits. Then qa-tester confirms
-      browsing. `scripts/check.sh` green.
+### Phase 3f — post-loop bug fixes (2026-07-07)
 
-- [ ] **11. UI: `/expand`** _(deps: 4, 8)_ — add `/expand` to `InputBar.COMMANDS` +
-      dispatch (`app.py:542`): acts on the currently selected node; if it's a K →
-      `core.expand_compression(k.id)`, rebuild the list (children back in place,
-      selection moved to the first restored child — record the choice), else a
-      breadcrumb "Not a compression node". _Acceptance:_ Pilot: compress a tip range,
-      `/expand` → `describe_state` shows the children back and no K in the view; the
-      view survives an app restart (E + cleared pointers round-trip); a recording
-      provider on the next turn receives the children verbatim and **no**
-      `<conversation_summary>`. qa-tester confirms compress→expand→re-compress.
-      `scripts/check.sh` green.
+> Filed from first-hand user testing after the Sprint 3 loop. Three bugs, settled by
+> a grill: (2) the compression **draft** produced nonsense ("you haven't provided the
+> nodes to compress yet") because it replayed *only* the range as bare turns + a
+> trailing instruction — so a range that leads with an assistant turn reads as the
+> model's own words plus a naked meta-request. **Read ADR-0016 Amendment #6** before
+> tasks 46–48: the draft is reframed to send the editable prompt as the **system**
+> message and the **whole active-line** transcript (`current_view`, model-facing
+> forms) as one user message with the range wrapped in `<compress_this>…</compress_this>`
+> markers. This **overrides Q10c** and **supersedes A#1's exact default-prompt text**
+> (both settled — do not re-litigate). (1) is a visual selection-bar bug; (3) is
+> VSCode-style synced scrolling in the diff view. Order is priority (2 → 1 → 3);
+> deps noted inline.
 
-- [ ] **12. UI: deep-dive (`g d` / `Ctrl+o`)** _(deps: 10)_ — implement a minimal
-      key-chord buffer (no `on_key` exists in `app.py` yet): in Edit mode, `g` arms a
-      pending chord, `d` completes it (anything else cancels). On a K node: replace
-      the right-pane message list content with the folded children (**full-view
-      replacement**, Q8) and show a **breadcrumb bar** ("Chat › K…") — built as a
-      general **stack** (Q7: nesting-ready; 3a depth stays 1). Inside: `up`/`down`
-      cursor + inspector work; **read-only** — `v`/`c`//`compress`//`expand` are
-      no-ops; children weights render **"not in context"** instead of a % (Q9).
-      `Ctrl+o` pops one level (top pop restores the live conversation). `i` exits
-      the whole stack: live list restored, left pane back to the tip, input focused,
-      appends go to the **active tip** (deep-dive never moves it). Ephemeral — no
-      persistence. `describe_state()` gains `"deep_dive": {"active": bool,
-      "breadcrumb": [str, ...]}`. Footer hints for the deep-dive state. _Acceptance:_
-      Pilot: commit a K → `g`,`d` → `deep_dive.active` with the children as the
-      visible nodes and breadcrumb of length 2; `Ctrl+o` → live view; `g`,`d` then
-      `i` → Insert mode, live view, input focused. qa-tester walks the flow.
-      `scripts/check.sh` green.
+- [x] 46 — Core: `build_compression_transcript` helper (full spec in `PRD-done.md`)
+- [x] 47 — Core+config: reframe `draft_compression` + rewrite the default prompt (full spec in `PRD-done.md`)
+- [x] 48 — UI: drop the zero-token interrupted node on cancel (full spec in `PRD-done.md`)
 
-- [ ] **13. Phase 3a end-to-end verification (qa-tester, verify-feature)** _(deps:
-      1–12)_ — no code changes. Drive the harness through: (1) two turns → `v`-select
-      a suffix ending at the tip → `c` → `Ctrl+D` (canned draft) → edit Bottom →
-      `Ctrl+S` → K visible with numeric weight, children gone; (2) next turn → the
-      recording provider's captured messages contain `<conversation_summary>` with
-      K's content and none of the children's content; (3) a range NOT ending at the
-      tip → `c`/`/compress` rejected with a breadcrumb (tip guard); (4) `/expand` →
-      children restored, next turn's context verbatim again; (5) `g d` deep-dive →
-      children + breadcrumb, `Ctrl+o` back, `i` exits to Insert; (6) restart the app
-      → compressed state persists. `textual_check_errors` clean throughout.
-      _Acceptance:_ qa-tester reports PASS on all checkpoints. Defects become new
-      `- [ ]` tasks at the top of Phase 3b; do not patch inside this task.
+- [x] 49 — UI (visual): colored left bar on an inner `MessageRow` wrapper (full spec in `PRD-done.md`)
 
-### Phase 3b — middle compression + context transparency
+- [x] 50 — **UI (visual): `DiffView` equal-height aligned regions** (full spec in `PRD-done.md`)
 
-- [ ] **14. Core: `created_seq` column + migration** _(deps: none in 3b)_ — add
-      `created_seq: int = 0` to `Node` (`ctx/models/nodes.py`); persist it: column in
-      `_SCHEMA` + `_migrate` `ADD COLUMN` gated on the column being absent (the S2
-      pattern, `storage.py:76-102`), with a one-time backfill assigning sequential
-      ints **per conversation in rowid order** (valid: insertion order round-trips
-      through the full-replace save — ADR-0016 A#3 §1); `save()`/`load()` carry it.
-      `ConversationCore` assigns it at creation for **every** node entering `_graph`
-      (line nodes, K, E): next = max over `_all_nodes()` + 1 (H6 — all nodes incl.
-      folded children, abandoned tails, event nodes; never the view), counter
-      initialized on `resume_conversation` from the loaded max, monotonic, **never
-      reassigned** (A#2). `StoragePort` signatures unchanged → `SaveCountingStorage`
-      untouched (verify). _Acceptance:_ code-blind tests: a raw pre-3b DB fixture
-      (nodes without `created_seq`, the `conversation.md` migration-fixture pattern)
-      migrates to strictly-increasing seqs in rowid order; new nodes after a rewind
-      get max+1 (abandoned tail counted); K/E get seqs; round-trip preserves values;
-      migration runs once (a second `init()` doesn't rewrite). `scripts/check.sh`
-      green.
-
-- [ ] **15. Core: event-enumeration resolution (H3)** _(deps: 14)_ — swap
-      `current_view()`'s fold step to the A#2/Q14 **now-rule** behind the same
-      signature: walk `prev_id` for the raw line `L`; a compression K applies iff
-      **no E targets it** (`E.meta["target"] == K.id`) **and** `K.meta["range"]` ⊆
-      `L`; replace each applying K's run with K. `folded_children` reads
-      `K.meta["range"]` (task 10 already does — confirm). `compressed_into` is still
-      **written** (commit sets, expand clears — vestigial DB debuggability) but **no
-      runtime code path reads it anymore** (ADR-0016 A#3 §3). All existing tests must
-      pass unchanged — same observable behavior. _Acceptance:_ code-blind tests: a
-      stale `compressed_into` pointer planted with no matching K range/event does
-      NOT fold (resolution ignores pointers); after expand + re-compress of an
-      overlapping range, K′ folds and the old K never reappears; `grep -rn
-      "compressed_into" ctx/` shows write sites only (no reads in
-      resolution/UI paths); full suite green. `scripts/check.sh` green.
-
-- [ ] **16. Core: `context_at_generation` + drift predicate** _(deps: 14, 15)_ — new
-      framework-free module (e.g. `ctx/core/reconstruction.py`), pure functions over
-      a node list (Q11 — read-only, lazy, never on the live pipeline):
-      `context_at_generation(all_nodes, node_id) -> list[Node]` — walk `prev_id` for
-      T's **strict ancestors** `L`, then apply every K with `created_seq(K) <
-      created_seq(T)`, range ⊆ `L`, and no E targeting K with `created_seq(E) <
-      created_seq(T)` (the A#2 rule); `now_prefix(all_nodes, node_id)` — the same
-      prefix under the task-15 now-rule; `has_drift(all_nodes, node_id) -> bool` —
-      the two differ. _Acceptance:_ code-blind contract tests: a turn generated
-      before a compression sees the range verbatim, one after sees K; a turn that
-      saw K then `:expand`-ed after it drifts in the reverse direction (left K,
-      right verbatim); expand→re-compress: each turn sees exactly the K active at
-      its seq; a K whose range ⊄ L (abandoned-tail case) never applies; no-event
-      conversations never drift. `scripts/check.sh` green.
-
-- [ ] **17. Core: `ctx_hash` (H4)** _(deps: 16)_ — a pure canonical hasher (e.g. in
-      the task-16 module): `hash_context(messages) -> str` = sha256 of
-      `json.dumps(messages, sort_keys=True, ensure_ascii=False)`. In
-      `ConversationCore.stream` (`conversation.py:321-323`), right after
-      `build_context`, set `assistant_node.meta["ctx_hash"] = hash_context(messages)`
-      — written once at the real generation moment, immutable after (ADR-0016 A#3
-      §4; derivation stays the only truth — the hash is a tripwire). _Acceptance:_
-      the **oracle suite** (code-blind): scripted sequences (turns → tip compress →
-      turns → expand → turns → re-compress) assert, for **every** assistant node T,
-      `hash_context(build_context(context_at_generation(all, T.id), read_file)) ==
-      T.meta["ctx_hash"]`; a turn with no events trivially matches; if any existing
-      node-equality test trips on the new meta key, adapt it as a deliberate change
-      recorded in PROGRESS.md. `scripts/check.sh` green.
-
-- [ ] **18. Config: `compression.default_prompt` + `ui.show_context_drift` (Q13)**
-      _(deps: 7)_ — `ctx/core/config.py`: new top-level `"compression"` section in
-      `_DEFAULTS` with `"default_prompt": <the exact preserve-info text>` plus a
-      merge-guard block mirroring the `"ui"`/`"colors"` ones (`config.py:61-83`);
-      `"show_context_drift": True` under `ui` with bool coercion. Single source: the
-      core constant becomes a read of the config default; the editor's Top prefill
-      (task 7) reads `get_config()["compression"]["default_prompt"]`. Overriding =
-      editing the JSON by hand (no in-app editor — deferred). _Acceptance:_ extend
-      `tests/test_config.py` + `tests/specs/config.md` (defaults present; a user
-      override of `default_prompt` is preserved; invalid `show_context_drift`
-      coerces to True); Pilot: with a patched user config, the editor opens
-      prefilled with the override. `scripts/check.sh` green.
-
-- [ ] **19. UI: drift indicator** _(deps: 16, 18)_ — expose the graph read-only:
-      `ConversationCore.all_nodes() -> list[Node]` (public accessor over
-      `_all_nodes()`). In `_refresh_token_ui()` (`app.py:402-417`) compute, for each
-      **assistant** node in the view, `reconstruction.has_drift(...)`, gated by
-      `get_config()["ui"]["show_context_drift"]`; new
-      `MessageWidget.set_drift(bool)` renders a **subtle** marker (a single glyph
-      next to the weight `Static` — many turns can legitimately drift, Q12/A#1;
-      keep it quiet). `describe_state()` nodes gain `"drift": bool`. _Acceptance:_
-      Pilot: U1,A1 → compress `[U1,A1]` (tip range) → U2,A2 (A2 sees K) →
-      `/expand` → A2 has `drift: True`, A1 `False`; with `show_context_drift:
-      false` all `False`. qa-tester spot-checks the marker. `scripts/check.sh`
-      green.
-
-- [ ] **20. UI: diff view overview (full-screen)** _(deps: 12, 17, 19)_ — extend the
-      task-12 chord: `g d` on an **assistant node with drift** opens the context
-      diff (on a K it still deep-dives — one family, one navigation stack, Q12);
-      breadcrumb pushes "Diff › …". Full right-pane replacement showing **block
-      alignment by node id** (H6 — shared ids are byte-identical by construction;
-      never diff content): left = `context_at_generation(T)`, right =
-      `now_prefix(T)`; contiguous changed regions marked (either direction: verbatim
-      run ⟷ K, or many-to-many after expand+re-compress); `up`/`down` move a region
-      cursor. On open, verify H4: recompute
-      `hash_context(build_context(left, read_file))` vs `T.meta["ctx_hash"]` —
-      mismatch (or missing hash on a pre-3b turn) shows a "reconstruction may be
-      inexact" banner instead of lying (A#3 §4). `Esc`/`Ctrl+o` pop one level; `i`
-      exits fully (family semantics). `describe_state()` gains `"diff_view":
-      {"open": bool, "regions": [{"left": [ids], "right": [ids]}], "warning":
-      bool}`. Note: pre-S5, import blocks render the live file on **both** sides —
-      expected (Q12). _Acceptance:_ Pilot: build the task-19 drift → `g d` on A2 →
-      `diff_view.open` with one region `left=[K.id]`, `right=[U1.id, A1.id]`
-      (expand direction) and `warning: False`; tamper `ctx_hash` → `warning: True`;
-      `Ctrl+o` restores the live view. qa-tester walks it. `scripts/check.sh`
-      green.
-
-- [ ] **21. UI: diff drill-down** _(deps: 20)_ — `Enter` on a marked region opens it
-      full: left blocks rendered in full vs right blocks (regions are
-      **many-to-many** block sequences, H6 — e.g. `[K]` ⟷ `[B, K′, E]`); pushes a
-      breadcrumb level; `Ctrl+o` returns to the overview; `i` exits all the way.
-      `describe_state().diff_view` gains `"drill": {"left": [...], "right": [...]}
-      | None`. _Acceptance:_ Pilot: from the task-20 state, `Enter` on the region →
-      drill populated with K's summary text on one side and the verbatim contents
-      on the other; `Ctrl+o` → back at the overview with regions intact. qa-tester
-      confirms navigation. `scripts/check.sh` green.
-
-- [ ] **22. Enable middle compression (delete the 3a tip guard)** _(deps: 15, 16,
-      17, 20)_ — remove the last-node-is-active-leaf check from
-      `_validate_compress_range` (commit **and** draft; the Q7 no-K-in-range and H2
-      streaming guards stay). The reconstruction path now carries the honesty the
-      guard provided (Q5: "3b replaces the guard with the reconstruction path, not
-      merely deletes it"). Extend the task-17 oracle suite with a middle sequence:
-      U1,A1,U2,A2 → compress `[U1,A1]` → U3,A3 → oracle green for all four
-      assistant turns; A2 drifts (saw verbatim, now K), A3 doesn't (born seeing K).
-      _Acceptance:_ pytest: middle commit succeeds; extended oracle green; Pilot:
-      middle compress → A2 `drift: True`, diff region `left=[U1,A1]` /
-      `right=[K]`; the next turn's recorded context contains the summary, not the
-      children. qa-tester: middle-compress a continued conversation, later turns
-      read coherently, the earlier turn's diff shows what it saw.
-      `scripts/check.sh` green.
-
-- [ ] **23. Sprint 3 end-to-end verification (qa-tester, verify-feature)** _(deps:
-      all)_ — no code changes. Full brief on the harness: (1) config-overridden
-      default prompt reaches the editor prefill; (2) tip compress via draft→edit→
-      commit; deep-dive + `Ctrl+o` + `i`; (3) middle compress on a continued
-      conversation → later turns coherent; drift markers appear (and disappear with
-      `show_context_drift: false`); (4) diff overview + drill-down in **both**
-      directions (post-compression drift and post-expand drift), no warning banner
-      on intact data; (5) expand → re-compress an overlapping range; (6) restart →
-      everything persists (K, E, seqs, hashes); (7) `textual_check_errors` clean
-      throughout. _Acceptance:_ qa-tester reports PASS on all checkpoints. Defects
-      become new `- [ ]` tasks; do not patch inside this task.
+- [x] 51 — UI: `DiffView` locked bidirectional scroll + region-nav scrolls both (full spec in `PRD-done.md`)
 
 ## Out of scope
 - **Nested compression** (compressing a range containing a K) — Q7: the flat guard
@@ -424,8 +191,13 @@ Dependencies noted; every prerequisite sits above its dependent.
 - **Import snapshots / source-file drift in the diff** (S5) — pre-S5 the diff renders
   imports live on both sides; the `ctx_hash` warning is the only drift signal. Do not
   build snapshot storage.
-- **A colon-command (`:`) input mode** — `:compress`/`:expand` map to slash commands.
+- **A colon-command (`:`) input mode** — the roadmap's `:compress`/`:expand` map to
+  Edit-mode keys (`c` / `x`), NOT slash commands (revised 2026-07-03, task 13b).
 - **In-app config editing** — `compression.default_prompt` is hand-edited JSON.
+- **`Ctrl+C` copies instead of cancelling while a TextArea/Input has focus** (the
+  footer's "^C Cancel" is false there — Textual's TextArea binds ctrl+c to copy).
+  Pre-existing for the InputBar, more visible with the editor; known + deferred to a
+  future keybinding pass (review 2026-07-03).
 - **RAG/semantic anything**; `created_seq` before task 14; edits to
   `docs/Sprint Roadmap.md`; the `mutants/` tree; `main`/`develop`; `uv.lock` by hand;
   committing `.ctx/`/`.env`.

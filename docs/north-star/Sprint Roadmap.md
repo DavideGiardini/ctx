@@ -1,8 +1,17 @@
+> **North star — not the current plan (parked 2026-07-11, ADR-0017).** This
+> roadmap targeted the full ctx Product Concept; the product actually being
+> built is **ctx0** — see `docs/ctx0_Product_Concept.md` and `docs/ctx0
+> Roadmap.md`. This file is deliberately kept, unedited: its settled design
+> grills (S3 Q1–Q14/H1–H6, S4 B1–B13, the S5 import primitive) are decision
+> records that ctx0 work reuses — e.g. ctx0's `import(file, prompt)` builds on
+> the B4 verbatim/summarize modes and S5's content-on-node snapshots. Consult
+> it during planning; do not schedule its sprints.
+
 # ctx — Sprint Roadmap to the Product Concept
 
-> Living planning doc. We refine it sprint by sprint. Sprints are one level above
+> Living planning doc (frozen — see banner above). Sprints are one level above
 > Ralph tasks: each is a coherent slice of capability, not a single-session task.
-> See `docs/Product Concept.md` for the target vision.
+> See `north-star/Product Concept.md` for the target vision.
 
 ## Context
 
@@ -249,17 +258,19 @@ green.
 
 ### Sprint 4 — Branching (§5)  *(was S5; sub-chats moved to S5 — see 2026-07-02 grill)*
 **Goal:** Branch from any node (inline tabs at the fork); switch the active line between
-branches. Indexed/not-indexed as an orthogonal per-conversation archive flag.
+branches; the reversibility verbs (rewind / edit-forks / delete-with-session-undo) live here.
 **Sub-chat re-import is no longer here:** a sub-chat is `branch ∘ import`, and the import
 primitive lives in S5, so sub-chats land there (see the 2026-07-02 re-cut in the parking
-lot).
+lot). **Indexing is no longer here either** — it turned out to mean *automatic-import scope
+control* (§3.1 kin, S6), not conversation archiving, and moved to Future Sprints (2026-07-02).
 **Approach:** Branches are the sibling `prev_id` edges already in the S2 graph;
 `current_view()` follows `active_leaf_id`. UI renders inline `Branch1/Branch2` tabs at the
-fork and lets the user switch the active line. Rewind/edit/expand all surface here as the
-operations that create or move between branches (expand is scoped **branch-local** via
-`E.meta.anchor`, H5). Add an `indexed` flag on the conversation row for archive/hide.
-**Depends on:** S2 (edges). **Size:** L. **Done:** branch, switch tabs, rewind-edit forks
-a branch; archive via un-index; qa-tester + `check.sh` green.
+fork and lets the user switch the active line. Rewind/edit/delete/expand all surface here as
+the Edit-mode keybindings that create or move between branches (expand is scoped
+**branch-local** via `E.meta.anchor`, H5; delete is backed by a single-step session undo).
+**Depends on:** S2 (edges). **Size:** L. **Done:** branch (explicit `b` + incidental), switch
+tabs (`gt`/`gT`), rewind-edit forks a branch, delete-a-branch with undo; qa-tester +
+`check.sh` green.
 
 ### Sprint 5 — Import primitive: files & sub-chats (§3.3, §5)  *(was S6; now owns sub-chats)*
 **Goal:** A **source-agnostic import primitive** — materialize *external* content as an
@@ -732,14 +743,103 @@ a node selects it in the main view.
     the existing `Node` carries both. S5's genuinely new work is **file** snapshotting:
     raw content + a source **hash** for staleness (`~`) + `gd`/`gD`. Staleness-vs-the-
     source-branch (a sub-chat's branch grew after import) is deferrable polish.
-  - **Indexing** stays in **S4** as conversation-management (orthogonal per-conversation
-    flag); a coin-flip vs S5.
-  - **Still open (carried into the S4 grill, unchanged):** (a) abandoned-tail after rewind
-    = visible branch or discarded; (b) exact **branch-local expand** ancestry rule via
-    `E.meta.anchor` (H5); (c) whole-branch hard-delete cleanup for `K.meta` ranges
-    referencing deleted node ids. Plus new: branch **creation gestures**, **tab UI /
-    switching keybindings**, branch **naming/ordering**, and how **edit-a-past-message**
-    forks. To grill next.
+  - **[B7] Rewind verbs & session-scoped delete-undo (resolves carried-open (a)).**
+    Vim-style: distinct verbs for distinct intents, not one fixed rewind behavior.
+    - **Plain rewind = non-destructive** (the safe, frequent default): repoint the tip; the
+      abandoned tail is preserved, becomes a visible `Branch2` tab once you diverge, and is
+      reachable by a forward-move before it forks.
+    - **Rewind + diverge** = rewind then type (no separate verb); the old tail auto-forks.
+    - **Delete tail/branch = the sanctioned whole-branch hard delete** (ADR-0016's one true
+      row-deletion), applied to the abandoned tail — a **fast verb, no confirmation**,
+      because it is backed by a **single-step, session-scoped undo**. (No confirmation
+      precisely *because* it's undoable; a confirm is what you reach for when you can't
+      undo.)
+    - **Why the undo is cheap (and not the rejected op-log):** the graph is fully in memory
+      and `save()` is full-replace, so delete = pop the tail subgraph into a one-slot stash
+      `_last_deleted` + `save()`; undo = re-insert + restore `active_leaf_id` + `save()`.
+      ~a dozen lines, one level, this-op-only. It restores `K.meta`/import references
+      intact, so it also covers carried-open (c)'s *undo* path.
+    - **Explicitly NOT built:** durable/cross-restart undo (= the trash/soft-delete
+      ADR-0016 defers as a future add) and any general multi-op undo stack (= the rejected
+      subsystem).
+  - **[B8] Edit-a-past-message forks (pins ADR-0016's "edit → fork").** Editing a message
+    on the active line creates a **sibling** `M'` (`prev_id` = the original's `prev_id`),
+    moves the tip to `M'`, and preserves the old tail as a branch (the dependent nodes after
+    the original don't carry over — a new line is the only coherent outcome). **Scope for
+    S4:** editing is **restricted to user messages**, and a user-message edit
+    **auto-regenerates** the assistant reply on confirm (mainstream edit-&-resubmit UX).
+    **Deferred:** editing *assistant* messages (author/correct the model's words) — fork
+    mechanics are identical when picked up, only without auto-regeneration. Editing an
+    import (= re-import, S5) or a `K` (= re-compress, S3) are their own ops, not this path.
+  - **[B9] One divergence primitive, three front-doors.** The single primitive is
+    "diverge from node `N`" = create a new child of `N`, make it the active tip. Doors:
+    (1) rewind-then-type, (2) edit-a-user-message (B8), and (3) an **explicit `branch`
+    verb** (Edit mode, cursor on `N`) — the *deliberate* door, the natural place to name
+    the branch, and the ergonomic entry point for creating a **sub-chat** (a deliberate,
+    findable, nameable branch that S5 re-imports). S4 ships the explicit verb alongside the
+    incidental paths.
+  - **[B10] Tab model & branch keybindings (Edit-mode, not commands).** Branching/rename
+    are **Edit-mode keybindings**, never typed commands (typed `/` commands are Insert-mode
+    only, §7.5/7.6) — the user must cursor to the target node first. The `:branch`/`:rename`
+    phrasing used earlier in this grill was wrong; corrected here.
+    - **Switch:** `gt`/`gT` cycles the tabs at the fork under the cursor.
+    - **Create branch:** `b` on the selected node → new child + switch tip; may open the
+      name popup.
+    - **Rename:** `r` on the fork/tab → opens a small inline **text-entry popup** (the one
+      place typing happens, opened *by a keybinding*) → writes `meta["branch_name"]`.
+    - **Rendering:** a node with ≥2 children is a fork; inline `[Branch1][Branch2]…` tab bar
+      at the fork, active highlighted, active child-line below. Tab shows
+      `meta["branch_name"]` else auto `Branch{n}` (sibling order by `created_seq`).
+    - **Switch target = deterministic latest leaf:** follow the highest-`created_seq` child
+      at each sub-fork down to a leaf (no per-branch memory in schema; a clean additive
+      refinement later).
+    - **Branch identity & naming storage:** a branch = its **entry node** (the fork-child
+      that starts the line; `prev_id` set once, stable forever). Name lives in that node's
+      `meta["branch_name"]` — mutable cosmetic metadata (same class as the conversation
+      title, §5 "manually overridable"); renaming is a plain meta edit, **not** a fork,
+      append-only-safe (labels aren't content, never reach the model).
+    - Keys `b`/`r`/`gt` are placeholders to reconcile against §7.6 before building.
+  - **[B11] Branch-local expand rule (resolves carried-open (b) / H5).** An expand `E`
+    (targeting `K`) applies to a turn `T` **iff `E.meta.anchor ∈ ancestors(T) ∪ {T}`
+    (spatial / branch-local) and `created_seq(E) < created_seq(T)` (temporal).** The spatial
+    clause makes expand branch-local for free from the anchor: an expand on branch A (anchor
+    not in a sibling's ancestry) leaves `K` folded on branch B. The temporal clause preserves
+    honest reconstruction (a turn made before the expand still reconstructs with `K` folded).
+    **Degrades exactly to the linear 3b rule** (A#2) — one line ⇒ anchor always an ancestor ⇒
+    collapses to pure `created_seq`, no conflict with what S3 ships. Now-view = the
+    `T = present` case (anchor ∈ current tip's ancestry). **Guarded by the `ctx_hash` oracle
+    (H4)** — reconstruction bugs here render plausible-wrong panes silently.
+  - **[B12] Hard-delete cleanup rule (resolves carried-open (c)).** Deleting a branch
+    removes the entry node + all forward descendants = set `D`. Governing principle: *delete
+    the closure of `D` over the off-line events that belong **exclusively** to `D`; for
+    references pointing **into** `D` from survivors, keep the survivor and clear the
+    now-dangling pointer* — so no dangling id ever remains in the resolution set.
+    - **Compression `K` whose folded range ⊆ `D`** → deleted with `D` (its summary now
+      describes nothing; every turn that saw it was on `D`). A `K` folding the shared prefix
+      above the fork is **not** in `D` — kept. A folded range can never *straddle* the fork
+      (fork points are always visible nodes; you can't branch inside a folded run), so it
+      lies wholly on one side.
+    - **Expand `E` with `anchor ∈ D` or targeting a deleted `K`** → deleted.
+    - **A surviving import node `I` with `meta.source` pointing into `D`** (e.g. a sub-chat
+      import whose source branch was deleted) → **kept** (content is a self-contained
+      snapshot, still model-valid), with its **dangling source pointer nulled/marked**
+      ("source deleted") — graceful degrade, like a snapshot outliving its file.
+    - **Composes with B7 undo:** the one-slot stash captures the **full closure** — `D` +
+      deleted `K`/`E` + the pre-null value of any cleared import source — so undo restores
+      everything, references intact.
+  - **[B13] Indexing is NOT in S4 — moved to Future Sprints (corrected 2026-07-02).**
+    Initially read as a conversation archive/hide flag; the user corrected it: indexing is
+    **automatic-import scope control** — the fence defining *what the assistant may draw from
+    on its own* (repo analogy: what it's allowed to read unprompted), as opposed to **manual**
+    import, which is always allowed for any supported source. That makes it **access control**
+    (kin to §3.1 Access modes: Isolated / Restricted / Open, S6), not conversation management,
+    and meaningful only once *automatic* import/retrieval exists (S6 + deferred
+    RAG/conversation-import). Pulled from S4; no `indexed` flag ships in S4.
+  - **S4 — ALIGNED (2026-07-02).** B1–B13 settled; no open items remain. S4 is **branching
+    only** (fork + tabs + switch + reversibility verbs); ready to decompose to a Ralph PRD.
+    Cross-cutting dependencies handed forward: the `b`/`r`/`gt` keys reconcile against §7.6;
+    branch-local expand (B11) + hard-delete cleanup (B12) are guarded by the `ctx_hash`
+    oracle (H4) and only bite once S3 compression ships beneath branching.
 - _(Add per-sprint refinement notes below as we go through each one.)_
 
 ---
@@ -777,6 +877,15 @@ is deferred for the whole roadmap). Revisit the trigger noted on each.
   (which is deferred entirely — no retrieval/embeddings, just one known file). Summary is a
   **snapshot** (S5-style, immutable); re-import with a new prompt forks a branch. **Revisit:**
   after S5 (which gives content-on-node), reusing the S3 draft path.
+- **Indexing = automatic-import scope control** *(clarified S4 grill, 2026-07-02)* — a per-
+  conversation (and by extension per-source) flag defining **what the assistant may draw from
+  automatically**, distinct from **manual** import (always allowed for any supported source).
+  The repo analogy: it fences off what the assistant is permitted to read *unprompted*. **Not**
+  conversation archiving/hiding (the initial misreading). This is **access control**, tightly
+  kin to §3.1 KB **Access modes** (Isolated / Restricted / Open) in **S6** — likely a facet of
+  that work rather than standalone. Only meaningful once *automatic* import/retrieval exists.
+  **Revisit:** with S6 (KB access) and the deferred RAG / cross-conversation import; decide
+  then whether it's its own flag or subsumed by the Access-mode policy object.
 - **Header gauge for models with no window metadata** *(decided S1, 2026-06-30)* — the gauge
   renders `--%` when litellm has no `max_input_tokens` for a model (incl. the default
   `openrouter/google/gemma-…`). Per-node **%** is unaffected. **Candidate fixes:** a

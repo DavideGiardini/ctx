@@ -19,6 +19,9 @@ from textual.containers import Container, Vertical, VerticalScroll
 from textual.reactive import reactive
 from textual.widgets import Markdown, Static
 
+from ctx.models.nodes import Node
+from ctx.ui.widgets.message_row import MessageRow
+
 
 @dataclass(frozen=True)
 class NodeView:
@@ -29,6 +32,10 @@ class NodeView:
     prompt: str = ""
     output: str = ""
     source_path: str | None = None
+    # Message-bearing nodes behind the content split (a K's folded children).
+    # When present, the content ("Originals") split renders these as compact
+    # rows (task 38); ``content`` stays the joined text for text-based callers.
+    content_nodes: tuple[Node, ...] = ()
 
 
 class _Split(VerticalScroll):
@@ -50,6 +57,16 @@ _SPLITS = {
     "output": ("#detail-output", "#detail-output-text"),
 }
 
+# Node types rendered as the 3-split view (vs. the standard Markdown view). A
+# compression K reuses the context view's split machinery (browse/maximize/1-2-3)
+# with per-type labels (ADR-0016, task 10): Prompt / Originals / Summary.
+_SPLIT_VIEW_TYPES = ("context", "compression")
+
+_SPLIT_LABELS = {
+    "context": {"prompt": "Prompt", "content": "Content", "output": "Output"},
+    "compression": {"prompt": "Prompt", "content": "Originals", "output": "Summary"},
+}
+
 
 class DetailInspector(Container):
     DEFAULT_CSS = """
@@ -62,6 +79,10 @@ class DetailInspector(Container):
         color: $text-muted;
         text-style: italic;
     }
+    /* A visible divider between the three context splits (task 38). */
+    DetailInspector #detail-prompt { border-bottom: solid $surface; }
+    DetailInspector #detail-content { border-bottom: solid $surface; }
+    DetailInspector #detail-content-rows { height: auto; }
     DetailInspector _Split:focus {
         background: $surface-lighten-1;
     }
@@ -96,13 +117,14 @@ class DetailInspector(Container):
             yield Static("", id="detail-standard-text")
         with Vertical(id="detail-context"):
             with _Split(id="detail-prompt"):
-                yield Static("Prompt", classes="split-label")
+                yield Static("Prompt", classes="split-label", id="detail-prompt-label")
                 yield Static("", id="detail-prompt-text")
             with _Split(id="detail-content"):
-                yield Static("Content", classes="split-label")
+                yield Static("Content", classes="split-label", id="detail-content-label")
                 yield Static("", id="detail-content-text")
+                yield Vertical(id="detail-content-rows")
             with _Split(id="detail-output"):
-                yield Static("Output", classes="split-label")
+                yield Static("Output", classes="split-label", id="detail-output-label")
                 yield Static("", id="detail-output-text")
         yield Static("No node selected.", id="detail-empty")
 
@@ -117,7 +139,7 @@ class DetailInspector(Container):
     def append_stream(self, content: str) -> None:
         """Update the currently-shown node's body in place (per streaming token)
         without reassigning ``node_state`` (which would rebuild the subtree)."""
-        if self.node_state is None or self.node_state.node_type == "context":
+        if self.node_state is None or self.node_state.node_type in _SPLIT_VIEW_TYPES:
             return
         self.query_one("#detail-standard-md", Markdown).update(content)
         box = self.query_one("#detail-standard", VerticalScroll)
@@ -182,7 +204,7 @@ class DetailInspector(Container):
         No-op (returns False) when the split is hidden/absent."""
         ids = _SPLITS.get(which)
         view = self.node_state
-        if not ids or view is None or view.node_type != "context":
+        if not ids or view is None or view.node_type not in _SPLIT_VIEW_TYPES:
             return False
         value = {"prompt": view.prompt, "content": view.content, "output": view.output}[which]
         if not value:
@@ -212,7 +234,11 @@ class DetailInspector(Container):
         """Esc: step back one level. Returns "browse" (un-maximized to Browse) or
         "exit" (caller should refocus the conversation)."""
         view = self.node_state
-        if self.pane_mode == "maximized" and view is not None and view.node_type == "context":
+        if (
+            self.pane_mode == "maximized"
+            and view is not None
+            and view.node_type in _SPLIT_VIEW_TYPES
+        ):
             prev = self._maximized_name
             self._render_context(view)  # restore all visible splits
             visible = self.splits_visible()
@@ -252,7 +278,7 @@ class DetailInspector(Container):
         view = self.node_state
         if view is None:
             return "empty"
-        return "context" if view.node_type == "context" else "standard"
+        return "context" if view.node_type in _SPLIT_VIEW_TYPES else "standard"
 
     # --- rendering -------------------------------------------------------
 
@@ -276,7 +302,7 @@ class DetailInspector(Container):
             return
 
         empty.display = False
-        if view.node_type == "context":
+        if view.node_type in _SPLIT_VIEW_TYPES:
             standard.display = False
             context.display = True
             self._render_context(view)
@@ -299,14 +325,35 @@ class DetailInspector(Container):
 
     def _render_context(self, view: NodeView) -> None:
         values = {"prompt": view.prompt, "content": view.content, "output": view.output}
+        labels = _SPLIT_LABELS.get(view.node_type, _SPLIT_LABELS["context"])
         any_visible = False
         for name, (box_id, text_id) in _SPLITS.items():
             box = self.query_one(box_id, _Split)
             value = values[name]
             box.display = bool(value)
             any_visible = any_visible or bool(value)
-            self.query_one(text_id, Static).update(value)
+            self.query_one(f"#detail-{name}-label", Static).update(labels[name])
+            if name == "content":
+                self._render_content_split(view, value)
+            else:
+                self.query_one(text_id, Static).update(value)
         if not any_visible:
             # Defensive: a context node with no data at all still shows Content.
             self.query_one("#detail-content", _Split).display = True
-            self.query_one("#detail-content-text", Static).update("(no content)")
+            self._render_content_split(view, "(no content)")
+
+    def _render_content_split(self, view: NodeView, text: str) -> None:
+        """Render the content ("Originals" for a K) split. When the view carries
+        message-bearing nodes (a K's folded children), show them as the shared
+        compact rows (task 38); otherwise fall back to the plain-text body."""
+        rows = self.query_one("#detail-content-rows", Vertical)
+        text_widget = self.query_one("#detail-content-text", Static)
+        rows.remove_children()
+        if view.content_nodes:
+            text_widget.display = False
+            rows.display = True
+            rows.mount_all([MessageRow(node) for node in view.content_nodes])
+        else:
+            rows.display = False
+            text_widget.display = True
+            text_widget.update(text)

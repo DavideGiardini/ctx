@@ -10,13 +10,39 @@ CONFIG_PATH = CONFIG_DIR / "config.json"
 # the other user-settable defaults (ADR 0006 #3).
 DEFAULT_MODEL = "openrouter/google/gemma-4-26b-a4b-it"
 
+# The *system* prompt handed to the model when drafting a compression and no
+# per-range prompt is supplied (ADR-0016 A#6, superseding A#1's user-turn text).
+# The draft call sends the whole conversation as one user message with the target
+# span wrapped in <compress_this>…</compress_this>, so the default is a marker-aware
+# scaffold ("summarize only what is between the markers") plus the preserve-intent
+# clause. Single source of the text: it seeds _DEFAULTS["compression"]
+# ["default_prompt"] and conversation.py re-exports it as
+# DEFAULT_COMPRESSION_PROMPT. Overriding is JSON-only (task 18); the user may edit
+# the whole thing, markers included, at their own risk (power over protection).
+DEFAULT_COMPRESSION_PROMPT = (
+    "You are compressing part of an ongoing conversation. The full conversation is "
+    "given to you as a single message, with one span wrapped in <compress_this> and "
+    "</compress_this> markers. Summarize only the content between those markers; use "
+    "everything outside them as context to understand that span, but do not "
+    "summarize the rest. Preserve the facts, decisions, entities, and open threads "
+    "needed for the conversation to continue coherently. Respond with only the "
+    "summary text, no preamble."
+)
+
 _DEFAULTS: dict = {
     "model": DEFAULT_MODEL,
+    "compression": {
+        "default_prompt": DEFAULT_COMPRESSION_PROMPT,
+    },
     "colors": {
         "user": "#3b82f6",
         "assistant": "#f97316",
         "system": "#737373",
         "context": "#22c55e",
+        # A compression summary shares the context-import green (both are
+        # human-side, model-facing injections); the row's kind glyph (≡) is what
+        # keeps a summary distinguishable from an imported file (task 39).
+        "compression": "#22c55e",
     },
     "ui": {
         # Max lines a node occupies in the right-pane conversation graph before
@@ -34,6 +60,13 @@ _DEFAULTS: dict = {
         # "window" expresses it as a share of the model's input window. Any
         # other value is coerced back to "context" in get_config().
         "weight_basis": "context",
+        # Whether the UI surfaces AI turns whose generation context has since
+        # drifted from the current one (ADR-0016 concern "b"): gates *all* drift
+        # UI, both the passive `Δ` marker and the active `g d` diff drill (task
+        # 24) — off means no marker and `g d` is a no-op on a drifted turn (a K
+        # still deep-dives). A non-bool user value is coerced back to this
+        # default in get_config().
+        "show_context_drift": True,
     },
 }
 
@@ -63,6 +96,14 @@ def get_config() -> dict:
     else:
         merged["colors"] = copy.deepcopy(_DEFAULTS["colors"])
 
+    if isinstance(user_config.get("compression"), dict):
+        merged["compression"] = {
+            **_DEFAULTS["compression"],
+            **user_config["compression"],
+        }
+    else:
+        merged["compression"] = copy.deepcopy(_DEFAULTS["compression"])
+
     if isinstance(user_config.get("ui"), dict):
         merged["ui"] = {**_DEFAULTS["ui"], **user_config["ui"]}
         if isinstance(user_config["ui"].get("truncation_lines"), dict):
@@ -81,5 +122,10 @@ def get_config() -> dict:
     # the default. The merge above may have carried a user value verbatim.
     if merged["ui"].get("weight_basis") not in _WEIGHT_BASES:
         merged["ui"]["weight_basis"] = _DEFAULTS["ui"]["weight_basis"]
+
+    # Coerce a non-bool show_context_drift (wrong type, incl. int masquerading as
+    # bool) back to the default. A legitimate False (opt-out) survives.
+    if not isinstance(merged["ui"].get("show_context_drift"), bool):
+        merged["ui"]["show_context_drift"] = _DEFAULTS["ui"]["show_context_drift"]
 
     return merged

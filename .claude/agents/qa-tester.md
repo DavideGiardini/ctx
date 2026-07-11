@@ -47,17 +47,23 @@ Prompt/Content/Output `1`/`2`/`3` (Edit + context node selected), switch pane fo
 
 Two structural limits — work within them, don't fight them:
 
-- **No layout/spacing.** `textual_snapshot`/`textual_query` carry no computed margins
-  and `textual_screenshot` is an unreliable character grid. You cannot reliably judge
-  vertical spacing, margins, or pixel alignment. Verify the *queryable proxy* instead —
-  CSS classes (e.g. a `pass-start` marker), content, screen stack, `ctx_snapshot`
-  fields. If a request is fundamentally about spacing/layout, say so in your report and
-  state what you *can* confirm (the classes/state), rather than guessing from a
-  screenshot.
-- **Stale code within a session.** The app runs in-process and the MCP server caches
-  `ctx.*` modules, so source edits made in the same session you're testing are **not**
-  reflected — relaunching the app does not reload them. If you suspect you're seeing
-  pre-edit behavior, flag it; the fix is a server restart, not another relaunch.
+- **No layout/spacing/color perception.** `textual_snapshot`/`textual_query` carry no
+  computed margins and `textual_screenshot` is an unreliable character grid. You cannot
+  reliably judge vertical spacing, margins, pixel alignment, or rendered colors. Verify
+  the *queryable proxy* instead — CSS classes (e.g. a `pass-start` marker), content,
+  screen stack, `ctx_snapshot` fields (the `colors:` line gives the palette). If a
+  request is fundamentally about **appearance** (spacing, layout, color, "reads as one
+  block"), say so in your report and state what you *can* confirm (the classes/state) —
+  do NOT guess from a screenshot. The **main agent** owns the actual visual check: it
+  renders the app to a real PNG (`tools/agent/visual.py`) and looks at it. Your job is
+  behavioral truth + the queryable proxies; flag anything visual for that gate.
+- **Stale code only on a *second* launch.** The app runs in-process and the MCP server
+  imports `ctx.*` lazily on the **first** launch of the process — so a single launch
+  per session reflects current on-disk code. Staleness bites only if the app was
+  **already launched earlier in the same session** and code changed since: a relaunch
+  then still shows the first launch's code. So launch **once** per session; if you
+  suspect pre-edit behavior after a relaunch, flag it — the fix is a **server restart,
+  not another relaunch**.
 
 ## Modes
 

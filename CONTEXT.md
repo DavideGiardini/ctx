@@ -1,8 +1,9 @@
 # ctx — Domain Glossary
 
 > Canonical vocabulary for the ctx conversation IDE. Glossary only — no
-> implementation detail. See `docs/Product Concept.md` for vision,
-> `docs/decisions/` for ADRs, `docs/Sprint Roadmap.md` for the plan.
+> implementation detail. See `docs/ctx0_Product_Concept.md` for the product
+> being built, `docs/decisions/` for ADRs, `docs/ctx0 Roadmap.md` for the plan.
+> The long-term vision is parked in `docs/north-star/` (ADR-0017).
 
 ## Conversation graph
 
@@ -35,8 +36,20 @@
   snapshot. Re-import is the **import** primitive, **not** compression: it
   reuses S3's draft-with-prompt *engine* but emits an import node, sharing
   nothing with `K` / `compressed_into` / event-enumeration.
-- **Indexed** — an orthogonal per-*conversation* flag: an indexed conversation
-  is searchable/importable by other chats; un-indexing archives it (private).
+- **Indexed** *(deferred — see Future Sprints)* — **automatic-import scope
+  control**: the fence defining what the assistant may draw from *on its own*,
+  as opposed to **manual** import (always allowed for any supported source). It
+  is **access control** (kin to §3.1 Access modes), *not* conversation
+  archiving. Only meaningful once automatic import/retrieval exists (S6+); pulled
+  from S4.
+- **Branch delete** — the whole-branch hard delete (ADR-0016's *one* true
+  row-deletion), reachable as a fast verb on an abandoned tail. Distinct from
+  **rewind** (non-destructive). Backed by **session undo**.
+- **Session undo** — a single-step, session-scoped, this-op-only undo of a branch
+  delete: a one-slot in-memory stash of the last-deleted subgraph, re-inserted on
+  undo. *Not* a general undo stack and *not* durable across restart (that would be
+  the deferred trash/soft-delete). Cheap because the graph is in-memory and
+  `save()` is full-replace.
 
 ## Compression (Sprint 3)
 
@@ -53,7 +66,12 @@
   contiguous run of nodes sharing `compressed_into = K` with `K`, in place.
 - **Draft** — the AI-generated (or blank, for manual) candidate summary shown in
   the compression editor before commit. Streamed from the active model; discarding
-  it mutates nothing.
+  it mutates nothing. The draft call sends the editable prompt as the **system**
+  message and the **whole active-line conversation** (model-facing forms) as one
+  user message, with the range being compressed wrapped in `<compress_this>`
+  markers — so the model sees the context before *and* after the range and knows
+  exactly what to summarize (ADR-0016 A#6). *(Supersedes the earlier "draft sees
+  only the range" scope.)*
 - **Commit** — the single graph mutation that turns a draft into a real
   compression node `K` and sets `compressed_into` on the folded range.
 - **Compression editor** — the left-pane surface for *creating* a compression:

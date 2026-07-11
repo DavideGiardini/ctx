@@ -1,7 +1,7 @@
 {
   "permissions": {
     "ask": [
-      "Read(./docs/Product Concept.md)"
+      "Read(./docs/north-star/**)"
     ],
     "allow": [
       "Write(tests/**)"
