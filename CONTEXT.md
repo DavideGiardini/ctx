@@ -1,8 +1,9 @@
 # ctx — Domain Glossary
 
 > Canonical vocabulary for the ctx conversation IDE. Glossary only — no
-> implementation detail. See `docs/Product Concept.md` for vision,
-> `docs/decisions/` for ADRs, `docs/Sprint Roadmap.md` for the plan.
+> implementation detail. See `docs/ctx0_Product_Concept.md` for the product
+> being built, `docs/decisions/` for ADRs, `docs/ctx0 Roadmap.md` for the plan.
+> The long-term vision is parked in `docs/north-star/` (ADR-0017).
 
 ## Conversation graph
 

@@ -48,18 +48,23 @@ touches. Read relevant ADRs in `docs/decisions/` and the "Designing new modules"
 guidance in `AGENTS.md`. Decide where the feature lives (core vs. ui), what to
 reuse, and which seam it sits behind — use `codebase-design` vocabulary.
 
-Planning is also the **only** sanctioned time to consult the long-term north star,
-`docs/Product Concept.md`. Read it to make sure this feature is a coherent *step
-toward* that vision and doesn't paint us into a corner. Reading it triggers a
-permission prompt (it's gated so implementation agents never see it) — approving
-that prompt here is expected and correct. Do **not** drag the vision's future
+The product being built is **ctx0** — read `docs/ctx0_Product_Concept.md` to make
+sure the feature fits its scope tests (essential / useful at moment zero / has a
+soul). Planning is also the **only** sanctioned time to consult the long-term
+north star in `docs/north-star/` (the full ctx Product Concept and the parked
+Sprint Roadmap, which holds settled design worth reusing — e.g. the S5 import
+grill). Read those to make sure this feature is a coherent *step toward* the
+vision and doesn't paint us into a corner. Reading them triggers a permission
+prompt (they're gated so implementation agents never see them) — approving that
+prompt here is expected and correct. Do **not** drag the vision's future
 features into this plan beyond the step being planned now.
 
-**Keep the concept in sync.** The Product Concept is the north star, so it must not
-silently drift out of date. Whenever a decision taken during this session **shifts
-away from what the concept describes** — changes a behavior, renames or restructures
-a concept, or deliberately diverges from a documented design — stop and **ask the
-user whether to update `docs/Product Concept.md`** to reflect the new decision.
+**Keep the concept in sync.** The ctx0 Product Concept is the shipping spec, so it
+must not silently drift out of date. Whenever a decision taken during this session
+**shifts away from what the concept describes** — changes a behavior, renames or
+restructures a concept, or deliberately diverges from a documented design — stop and
+**ask the user whether to update `docs/ctx0_Product_Concept.md`** to reflect the new
+decision.
 Distinguish this from an *intermediate implementation* (a stepping stone on the way
 to the documented goal, which should leave the concept untouched): if you can't tell
 which it is, ask. Don't edit the concept on your own initiative — surface the

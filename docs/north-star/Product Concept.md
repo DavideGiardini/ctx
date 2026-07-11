@@ -1,3 +1,9 @@
+> **North star — not the current plan (parked 2026-07-11, ADR-0017).** This
+> document describes the full ctx vision. The product actually being built is
+> **ctx0**, a smaller, complete subset — see `docs/ctx0_Product_Concept.md` and
+> `docs/ctx0 Roadmap.md`. Do not implement features from this document unless
+> the ctx0 roadmap schedules them.
+
 # **Product Concept Document: Context-Aware Terminal AI Assistant**
 
 ## **1\. Executive Summary**

@@ -1,8 +1,17 @@
+> **North star — not the current plan (parked 2026-07-11, ADR-0017).** This
+> roadmap targeted the full ctx Product Concept; the product actually being
+> built is **ctx0** — see `docs/ctx0_Product_Concept.md` and `docs/ctx0
+> Roadmap.md`. This file is deliberately kept, unedited: its settled design
+> grills (S3 Q1–Q14/H1–H6, S4 B1–B13, the S5 import primitive) are decision
+> records that ctx0 work reuses — e.g. ctx0's `import(file, prompt)` builds on
+> the B4 verbatim/summarize modes and S5's content-on-node snapshots. Consult
+> it during planning; do not schedule its sprints.
+
 # ctx — Sprint Roadmap to the Product Concept
 
-> Living planning doc. We refine it sprint by sprint. Sprints are one level above
+> Living planning doc (frozen — see banner above). Sprints are one level above
 > Ralph tasks: each is a coherent slice of capability, not a single-session task.
-> See `docs/Product Concept.md` for the target vision.
+> See `north-star/Product Concept.md` for the target vision.
 
 ## Context
 
