@@ -8,23 +8,16 @@ the untouched leading rows are the identical objects they were before and the K
 appears in place.
 """
 
+from pilot_helpers import two_turns
 from textual.widgets import TextArea
 
-from ctx.ui.widgets.input_bar import InputBar
 from ctx.ui.widgets.message_list import MessageList, MessageWidget
-
-
-async def _two_turns(app) -> None:
-    await app.on_input_bar_submitted(InputBar.Submitted("first"))
-    await app.workers.wait_for_complete()
-    await app.on_input_bar_submitted(InputBar.Submitted("second"))
-    await app.workers.wait_for_complete()
 
 
 async def test_commit_preserves_surviving_widget_instances(app_factory):
     app = app_factory()
     async with app.run_test() as pilot:
-        await _two_turns(app)  # view: [u1, a1, u2, a2]
+        await two_turns(app)  # view: [u1, a1, u2, a2]
 
         # Widget instances keyed by node id, before the commit.
         message_list = app.query_one(MessageList)

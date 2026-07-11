@@ -7,22 +7,15 @@ commits. The oracle is the Task 9 acceptance criterion, asserted through the
 public ``describe_state()`` / editor state and ``app.core`` (for K's meta).
 """
 
+from pilot_helpers import two_turns
 from textual.widgets import TextArea
 
 from ctx.core.provider import Usage
-from ctx.ui.widgets.input_bar import InputBar
 
 # Provider that also reports a plausible usage: a normal turn would anchor the
 # gauge, so a draft that (wrongly) anchored would be caught by the Q10b assert.
 _DRAFT_TOKENS = ["draft ", "summary"]
 _DRAFT_TEXT = "draft summary"
-
-
-async def _two_turns(app) -> None:
-    await app.on_input_bar_submitted(InputBar.Submitted("first"))
-    await app.workers.wait_for_complete()
-    await app.on_input_bar_submitted(InputBar.Submitted("second"))
-    await app.workers.wait_for_complete()
 
 
 async def _open_editor_on_full_range(pilot) -> None:
@@ -36,7 +29,7 @@ async def _open_editor_on_full_range(pilot) -> None:
 async def test_ctrl_d_streams_draft_into_bottom_without_anchoring(app_factory):
     app = app_factory(tokens=_DRAFT_TOKENS, usage=Usage(12, 5, 17))
     async with app.run_test() as pilot:
-        await _two_turns(app)
+        await two_turns(app)
         await _open_editor_on_full_range(pilot)
 
         gen_before = app.core.usage_generation
@@ -56,7 +49,7 @@ async def test_ctrl_d_streams_draft_into_bottom_without_anchoring(app_factory):
 async def test_redraft_overwrites_bottom(app_factory):
     app = app_factory(tokens=_DRAFT_TOKENS, usage=Usage(12, 5, 17))
     async with app.run_test() as pilot:
-        await _two_turns(app)
+        await two_turns(app)
         await _open_editor_on_full_range(pilot)
 
         await pilot.press("ctrl+d")
@@ -76,7 +69,7 @@ async def test_redraft_overwrites_bottom(app_factory):
 async def test_ctrl_s_after_draft_stamps_drafted_prompt_on_k(app_factory):
     app = app_factory(tokens=_DRAFT_TOKENS, usage=Usage(12, 5, 17))
     async with app.run_test() as pilot:
-        await _two_turns(app)
+        await two_turns(app)
         await _open_editor_on_full_range(pilot)
 
         app.query_one("#compress-prompt", TextArea).text = "MY CUSTOM PROMPT"
@@ -94,7 +87,7 @@ async def test_ctrl_s_after_draft_stamps_drafted_prompt_on_k(app_factory):
 async def test_ctrl_d_inert_when_editor_closed(app_factory):
     app = app_factory(tokens=_DRAFT_TOKENS, usage=Usage(12, 5, 17))
     async with app.run_test() as pilot:
-        await _two_turns(app)
+        await two_turns(app)
         await pilot.press("escape")  # Edit mode, editor NOT open
 
         await pilot.press("ctrl+d")

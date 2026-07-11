@@ -30,7 +30,7 @@ def _make_core(repo, test_provider, workspace, tokens=None):
     return core
 
 
-async def _turn(core, prompt):
+async def _core_turn(core, prompt):
     """Drive one full user->assistant turn; return the assistant node."""
     _user, assistant = core.submit(prompt)
     async for _ in core.stream(assistant):
@@ -64,9 +64,9 @@ def _check_oracle(core):
 
 async def test_oracle_holds_for_plain_turns(repo, test_provider, workspace):
     core = _make_core(repo, test_provider, workspace)
-    await _turn(core, "one")
-    await _turn(core, "two")
-    await _turn(core, "three")
+    await _core_turn(core, "one")
+    await _core_turn(core, "two")
+    await _core_turn(core, "three")
     _check_oracle(core)
 
 
@@ -78,9 +78,9 @@ async def test_stamp_is_immutable_across_later_compression(
     repo, test_provider, workspace
 ):
     core = _make_core(repo, test_provider, workspace)
-    a1 = await _turn(core, "one")
+    a1 = await _core_turn(core, "one")
     before = a1.meta["ctx_hash"]
-    a2 = await _turn(core, "two")
+    a2 = await _core_turn(core, "two")
     core.commit_compression(a1.prev_id, a2.id, "summary")
     # a1's stamp was written at its own generation moment and never rewritten.
     assert a1.meta["ctx_hash"] == before
@@ -98,8 +98,8 @@ async def test_oracle_holds_through_compress_expand_recompress(
     core = _make_core(repo, test_provider, workspace)
 
     # 1. a few plain turns
-    a1 = await _turn(core, "capital of France?")
-    a2 = await _turn(core, "its population?")
+    a1 = await _core_turn(core, "capital of France?")
+    a2 = await _core_turn(core, "its population?")
     _check_oracle(core)
 
     # 2. compress the tip range [u2, a2] into K
@@ -108,7 +108,7 @@ async def test_oracle_holds_through_compress_expand_recompress(
     _check_oracle(core)
 
     # 3. more turns generated on top of the folded view (they saw K)
-    a3 = await _turn(core, "capital of Spain?")
+    a3 = await _core_turn(core, "capital of Spain?")
     _check_oracle(core)
 
     # 4. expand K (non-destructive undo via an E event)
@@ -117,7 +117,7 @@ async def test_oracle_holds_through_compress_expand_recompress(
     _check_oracle(core)
 
     # 5. more turns after expand (they see the originals verbatim again)
-    a4 = await _turn(core, "its population?")
+    a4 = await _core_turn(core, "its population?")
     _check_oracle(core)
 
     # 6. re-compress a fresh range into K'
@@ -137,10 +137,10 @@ async def test_pre_and_post_compression_turns_both_verify(
     repo, test_provider, workspace
 ):
     core = _make_core(repo, test_provider, workspace)
-    a1 = await _turn(core, "one")
-    a2 = await _turn(core, "two")
+    a1 = await _core_turn(core, "one")
+    a2 = await _core_turn(core, "two")
     core.commit_compression(a2.prev_id, a2.id, "one+two")
-    a3 = await _turn(core, "three")  # this turn saw K in its context
+    a3 = await _core_turn(core, "three")  # this turn saw K in its context
 
     all_nodes = core._all_nodes()
     read_file = core.read_file
@@ -171,11 +171,11 @@ async def test_pre_and_post_compression_turns_both_verify(
 
 async def test_oracle_holds_for_middle_compression(repo, test_provider, workspace):
     core = _make_core(repo, test_provider, workspace)
-    a1 = await _turn(core, "one")
-    a2 = await _turn(core, "two")
+    a1 = await _core_turn(core, "one")
+    a2 = await _core_turn(core, "two")
     # Compress the MIDDLE range [u1, a1] — not the tip a2 — into K.
     core.commit_compression(a1.prev_id, a1.id, "one summary")
-    await _turn(core, "three")  # generated on top of the folded view
+    await _core_turn(core, "three")  # generated on top of the folded view
     _check_oracle(core)
 
     # a2 is the discriminating turn: it was generated verbatim ([u1,a1,u2]) before
@@ -190,8 +190,8 @@ async def test_oracle_holds_through_middle_expand_recompress(
     repo, test_provider, workspace
 ):
     core = _make_core(repo, test_provider, workspace)
-    a1 = await _turn(core, "one")
-    a2 = await _turn(core, "two")
+    a1 = await _core_turn(core, "one")
+    a2 = await _core_turn(core, "two")
 
     # 1. compress the middle range [u1, a1] into K
     k = core.commit_compression(a1.prev_id, a1.id, "one summary")
@@ -205,7 +205,7 @@ async def test_oracle_holds_through_middle_expand_recompress(
 
     # 3. re-compress the same middle range into a fresh K'
     core.commit_compression(a1.prev_id, a1.id, "one summary v2")
-    a3 = await _turn(core, "three")
+    a3 = await _core_turn(core, "three")
     _check_oracle(core)
 
     # a2 still discriminates after the expand->re-compress churn: gen-view verbatim,

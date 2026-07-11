@@ -11,18 +11,11 @@ inspector's ``NodeView``/``splits_visible`` (the split *contents* are an inspect
 detail describe_state omits).
 """
 
+from pilot_helpers import two_turns
 from textual.widgets import TextArea
 
 from ctx.core.conversation import DEFAULT_COMPRESSION_PROMPT
 from ctx.ui.widgets.detail_inspector import DetailInspector
-from ctx.ui.widgets.input_bar import InputBar
-
-
-async def _two_turns(app) -> None:
-    await app.on_input_bar_submitted(InputBar.Submitted("first"))
-    await app.workers.wait_for_complete()
-    await app.on_input_bar_submitted(InputBar.Submitted("second"))
-    await app.workers.wait_for_complete()
 
 
 async def _open_editor_on_full_range(pilot) -> None:
@@ -35,7 +28,7 @@ async def _open_editor_on_full_range(pilot) -> None:
 async def test_drafted_k_inspector_shows_prompt_originals_summary(app_factory):
     app = app_factory()
     async with app.run_test() as pilot:
-        await _two_turns(app)
+        await two_turns(app)
         await _open_editor_on_full_range(pilot)
 
         # Draft (Ctrl+D) so the committed K carries a non-empty prompt.
@@ -67,7 +60,7 @@ async def test_drafted_k_inspector_shows_prompt_originals_summary(app_factory):
 async def test_manual_k_inspector_hides_empty_prompt_split(app_factory):
     app = app_factory()
     async with app.run_test() as pilot:
-        await _two_turns(app)
+        await two_turns(app)
         await _open_editor_on_full_range(pilot)
 
         app.query_one("#compress-output", TextArea).text = "MANUAL SUMMARY"
@@ -90,7 +83,7 @@ async def test_k_inspector_originals_split_renders_compact_rows(app_factory):
     visible divider sits between the three splits."""
     app = app_factory()
     async with app.run_test() as pilot:
-        await _two_turns(app)
+        await two_turns(app)
         await _open_editor_on_full_range(pilot)
 
         app.query_one("#compress-output", TextArea).text = "SUMMARY"
@@ -112,7 +105,7 @@ async def test_k_inspector_originals_split_renders_compact_rows(app_factory):
 async def test_number_keys_maximize_k_splits(app_factory):
     app = app_factory()
     async with app.run_test() as pilot:
-        await _two_turns(app)
+        await two_turns(app)
         await _open_editor_on_full_range(pilot)
 
         app.query_one("#compress-output", TextArea).text = "SUMMARY"

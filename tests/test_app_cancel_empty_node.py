@@ -17,6 +17,7 @@ import asyncio
 import contextlib
 
 from conftest import BlockingProvider
+from pilot_helpers import wait_until
 from textual.worker import WorkerCancelled
 
 from ctx.ui.widgets.input_bar import InputBar
@@ -40,17 +41,17 @@ async def _submit_blocked(app, pilot, before: list[str], gate: asyncio.Event) ->
     app.core._provider = BlockingProvider(before, gate)
     await app.on_input_bar_submitted(InputBar.Submitted("hello"))
     want = "".join(before)
-    for _ in range(200):
+
+    def _live() -> bool:
         node = app._streaming_node
-        if (
+        return (
             app._stream_worker is not None
             and not app._stream_worker.is_finished
             and node is not None
             and node.content == want
-        ):
-            break
-        await pilot.pause()
-    assert app._stream_worker is not None and not app._stream_worker.is_finished
+        )
+
+    assert await wait_until(pilot, _live)
 
 
 def _nodes(app) -> list[dict]:

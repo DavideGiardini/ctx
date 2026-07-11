@@ -15,21 +15,16 @@ while ``A1``'s did not. With the config off, no node drifts.
 
 import json
 
+from pilot_helpers import turn
 from textual.widgets import Static, TextArea
 
 import ctx.core.config
-from ctx.ui.widgets.input_bar import InputBar
 from ctx.ui.widgets.message_list import MessageWidget
-
-
-async def _turn(app, text: str) -> None:
-    await app.on_input_bar_submitted(InputBar.Submitted(text))
-    await app.workers.wait_for_complete()
 
 
 async def _drift_scenario(app, pilot) -> None:
     """U1,A1 → compress [U1,A1] → U2,A2 → expand K (the acceptance setup)."""
-    await _turn(app, "first")  # → U1, A1
+    await turn(app, "first")  # → U1, A1
 
     # Compress the whole tip range [U1, A1] into one K via the draft editor.
     await pilot.press("escape")  # → Edit mode
@@ -39,7 +34,7 @@ async def _drift_scenario(app, pilot) -> None:
     app.query_one("#compress-output", TextArea).text = "SUMMARY"
     await pilot.press("ctrl+s")  # commit → view = [K], Edit mode, no selection
 
-    await _turn(app, "second")  # → K, U2, A2 (A2 saw K in context)
+    await turn(app, "second")  # → K, U2, A2 (A2 saw K in context)
 
     # Re-enter Edit, land on K (first node), and expand it with the 13b key.
     if app.mode == "edit":

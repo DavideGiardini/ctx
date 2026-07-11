@@ -11,19 +11,12 @@ The oracle is the Task 8 acceptance criterion, asserted through the public
 detail describe_state deliberately omits).
 """
 
+from pilot_helpers import two_turns
 from textual.widgets import TextArea
 
 from ctx.ui.widgets.compression_editor import CompressionEditor
 from ctx.ui.widgets.detail_inspector import DetailInspector
-from ctx.ui.widgets.input_bar import InputBar
 from ctx.ui.widgets.message_list import MessageWidget
-
-
-async def _two_turns(app) -> None:
-    await app.on_input_bar_submitted(InputBar.Submitted("first"))
-    await app.workers.wait_for_complete()
-    await app.on_input_bar_submitted(InputBar.Submitted("second"))
-    await app.workers.wait_for_complete()
 
 
 async def _open_editor_on_full_range(pilot) -> None:
@@ -37,7 +30,7 @@ async def _open_editor_on_full_range(pilot) -> None:
 async def test_ctrl_s_commits_folds_range_to_single_k(app_factory):
     app = app_factory()
     async with app.run_test() as pilot:
-        await _two_turns(app)
+        await two_turns(app)
         await _open_editor_on_full_range(pilot)
 
         app.query_one("#compress-output", TextArea).text = "SUMMARY OF THE FIRST TWO TURNS"
@@ -66,7 +59,7 @@ async def test_ctrl_s_commits_folds_range_to_single_k(app_factory):
 async def test_tab_reaches_summary_split_for_keyboard_only_commit(app_factory):
     app = app_factory()
     async with app.run_test() as pilot:
-        await _two_turns(app)
+        await two_turns(app)
         await _open_editor_on_full_range(pilot)
 
         # On open the prompt split is focused; Tab must reach the summary split
@@ -86,7 +79,7 @@ async def test_tab_reaches_summary_split_for_keyboard_only_commit(app_factory):
 async def test_ctrl_s_empty_summary_breadcrumbs_no_commit(app_factory):
     app = app_factory()
     async with app.run_test() as pilot:
-        await _two_turns(app)
+        await two_turns(app)
         await _open_editor_on_full_range(pilot)
 
         # Leave the summary empty.
@@ -104,7 +97,7 @@ async def test_ctrl_s_empty_summary_breadcrumbs_no_commit(app_factory):
 async def test_ctrl_s_inert_when_editor_closed(app_factory):
     app = app_factory()
     async with app.run_test() as pilot:
-        await _two_turns(app)
+        await two_turns(app)
         await pilot.press("escape")  # Edit mode, editor NOT open
 
         await pilot.press("ctrl+s")  # must be a no-op
@@ -120,7 +113,7 @@ async def test_committed_k_after_assistant_carries_pass_start_margin(app_factory
     # without the task-40 fix the K would hug the reply above it with no gap.
     app = app_factory()
     async with app.run_test() as pilot:
-        await _two_turns(app)  # view = [user1, assistant1, user2, assistant2]
+        await two_turns(app)  # view = [user1, assistant1, user2, assistant2]
         await pilot.press("escape")  # → Edit mode
         await pilot.press("home")  # cursor on user1
         await pilot.press("down", "down")  # cursor on user2 (index 2)
@@ -139,7 +132,7 @@ async def test_committed_k_after_assistant_carries_pass_start_margin(app_factory
 async def test_committed_k_round_trips_across_app_instances(app_factory):
     app = app_factory()
     async with app.run_test() as pilot:
-        await _two_turns(app)
+        await two_turns(app)
         conv_id = app.core.conversation_id
         await _open_editor_on_full_range(pilot)
 

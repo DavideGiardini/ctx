@@ -85,3 +85,49 @@ Key decisions a future iteration must know:
   (it's the provider unit test, not a Pilot app test); left untouched.
 
 No new tests (behavior-preserving refactor). Verification = green gate.
+
+## 2026-07-11 — Task 3: turn/submit choreography in tests/pilot_helpers.py
+
+Created `tests/pilot_helpers.py` (the second shared-scaffolding home, importable
+alongside `conftest`) with `two_turns(app)`, `turn(app, text)`, a generic
+`wait_until(pilot, predicate, *, tries=200) -> bool`, and `wait_until_streaming(app,
+pilot)`. Migrated the 15 identical `_two_turns` copies, the two `_turn(app, text)`
+copies (drift/diff_view), the inlined two-submit blocks + single submits in
+`test_app_range_selection.py`, and the spin loops in `_submit_blocked`
+(cancel_empty_node), both `_start_blocked_draft` (draft_worker_lifecycle,
+new_resume_reset), and the inlined loops in draft_prompt_reset + commit_failures.
+Acceptance grep `def _two_turns\|def _turn\b` returns nothing; collected count
+unchanged (705 → 705); gate green (ruff + mypy + 705 pytest).
+
+Key decisions a future fresh iteration must know:
+
+- **Two wait helpers, not one.** The PRD names `wait_until_streaming(app, pilot)`,
+  but the ~6 spin-loop sites guard on genuinely different predicates (`_stream_worker`
+  live + rendered node content; `_draft_worker` live; `_draft_worker` live + editor
+  text; `worker.is_finished` — a *finish* wait; `core.streaming`). The one obvious
+  shared knob is the predicate, so the real primitive is a generic bounded
+  `wait_until(pilot, predicate, *, tries=200)` that returns whether the condition held
+  within the bound (callers `assert` on it, so an exhausted bound fails loudly — a
+  wait that hangs forever is worse than the duplication, per the PRD). `wait_until_streaming`
+  is a thin PRD-named convenience over it for the plain `core.streaming` case
+  (commit_failures) — kept because Phase-1 turn-lifecycle tests will reuse it.
+- **`_submit_blocked` uses `wait_until` with its FULL predicate (incl. the
+  `_streaming_node.content == want` check), NOT `wait_until_streaming`.** Dropping the
+  content check to `core.streaming` would weaken the "tokens actually rendered"
+  guarantee the zero/partial-token cancel tests rely on. Same for the draft helpers —
+  they keep their draft-worker predicates.
+- **Renamed `test_ctx_hash_oracle.py`'s `_turn(core, prompt)` → `_core_turn`.** It is
+  a different, core-level helper (returns the assistant node, no Pilot app) but the
+  acceptance grep `def _turn\b` catches it. A mechanical rename (behavior-preserving,
+  not a move into pilot_helpers, which is Pilot-only) is the minimal way to satisfy
+  the grep. All 15 call sites updated.
+- **`_start_blocked_draft` left local in each of its 2 files** (not hoisted to
+  pilot_helpers) — its spin loop now calls `wait_until`, but the helper itself is not
+  a PRD-named deliverable; hoisting it is task-4-adjacent scope, skipped.
+- Migration was scripted for the uniform `_two_turns`/`_turn` blocks (byte-identical),
+  manual Edits for the nuanced spin loops. `ruff check --fix tests/` dropped the
+  now-unused `InputBar` imports (36 fixes) and normalized `Callable` import.
+
+No new tests (behavior-preserving refactor; floor is same-tests-collected-and-pass,
+met at 705). No qa-tester / visual check — test-only change, no runtime surface;
+green gate IS the verification.

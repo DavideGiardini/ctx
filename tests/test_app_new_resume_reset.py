@@ -19,16 +19,8 @@ mode switch) has no Pilot key equivalent.
 import asyncio
 
 from conftest import BlockingProvider
+from pilot_helpers import two_turns, wait_until
 from textual.widgets import TextArea
-
-from ctx.ui.widgets.input_bar import InputBar
-
-
-async def _two_turns(app) -> None:
-    await app.on_input_bar_submitted(InputBar.Submitted("first"))
-    await app.workers.wait_for_complete()
-    await app.on_input_bar_submitted(InputBar.Submitted("second"))
-    await app.workers.wait_for_complete()
 
 
 async def _compress_full_tip_range(app, pilot, summary: str) -> None:
@@ -41,7 +33,7 @@ async def _compress_full_tip_range(app, pilot, summary: str) -> None:
 
 
 async def _enter_deep_dive(app, pilot) -> None:
-    await _two_turns(app)
+    await two_turns(app)
     await _compress_full_tip_range(app, pilot, "SUMMARY")
     # A commit clears the selection; bounce out and back to re-select the K tip.
     await pilot.press("escape")  # → Insert
@@ -62,11 +54,10 @@ async def _open_editor_on_full_range(pilot) -> None:
 async def _start_blocked_draft(app, pilot, gate) -> None:
     app.core._provider = BlockingProvider(["partial"], gate)
     await pilot.press("ctrl+d")
-    for _ in range(200):
-        if app._draft_worker is not None and not app._draft_worker.is_finished:
-            break
-        await pilot.pause()
-    assert app._draft_worker is not None and not app._draft_worker.is_finished
+    live = await wait_until(
+        pilot, lambda: app._draft_worker is not None and not app._draft_worker.is_finished
+    )
+    assert live
 
 
 async def test_new_resets_a_live_deep_dive(app_factory):
@@ -112,7 +103,7 @@ async def test_resume_resets_a_live_deep_dive(app_factory, monkeypatch):
 async def test_new_closes_an_open_editor_without_committing(app_factory):
     app = app_factory()
     async with app.run_test() as pilot:
-        await _two_turns(app)
+        await two_turns(app)
         await _open_editor_on_full_range(pilot)
         assert app.describe_state()["compression_editor"]["open"] is True
 
@@ -128,7 +119,7 @@ async def test_new_closes_an_open_editor_without_committing(app_factory):
 async def test_new_cancels_a_live_draft_worker(app_factory):
     app = app_factory()
     async with app.run_test() as pilot:
-        await _two_turns(app)
+        await two_turns(app)
         await _open_editor_on_full_range(pilot)
         gate = asyncio.Event()
         await _start_blocked_draft(app, pilot, gate)

@@ -37,3 +37,18 @@ Completed task bodies, cut verbatim from `PRD.md` as each finishes. See the
       maps cleanly onto the factory.
       _Acceptance:_ `grep -rn "def _app\b" tests/` returns nothing; collected test
       count identical to before; `bash scripts/check.sh` green.
+
+- [x] **3. Turn/submit choreography in `tests/pilot_helpers.py`** — Create the
+      module with: `two_turns(app)` (submit "first"/"second" via
+      `on_input_bar_submitted` + `wait_for_complete` — the shape duplicated in ~15
+      files), `turn(app, text)` (single-turn variant, in `test_app_drift.py` /
+      `test_app_diff_view.py`), and `wait_until_streaming(app, pilot)` replacing the
+      copy-pasted bounded `pilot.pause()` spin loops (`_submit_blocked` in
+      `test_app_cancel_empty_node.py`, `_start_blocked_draft` in
+      `test_app_draft_worker_lifecycle.py` / `test_app_new_resume_reset.py`, inlined
+      loops in `test_app_draft_prompt_reset.py` / `test_app_commit_failures.py` —
+      keep the bounded-iterations shape; a wait that can hang forever is worse than
+      the duplication). Migrate all users; `test_app_range_selection.py` inlines the
+      two submits without a helper — migrate it too.
+      _Acceptance:_ `grep -rn "def _two_turns\|def _turn\b" tests/` returns nothing;
+      collected test count identical to before; `bash scripts/check.sh` green.

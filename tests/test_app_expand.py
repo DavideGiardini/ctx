@@ -22,16 +22,10 @@ provider (for the next turn's context).
 """
 
 from conftest import RecordingProvider
+from pilot_helpers import two_turns
 from textual.widgets import TextArea
 
 from ctx.ui.widgets.input_bar import InputBar
-
-
-async def _two_turns(app) -> None:
-    await app.on_input_bar_submitted(InputBar.Submitted("first"))
-    await app.workers.wait_for_complete()
-    await app.on_input_bar_submitted(InputBar.Submitted("second"))
-    await app.workers.wait_for_complete()
 
 
 async def _compress_full_tip_range(app, pilot, summary: str) -> None:
@@ -58,7 +52,7 @@ async def _select_tip_in_edit(app, pilot) -> None:
 async def test_expand_restores_children_and_removes_k(app_factory):
     app = app_factory()
     async with app.run_test() as pilot:
-        await _two_turns(app)
+        await two_turns(app)
         await _compress_full_tip_range(app, pilot, "SUMMARY")
         assert sum(
             1 for n in app.describe_state()["nodes"] if n["node_type"] == "compression"
@@ -80,7 +74,7 @@ async def test_expand_restores_children_and_removes_k(app_factory):
 async def test_expand_survives_restart(app_factory):
     app = app_factory()
     async with app.run_test() as pilot:
-        await _two_turns(app)
+        await two_turns(app)
         conv_id = app.core.conversation_id
         await _compress_full_tip_range(app, pilot, "SUMMARY")
         await _select_tip_in_edit(app, pilot)
@@ -103,7 +97,7 @@ async def test_next_turn_sees_children_verbatim_after_expand(app_factory):
     provider = RecordingProvider(["reply"])
     app = app_factory(provider=provider)
     async with app.run_test() as pilot:
-        await _two_turns(app)
+        await two_turns(app)
         await _compress_full_tip_range(app, pilot, "THE SUMMARY TEXT")
         await _select_tip_in_edit(app, pilot)
         await pilot.press("x")
@@ -124,7 +118,7 @@ async def test_next_turn_sees_children_verbatim_after_expand(app_factory):
 async def test_expand_on_non_compression_is_a_silent_no_op(app_factory):
     app = app_factory()
     async with app.run_test() as pilot:
-        await _two_turns(app)
+        await two_turns(app)
         await pilot.press("escape")  # Edit mode, cursor on the last (assistant) node
         assert app._get_selected_node().node_type != "compression"
 

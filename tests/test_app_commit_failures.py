@@ -17,16 +17,10 @@ keypress still changes app state (the editor closes on Esc).
 import asyncio
 
 from conftest import BlockingProvider
+from pilot_helpers import two_turns, wait_until_streaming
 from textual.widgets import TextArea
 
 from ctx.ui.widgets.input_bar import InputBar
-
-
-async def _two_turns(app) -> None:
-    await app.on_input_bar_submitted(InputBar.Submitted("first"))
-    await app.workers.wait_for_complete()
-    await app.on_input_bar_submitted(InputBar.Submitted("second"))
-    await app.workers.wait_for_complete()
 
 
 def _compression_nodes(app) -> list[dict]:
@@ -44,7 +38,7 @@ async def test_commit_while_streaming_breadcrumbs_and_stays_responsive(app_facto
     # gate, so the editor opens fine and Ctrl+S then hits the guard.
     app = app_factory()
     async with app.run_test() as pilot:
-        await _two_turns(app)
+        await two_turns(app)
         await pilot.press("escape")
         await pilot.press("home")
         await pilot.press("v", "down", "down", "down")  # valid tip range
@@ -54,11 +48,7 @@ async def test_commit_while_streaming_breadcrumbs_and_stays_responsive(app_facto
         gate = asyncio.Event()
         app.core._provider = BlockingProvider(["x"], gate)
         await app.on_input_bar_submitted(InputBar.Submitted("third"))
-        for _ in range(200):
-            if app.core.streaming:
-                break
-            await pilot.pause()
-        assert app.core.streaming
+        await wait_until_streaming(app, pilot)
 
         await pilot.press("ctrl+s")
 
@@ -77,7 +67,7 @@ async def test_commit_range_containing_k_breadcrumbs_and_stays_responsive(app_fa
     # Trigger (3): a range that contains an already-committed K (Q7 flat guard).
     app = app_factory()
     async with app.run_test() as pilot:
-        await _two_turns(app)
+        await two_turns(app)
 
         # First fold a valid tip suffix (last two nodes) into a K.
         await pilot.press("escape")

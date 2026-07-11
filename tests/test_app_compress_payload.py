@@ -13,16 +13,10 @@ provider actually receives on the turn *after* a commit.
 """
 
 from conftest import RecordingProvider
+from pilot_helpers import two_turns
 from textual.widgets import TextArea
 
 from ctx.ui.widgets.input_bar import InputBar
-
-
-async def _two_turns(app) -> None:
-    await app.on_input_bar_submitted(InputBar.Submitted("first"))
-    await app.workers.wait_for_complete()
-    await app.on_input_bar_submitted(InputBar.Submitted("second"))
-    await app.workers.wait_for_complete()
 
 
 async def _compress_full_tip_range(app, pilot, summary: str) -> None:
@@ -39,7 +33,7 @@ async def test_next_turn_sees_summary_not_children_after_compress(app_factory):
     provider = RecordingProvider(["reply"])
     app = app_factory(provider=provider)
     async with app.run_test() as pilot:
-        await _two_turns(app)
+        await two_turns(app)
         await _compress_full_tip_range(app, pilot, "THE SUMMARY TEXT")
         # The whole tip range is folded into a single K.
         assert (

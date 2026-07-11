@@ -17,16 +17,8 @@ a gate) keeps the draft worker live while the test drives the UI.
 import asyncio
 
 from conftest import BlockingProvider
+from pilot_helpers import two_turns, wait_until
 from textual.widgets import TextArea
-
-from ctx.ui.widgets.input_bar import InputBar
-
-
-async def _two_turns(app) -> None:
-    await app.on_input_bar_submitted(InputBar.Submitted("first"))
-    await app.workers.wait_for_complete()
-    await app.on_input_bar_submitted(InputBar.Submitted("second"))
-    await app.workers.wait_for_complete()
 
 
 async def _open_editor_on_full_range(pilot) -> None:
@@ -41,15 +33,13 @@ async def _start_blocked_draft(app, pilot, gate) -> None:
     with its partial token rendered (so the worker is genuinely mid-stream)."""
     app.core._provider = BlockingProvider(["partial"], gate)
     await pilot.press("ctrl+d")
-    for _ in range(200):
-        if (
-            app._draft_worker is not None
-            and not app._draft_worker.is_finished
-            and app.query_one("#compress-output", TextArea).text == "partial"
-        ):
-            break
-        await pilot.pause()
-    assert app._draft_worker is not None and not app._draft_worker.is_finished
+    live = await wait_until(
+        pilot,
+        lambda: app._draft_worker is not None
+        and not app._draft_worker.is_finished
+        and app.query_one("#compress-output", TextArea).text == "partial",
+    )
+    assert live
 
 
 def _compression_nodes(app) -> list[dict]:
@@ -65,7 +55,7 @@ def _hint_shown(app, needle: str) -> bool:
 async def test_commit_mid_draft_is_refused(app_factory):
     app = app_factory()
     async with app.run_test() as pilot:
-        await _two_turns(app)
+        await two_turns(app)
         await _open_editor_on_full_range(pilot)
         gate = asyncio.Event()
         await _start_blocked_draft(app, pilot, gate)
@@ -84,7 +74,7 @@ async def test_commit_mid_draft_is_refused(app_factory):
 async def test_esc_cancels_a_live_draft(app_factory):
     app = app_factory()
     async with app.run_test() as pilot:
-        await _two_turns(app)
+        await two_turns(app)
         await _open_editor_on_full_range(pilot)
         gate = asyncio.Event()
         await _start_blocked_draft(app, pilot, gate)
@@ -106,7 +96,7 @@ async def test_close_cancels_a_live_worker(app_factory):
     # Esc) must cancel a live worker before dropping the reference.
     app = app_factory()
     async with app.run_test() as pilot:
-        await _two_turns(app)
+        await two_turns(app)
         await _open_editor_on_full_range(pilot)
         gate = asyncio.Event()
         await _start_blocked_draft(app, pilot, gate)
@@ -131,7 +121,7 @@ async def test_reopened_editor_summary_is_clean_after_orphan(app_factory):
     # its draft into the RE-OPENED editor's Summary. With the fix it is dead.
     app = app_factory()
     async with app.run_test() as pilot:
-        await _two_turns(app)
+        await two_turns(app)
         await _open_editor_on_full_range(pilot)
         gate = asyncio.Event()
         await _start_blocked_draft(app, pilot, gate)

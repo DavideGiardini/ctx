@@ -7,20 +7,13 @@ conversation graph the way ``core.add_system_message`` did. A durable breadcrumb
 not turn *every* system message transient.
 """
 
-from ctx.ui.widgets.input_bar import InputBar
-
-
-async def _two_turns(app) -> None:
-    await app.on_input_bar_submitted(InputBar.Submitted("first"))
-    await app.workers.wait_for_complete()
-    await app.on_input_bar_submitted(InputBar.Submitted("second"))
-    await app.workers.wait_for_complete()
+from pilot_helpers import two_turns
 
 
 async def test_empty_summary_commit_hints_without_adding_a_node(app_factory):
     app = app_factory()
     async with app.run_test() as pilot:
-        await _two_turns(app)
+        await two_turns(app)
         await pilot.press("escape")
         await pilot.press("home")
         await pilot.press("v", "down", "down", "down")  # select a range
@@ -39,7 +32,7 @@ async def test_empty_summary_commit_hints_without_adding_a_node(app_factory):
 async def test_model_change_still_adds_a_durable_node(app_factory):
     app = app_factory()
     async with app.run_test():
-        await _two_turns(app)
+        await two_turns(app)
         before = len(app.describe_state()["nodes"])
 
         await app._handle_model_command("/model openai/gpt-4o")

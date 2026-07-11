@@ -15,16 +15,8 @@ asserted through ``app.core`` (K's meta) and the public editor state.
 import asyncio
 
 from conftest import BlockingProvider, ErroringProvider
+from pilot_helpers import two_turns, wait_until
 from textual.widgets import TextArea
-
-from ctx.ui.widgets.input_bar import InputBar
-
-
-async def _two_turns(app) -> None:
-    await app.on_input_bar_submitted(InputBar.Submitted("first"))
-    await app.workers.wait_for_complete()
-    await app.on_input_bar_submitted(InputBar.Submitted("second"))
-    await app.workers.wait_for_complete()
 
 
 async def _open_editor_on_full_range(pilot) -> None:
@@ -43,7 +35,7 @@ def _last_k(app):
 async def test_manual_commit_after_cancelled_draft_stamps_empty_prompt(app_factory):
     app = app_factory()
     async with app.run_test() as pilot:
-        await _two_turns(app)
+        await two_turns(app)
         await _open_editor_on_full_range(pilot)
 
         # Draft with a custom prompt, then cancel the live worker via Esc.
@@ -51,19 +43,14 @@ async def test_manual_commit_after_cancelled_draft_stamps_empty_prompt(app_facto
         gate = asyncio.Event()
         app.core._provider = BlockingProvider(["partial"], gate)
         await pilot.press("ctrl+d")
-        for _ in range(200):
-            if app._draft_worker is not None and not app._draft_worker.is_finished:
-                break
-            await pilot.pause()
+        assert await wait_until(
+            pilot, lambda: app._draft_worker is not None and not app._draft_worker.is_finished
+        )
         worker = app._draft_worker
         assert worker is not None and not worker.is_finished
 
         await pilot.press("escape")  # cancels the worker, editor stays open
-        for _ in range(200):
-            if worker.is_finished:
-                break
-            await pilot.pause()
-        assert worker.is_finished
+        assert await wait_until(pilot, lambda: worker.is_finished)
 
         # Hand-write a summary and commit — this must be a MANUAL commit.
         app.query_one("#compress-output", TextArea).text = "hand written summary"
@@ -79,7 +66,7 @@ async def test_manual_commit_after_cancelled_draft_stamps_empty_prompt(app_facto
 async def test_manual_commit_after_failed_draft_stamps_empty_prompt(app_factory):
     app = app_factory()
     async with app.run_test() as pilot:
-        await _two_turns(app)
+        await two_turns(app)
         await _open_editor_on_full_range(pilot)
 
         app.query_one("#compress-prompt", TextArea).text = "focus on the decisions"

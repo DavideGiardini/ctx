@@ -10,24 +10,18 @@ The oracle is the Task 7 acceptance criterion, asserted through the public
 and the CSS ``display`` state the qa-tester harness can query.
 """
 
+from pilot_helpers import two_turns
+
 from ctx.core.conversation import DEFAULT_COMPRESSION_PROMPT
 from ctx.ui.widgets.app_footer import _HINTS
 from ctx.ui.widgets.compression_editor import CompressionEditor
 from ctx.ui.widgets.detail_inspector import DetailInspector
-from ctx.ui.widgets.input_bar import InputBar
-
-
-async def _two_turns(app) -> None:
-    await app.on_input_bar_submitted(InputBar.Submitted("first"))
-    await app.workers.wait_for_complete()
-    await app.on_input_bar_submitted(InputBar.Submitted("second"))
-    await app.workers.wait_for_complete()
 
 
 async def test_c_opens_editor_with_default_prompt_and_empty_output(app_factory):
     app = app_factory()
     async with app.run_test() as pilot:
-        await _two_turns(app)
+        await two_turns(app)
 
         await pilot.press("escape")  # → Edit mode
         await pilot.press("home")  # cursor on the first node
@@ -57,7 +51,7 @@ async def test_c_prefills_editor_with_config_override(app_factory, monkeypatch, 
 
     app = app_factory()
     async with app.run_test() as pilot:
-        await _two_turns(app)
+        await two_turns(app)
 
         await pilot.press("escape")  # → Edit mode
         await pilot.press("c")  # open editor on the selected node
@@ -68,7 +62,7 @@ async def test_c_prefills_editor_with_config_override(app_factory, monkeypatch, 
 async def test_c_on_single_node_opens_editor(app_factory):
     app = app_factory()
     async with app.run_test() as pilot:
-        await _two_turns(app)
+        await two_turns(app)
 
         await pilot.press("escape")  # → Edit mode (cursor on last node)
         await pilot.press("c")  # no anchor → range-of-one on the selected node
@@ -79,7 +73,7 @@ async def test_c_on_single_node_opens_editor(app_factory):
 async def test_esc_closes_editor_restores_inspector_keeps_selection(app_factory):
     app = app_factory()
     async with app.run_test() as pilot:
-        await _two_turns(app)
+        await two_turns(app)
 
         await pilot.press("escape")  # → Edit mode
         await pilot.press("home")
@@ -103,7 +97,7 @@ async def test_footer_shows_editor_hint_while_open_then_restores(app_factory):
     Edit-mode hint restored the moment it closes."""
     app = app_factory()
     async with app.run_test() as pilot:
-        await _two_turns(app)
+        await two_turns(app)
 
         await pilot.press("escape")  # → Edit mode
         assert app.describe_state()["footer"] == _HINTS["edit"]

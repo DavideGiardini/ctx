@@ -16,17 +16,10 @@ The oracle is the Task 13h acceptance criteria, asserted through ``describe_stat
 and the rendered widget count.
 """
 
+from pilot_helpers import two_turns
 from textual.widgets import TextArea
 
-from ctx.ui.widgets.input_bar import InputBar
 from ctx.ui.widgets.message_list import MessageWidget
-
-
-async def _two_turns(app) -> None:
-    await app.on_input_bar_submitted(InputBar.Submitted("first"))
-    await app.workers.wait_for_complete()
-    await app.on_input_bar_submitted(InputBar.Submitted("second"))
-    await app.workers.wait_for_complete()
 
 
 async def _compress_full_tip_range(app, pilot, summary: str) -> None:
@@ -49,7 +42,7 @@ async def test_single_esc_pops_dive_when_anchored_before_diving(app_factory):
     SINGLE Esc pops the dive rather than being eaten by a stale range clear."""
     app = app_factory()
     async with app.run_test() as pilot:
-        await _two_turns(app)
+        await two_turns(app)
         await _compress_full_tip_range(app, pilot, "SUMMARY")
         await _select_k_in_edit(app, pilot)
         assert app._get_selected_node().node_type == "compression"
@@ -75,7 +68,7 @@ async def test_connectivity_node_gated_out_of_dive_then_surfaces(app_factory):
     frame; exiting the dive surfaces it in the live view."""
     app = app_factory()
     async with app.run_test() as pilot:
-        await _two_turns(app)
+        await two_turns(app)
         await _compress_full_tip_range(app, pilot, "SUMMARY")
         await _select_k_in_edit(app, pilot)
         await pilot.press("g", "d")
@@ -103,7 +96,7 @@ async def test_model_command_gated_out_of_dive_then_surfaces(app_factory):
     dive gate."""
     app = app_factory()
     async with app.run_test() as pilot:
-        await _two_turns(app)
+        await two_turns(app)
         await _compress_full_tip_range(app, pilot, "SUMMARY")
         await _select_k_in_edit(app, pilot)
         await pilot.press("g", "d")
@@ -131,7 +124,7 @@ async def test_commit_resets_inspector_to_placeholder(app_factory):
     node that was just folded away."""
     app = app_factory()
     async with app.run_test() as pilot:
-        await _two_turns(app)
+        await two_turns(app)
         await _compress_full_tip_range(app, pilot, "SUMMARY")
         await pilot.pause()
 

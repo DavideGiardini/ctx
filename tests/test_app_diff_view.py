@@ -14,23 +14,18 @@ now-view is ``[U1,A1,U2]``, so ``g d`` on ``A2`` shows one changed region
 ``left=[K]`` ⟷ ``right=[U1,A1]``.
 """
 
+from pilot_helpers import turn
 from textual.containers import VerticalScroll
 from textual.widgets import TextArea
 
 from ctx.ui.widgets.compression_editor import CompressionEditor
 from ctx.ui.widgets.diff_view import DiffView
-from ctx.ui.widgets.input_bar import InputBar
 from ctx.ui.widgets.message_list import MessageList
-
-
-async def _turn(app, text: str) -> None:
-    await app.on_input_bar_submitted(InputBar.Submitted(text))
-    await app.workers.wait_for_complete()
 
 
 async def _drift_scenario(app, pilot) -> None:
     """U1,A1 → compress [U1,A1] → U2,A2 → expand K, then select A2."""
-    await _turn(app, "first")  # → U1, A1
+    await turn(app, "first")  # → U1, A1
 
     await pilot.press("escape")  # → Edit
     await pilot.press("home")  # cursor on U1
@@ -39,7 +34,7 @@ async def _drift_scenario(app, pilot) -> None:
     app.query_one("#compress-output", TextArea).text = "SUMMARY"
     await pilot.press("ctrl+s")  # commit → view = [K]
 
-    await _turn(app, "second")  # → K, U2, A2 (A2 saw K)
+    await turn(app, "second")  # → K, U2, A2 (A2 saw K)
 
     if app.mode == "edit":
         await pilot.press("escape")  # → Insert
@@ -58,8 +53,8 @@ async def _middle_compress_scenario(app, pilot) -> tuple[str, str]:
     compress. This exercises task 22's deleted tip guard: the range [U1,A1] does
     NOT end at the active leaf (A2), yet now folds.
     """
-    await _turn(app, "first")  # → U1, A1
-    await _turn(app, "second")  # → U2, A2; view = [U1, A1, U2, A2]
+    await turn(app, "first")  # → U1, A1
+    await turn(app, "second")  # → U2, A2; view = [U1, A1, U2, A2]
 
     view0 = app.core.nodes
     u1, a1 = view0[0].id, view0[1].id
@@ -322,7 +317,7 @@ async def _two_region_drift_scenario(app, pilot) -> None:
     diff overflows the pane and holds two changed regions (one near the top, one
     lower) — enough to exercise a manual scroll and a region-cursor jump."""
     for i in range(8):
-        await _turn(app, f"turn {i}")
+        await turn(app, f"turn {i}")
 
     await pilot.press("escape")  # → Edit
     view = app.core.nodes  # U0,A0,U1,A1,...,U7,A7
@@ -457,8 +452,8 @@ async def _double_compress_and_dive(app, pilot) -> None:
     so A2 drifts — the `g d` diff branch is genuinely reachable on it (the test
     asserts the drift, so it can only pass because the dive gate blocks it, not
     because the turn happens to be undrifted)."""
-    await _turn(app, "first")  # → U1, A1
-    await _turn(app, "second")  # → U2, A2
+    await turn(app, "first")  # → U1, A1
+    await turn(app, "second")  # → U2, A2
 
     # compress [U1, A1] → K1
     await pilot.press("escape")

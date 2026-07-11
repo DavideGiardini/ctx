@@ -8,7 +8,8 @@ reported ``nodes`` array, in view order — 13i) and the ``.range-selected`` CSS
 class the qa-tester harness can query.
 """
 
-from ctx.ui.widgets.input_bar import InputBar
+from pilot_helpers import turn, two_turns
+
 from ctx.ui.widgets.message_list import MessageWidget
 
 
@@ -16,10 +17,7 @@ async def test_v_then_down_down_selects_three_contiguous_ids(app_factory):
     app = app_factory()
     async with app.run_test() as pilot:
         # Two turns → four nodes [u1, a1, u2, a2].
-        await app.on_input_bar_submitted(InputBar.Submitted("first"))
-        await app.workers.wait_for_complete()
-        await app.on_input_bar_submitted(InputBar.Submitted("second"))
-        await app.workers.wait_for_complete()
+        await two_turns(app)
 
         view_ids = [n.id for n in app.core.nodes]
         assert len(view_ids) == 4
@@ -49,10 +47,7 @@ async def test_range_selection_uses_hover_style_and_bridges_gaps(app_factory):
     ``range-continues-*`` classes, the run's edges do not."""
     app = app_factory()
     async with app.run_test() as pilot:
-        await app.on_input_bar_submitted(InputBar.Submitted("first"))
-        await app.workers.wait_for_complete()
-        await app.on_input_bar_submitted(InputBar.Submitted("second"))
-        await app.workers.wait_for_complete()
+        await two_turns(app)
 
         view_ids = [n.id for n in app.core.nodes]
         assert len(view_ids) == 4
@@ -91,8 +86,7 @@ async def test_range_selection_uses_hover_style_and_bridges_gaps(app_factory):
 async def test_esc_clears_range_and_stays_in_edit(app_factory):
     app = app_factory()
     async with app.run_test() as pilot:
-        await app.on_input_bar_submitted(InputBar.Submitted("first"))
-        await app.workers.wait_for_complete()
+        await turn(app, "first")
 
         await pilot.press("escape")  # → Edit mode
         await pilot.press("v", "down")
@@ -109,8 +103,7 @@ async def test_esc_clears_range_and_stays_in_edit(app_factory):
 async def test_v_alone_is_range_of_one(app_factory):
     app = app_factory()
     async with app.run_test() as pilot:
-        await app.on_input_bar_submitted(InputBar.Submitted("only turn"))
-        await app.workers.wait_for_complete()
+        await turn(app, "only turn")
 
         await pilot.press("escape")  # → Edit mode, cursor on the last node
         await pilot.press("v")
@@ -125,10 +118,7 @@ async def test_down_at_bottom_edge_does_not_wrap(app_factory):
     index 0 and swallow the whole conversation."""
     app = app_factory()
     async with app.run_test() as pilot:
-        await app.on_input_bar_submitted(InputBar.Submitted("first"))
-        await app.workers.wait_for_complete()
-        await app.on_input_bar_submitted(InputBar.Submitted("second"))
-        await app.workers.wait_for_complete()
+        await two_turns(app)
 
         view_ids = [n.id for n in app.core.nodes]
         assert len(view_ids) == 4
@@ -144,10 +134,7 @@ async def test_up_at_top_edge_does_not_wrap(app_factory):
     """Task 13e: extending up from the first node clamps at index 0."""
     app = app_factory()
     async with app.run_test() as pilot:
-        await app.on_input_bar_submitted(InputBar.Submitted("first"))
-        await app.workers.wait_for_complete()
-        await app.on_input_bar_submitted(InputBar.Submitted("second"))
-        await app.workers.wait_for_complete()
+        await two_turns(app)
 
         await pilot.press("escape")
         await pilot.press("home")  # cursor on the first node
@@ -160,10 +147,7 @@ async def test_in_bounds_extension_unchanged(app_factory):
     """Normal in-bounds extension is unaffected by the clamp."""
     app = app_factory()
     async with app.run_test() as pilot:
-        await app.on_input_bar_submitted(InputBar.Submitted("first"))
-        await app.workers.wait_for_complete()
-        await app.on_input_bar_submitted(InputBar.Submitted("second"))
-        await app.workers.wait_for_complete()
+        await two_turns(app)
 
         await pilot.press("escape")
         await pilot.press("home")
