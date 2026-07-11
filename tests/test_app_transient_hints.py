@@ -7,17 +7,14 @@ conversation graph the way ``core.add_system_message`` did. A durable breadcrumb
 not turn *every* system message transient.
 """
 
-from pilot_helpers import two_turns
+from pilot_helpers import open_editor_on_range, two_turns
 
 
 async def test_empty_summary_commit_hints_without_adding_a_node(app_factory):
     app = app_factory()
     async with app.run_test() as pilot:
         await two_turns(app)
-        await pilot.press("escape")
-        await pilot.press("home")
-        await pilot.press("v", "down", "down", "down")  # select a range
-        await pilot.press("c")  # open the draft editor, summary left empty
+        await open_editor_on_range(pilot)  # open the draft editor, summary left empty
 
         before = len(app.describe_state()["nodes"])
         await pilot.press("ctrl+s")  # commit with an empty summary → refused

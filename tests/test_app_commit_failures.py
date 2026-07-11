@@ -17,7 +17,7 @@ keypress still changes app state (the editor closes on Esc).
 import asyncio
 
 from conftest import BlockingProvider
-from pilot_helpers import two_turns, wait_until_streaming
+from pilot_helpers import open_editor_on_range, two_turns, wait_until_streaming
 from textual.widgets import TextArea
 
 from ctx.ui.widgets.input_bar import InputBar
@@ -39,10 +39,7 @@ async def test_commit_while_streaming_breadcrumbs_and_stays_responsive(app_facto
     app = app_factory()
     async with app.run_test() as pilot:
         await two_turns(app)
-        await pilot.press("escape")
-        await pilot.press("home")
-        await pilot.press("v", "down", "down", "down")  # valid tip range
-        await pilot.press("c")
+        await open_editor_on_range(pilot)  # valid tip range
         app.query_one("#compress-output", TextArea).text = "SUMMARY"
 
         gate = asyncio.Event()

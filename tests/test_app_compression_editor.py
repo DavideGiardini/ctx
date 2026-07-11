@@ -10,7 +10,7 @@ The oracle is the Task 7 acceptance criterion, asserted through the public
 and the CSS ``display`` state the qa-tester harness can query.
 """
 
-from pilot_helpers import two_turns
+from pilot_helpers import open_editor_on_range, two_turns
 
 from ctx.core.conversation import DEFAULT_COMPRESSION_PROMPT
 from ctx.ui.widgets.app_footer import _HINTS
@@ -23,10 +23,7 @@ async def test_c_opens_editor_with_default_prompt_and_empty_output(app_factory):
     async with app.run_test() as pilot:
         await two_turns(app)
 
-        await pilot.press("escape")  # → Edit mode
-        await pilot.press("home")  # cursor on the first node
-        await pilot.press("v", "down")  # anchor a 2-node range
-        await pilot.press("c")
+        await open_editor_on_range(pilot, downs=1)  # anchor a 2-node range
 
         state = app.describe_state()
         editor_state = state["compression_editor"]
@@ -75,10 +72,7 @@ async def test_esc_closes_editor_restores_inspector_keeps_selection(app_factory)
     async with app.run_test() as pilot:
         await two_turns(app)
 
-        await pilot.press("escape")  # → Edit mode
-        await pilot.press("home")
-        await pilot.press("v", "down")  # 2-node range
-        await pilot.press("c")
+        await open_editor_on_range(pilot, downs=1)  # 2-node range
         range_before = app.describe_state()["range_selection"]
         assert len(range_before) == 2
 

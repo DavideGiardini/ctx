@@ -12,36 +12,16 @@ weight widgets. The suite convention (a K must be *selected* in Edit mode) is se
 via the keyboard, then the chord is driven with real key presses.
 """
 
-from pilot_helpers import two_turns
-from textual.widgets import Static, TextArea
+from pilot_helpers import compress_range, select_tip_in_edit, two_turns
+from textual.widgets import Static
 
 from ctx.ui.widgets.message_list import MessageWidget
 
 
-async def _compress_full_tip_range(app, pilot, summary: str) -> None:
-    """Compress the whole (4-node) tip range into one K via the draft editor."""
-    await pilot.press("escape")  # → Edit mode
-    await pilot.press("home")  # cursor on the first node
-    await pilot.press("v", "down", "down", "down")  # range = all 4 nodes (ends at tip)
-    await pilot.press("c")  # open the draft editor
-    app.query_one("#compress-output", TextArea).text = summary
-    await pilot.press("ctrl+s")  # commit → one K in the view (Edit mode, no selection)
-
-
-async def _select_k_in_edit(app, pilot) -> None:
-    """Land in Edit mode with the selection on the freshly folded K (the tip).
-
-    A commit clears the selection, so bounce out to Insert and back: re-entering
-    Edit re-selects the tip."""
-    if app.mode == "edit":
-        await pilot.press("escape")  # → Insert
-    await pilot.press("escape")  # → Edit, selects the tip (K)
-
-
 async def _enter_deep_dive(app, pilot) -> None:
     await two_turns(app)
-    await _compress_full_tip_range(app, pilot, "SUMMARY")
-    await _select_k_in_edit(app, pilot)
+    await compress_range(app, pilot, "SUMMARY")
+    await select_tip_in_edit(app, pilot)
     assert app._get_selected_node().node_type == "compression"
     await pilot.press("g", "d")
     await pilot.pause()

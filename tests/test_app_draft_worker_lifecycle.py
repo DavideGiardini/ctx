@@ -17,15 +17,8 @@ a gate) keeps the draft worker live while the test drives the UI.
 import asyncio
 
 from conftest import BlockingProvider
-from pilot_helpers import two_turns, wait_until
+from pilot_helpers import open_editor_on_range, two_turns, wait_until
 from textual.widgets import TextArea
-
-
-async def _open_editor_on_full_range(pilot) -> None:
-    await pilot.press("escape")  # → Edit mode
-    await pilot.press("home")  # cursor on the first node
-    await pilot.press("v", "down", "down", "down")  # range = all 4 nodes (ends at tip)
-    await pilot.press("c")  # open the draft editor
 
 
 async def _start_blocked_draft(app, pilot, gate) -> None:
@@ -56,7 +49,7 @@ async def test_commit_mid_draft_is_refused(app_factory):
     app = app_factory()
     async with app.run_test() as pilot:
         await two_turns(app)
-        await _open_editor_on_full_range(pilot)
+        await open_editor_on_range(pilot)
         gate = asyncio.Event()
         await _start_blocked_draft(app, pilot, gate)
 
@@ -75,7 +68,7 @@ async def test_esc_cancels_a_live_draft(app_factory):
     app = app_factory()
     async with app.run_test() as pilot:
         await two_turns(app)
-        await _open_editor_on_full_range(pilot)
+        await open_editor_on_range(pilot)
         gate = asyncio.Event()
         await _start_blocked_draft(app, pilot, gate)
         worker = app._draft_worker
@@ -97,7 +90,7 @@ async def test_close_cancels_a_live_worker(app_factory):
     app = app_factory()
     async with app.run_test() as pilot:
         await two_turns(app)
-        await _open_editor_on_full_range(pilot)
+        await open_editor_on_range(pilot)
         gate = asyncio.Event()
         await _start_blocked_draft(app, pilot, gate)
         worker = app._draft_worker
@@ -122,7 +115,7 @@ async def test_reopened_editor_summary_is_clean_after_orphan(app_factory):
     app = app_factory()
     async with app.run_test() as pilot:
         await two_turns(app)
-        await _open_editor_on_full_range(pilot)
+        await open_editor_on_range(pilot)
         gate = asyncio.Event()
         await _start_blocked_draft(app, pilot, gate)
 

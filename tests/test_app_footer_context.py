@@ -6,7 +6,7 @@ tracks the selected node type. The oracle is the public ``describe_state()``
 ``"footer"`` line (the same string ``AppFooter.current_hint`` renders).
 """
 
-from pilot_helpers import two_turns
+from pilot_helpers import select_tip_in_edit, two_turns
 from textual.widgets import TextArea
 
 from ctx.ui.widgets.app_footer import _HINTS
@@ -29,8 +29,7 @@ async def test_footer_advertises_expand_only_on_a_compression_node(app_factory):
         await pilot.press("c")
         app.query_one("#compress-output", TextArea).text = "SUMMARY"
         await pilot.press("ctrl+s")  # commit → Edit mode, selection cleared
-        await pilot.press("escape")  # → Insert
-        await pilot.press("escape")  # → Edit, selects the tip (the K)
+        await select_tip_in_edit(app, pilot)
 
         assert app._get_selected_node().node_type == "compression"
         assert "x Expand" in app.describe_state()["footer"]

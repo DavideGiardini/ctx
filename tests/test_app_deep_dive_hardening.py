@@ -16,25 +16,9 @@ The oracle is the Task 13h acceptance criteria, asserted through ``describe_stat
 and the rendered widget count.
 """
 
-from pilot_helpers import two_turns
-from textual.widgets import TextArea
+from pilot_helpers import compress_range, select_tip_in_edit, two_turns
 
 from ctx.ui.widgets.message_list import MessageWidget
-
-
-async def _compress_full_tip_range(app, pilot, summary: str) -> None:
-    await pilot.press("escape")  # → Edit mode
-    await pilot.press("home")  # cursor on the first node
-    await pilot.press("v", "down", "down", "down")  # range = all 4 nodes
-    await pilot.press("c")  # open the draft editor
-    app.query_one("#compress-output", TextArea).text = summary
-    await pilot.press("ctrl+s")  # commit → one K in the view
-
-
-async def _select_k_in_edit(app, pilot) -> None:
-    if app.mode == "edit":
-        await pilot.press("escape")  # → Insert
-    await pilot.press("escape")  # → Edit, selects the tip (K)
 
 
 async def test_single_esc_pops_dive_when_anchored_before_diving(app_factory):
@@ -43,8 +27,8 @@ async def test_single_esc_pops_dive_when_anchored_before_diving(app_factory):
     app = app_factory()
     async with app.run_test() as pilot:
         await two_turns(app)
-        await _compress_full_tip_range(app, pilot, "SUMMARY")
-        await _select_k_in_edit(app, pilot)
+        await compress_range(app, pilot, "SUMMARY")
+        await select_tip_in_edit(app, pilot)
         assert app._get_selected_node().node_type == "compression"
 
         await pilot.press("v")  # anchor a range on the K BEFORE diving
@@ -69,8 +53,8 @@ async def test_connectivity_node_gated_out_of_dive_then_surfaces(app_factory):
     app = app_factory()
     async with app.run_test() as pilot:
         await two_turns(app)
-        await _compress_full_tip_range(app, pilot, "SUMMARY")
-        await _select_k_in_edit(app, pilot)
+        await compress_range(app, pilot, "SUMMARY")
+        await select_tip_in_edit(app, pilot)
         await pilot.press("g", "d")
         await pilot.pause()
 
@@ -97,8 +81,8 @@ async def test_model_command_gated_out_of_dive_then_surfaces(app_factory):
     app = app_factory()
     async with app.run_test() as pilot:
         await two_turns(app)
-        await _compress_full_tip_range(app, pilot, "SUMMARY")
-        await _select_k_in_edit(app, pilot)
+        await compress_range(app, pilot, "SUMMARY")
+        await select_tip_in_edit(app, pilot)
         await pilot.press("g", "d")
         await pilot.pause()
         assert app.describe_state()["deep_dive"]["active"] is True
@@ -125,7 +109,7 @@ async def test_commit_resets_inspector_to_placeholder(app_factory):
     app = app_factory()
     async with app.run_test() as pilot:
         await two_turns(app)
-        await _compress_full_tip_range(app, pilot, "SUMMARY")
+        await compress_range(app, pilot, "SUMMARY")
         await pilot.pause()
 
         state = app.describe_state()

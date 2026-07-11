@@ -19,36 +19,24 @@ mode switch) has no Pilot key equivalent.
 import asyncio
 
 from conftest import BlockingProvider
-from pilot_helpers import two_turns, wait_until
-from textual.widgets import TextArea
-
-
-async def _compress_full_tip_range(app, pilot, summary: str) -> None:
-    await pilot.press("escape")  # → Edit mode
-    await pilot.press("home")  # cursor on the first node
-    await pilot.press("v", "down", "down", "down")  # range = all 4 nodes (ends at tip)
-    await pilot.press("c")  # open the draft editor
-    app.query_one("#compress-output", TextArea).text = summary
-    await pilot.press("ctrl+s")  # commit → one K in the view
+from pilot_helpers import (
+    compress_range,
+    open_editor_on_range,
+    select_tip_in_edit,
+    two_turns,
+    wait_until,
+)
 
 
 async def _enter_deep_dive(app, pilot) -> None:
     await two_turns(app)
-    await _compress_full_tip_range(app, pilot, "SUMMARY")
-    # A commit clears the selection; bounce out and back to re-select the K tip.
-    await pilot.press("escape")  # → Insert
-    await pilot.press("escape")  # → Edit, selects the tip (K)
+    await compress_range(app, pilot, "SUMMARY")
+    # A commit clears the selection; re-select the K tip before diving.
+    await select_tip_in_edit(app, pilot)
     assert app._get_selected_node().node_type == "compression"
     await pilot.press("g", "d")
     await pilot.pause()
     assert app.describe_state()["deep_dive"]["active"] is True
-
-
-async def _open_editor_on_full_range(pilot) -> None:
-    await pilot.press("escape")  # → Edit mode
-    await pilot.press("home")
-    await pilot.press("v", "down", "down", "down")
-    await pilot.press("c")  # open the draft editor
 
 
 async def _start_blocked_draft(app, pilot, gate) -> None:
@@ -104,7 +92,7 @@ async def test_new_closes_an_open_editor_without_committing(app_factory):
     app = app_factory()
     async with app.run_test() as pilot:
         await two_turns(app)
-        await _open_editor_on_full_range(pilot)
+        await open_editor_on_range(pilot)
         assert app.describe_state()["compression_editor"]["open"] is True
 
         await app._handle_new_command()
@@ -120,7 +108,7 @@ async def test_new_cancels_a_live_draft_worker(app_factory):
     app = app_factory()
     async with app.run_test() as pilot:
         await two_turns(app)
-        await _open_editor_on_full_range(pilot)
+        await open_editor_on_range(pilot)
         gate = asyncio.Event()
         await _start_blocked_draft(app, pilot, gate)
         worker = app._draft_worker

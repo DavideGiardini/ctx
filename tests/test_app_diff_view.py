@@ -14,7 +14,7 @@ now-view is ``[U1,A1,U2]``, so ``g d`` on ``A2`` shows one changed region
 ``left=[K]`` ⟷ ``right=[U1,A1]``.
 """
 
-from pilot_helpers import turn
+from pilot_helpers import compress_range, turn
 from textual.containers import VerticalScroll
 from textual.widgets import TextArea
 
@@ -27,12 +27,7 @@ async def _drift_scenario(app, pilot) -> None:
     """U1,A1 → compress [U1,A1] → U2,A2 → expand K, then select A2."""
     await turn(app, "first")  # → U1, A1
 
-    await pilot.press("escape")  # → Edit
-    await pilot.press("home")  # cursor on U1
-    await pilot.press("v", "down")  # range = [U1, A1]
-    await pilot.press("c")  # open the draft editor
-    app.query_one("#compress-output", TextArea).text = "SUMMARY"
-    await pilot.press("ctrl+s")  # commit → view = [K]
+    await compress_range(app, pilot, "SUMMARY", downs=1)  # commit → view = [K]
 
     await turn(app, "second")  # → K, U2, A2 (A2 saw K)
 

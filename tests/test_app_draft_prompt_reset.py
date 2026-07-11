@@ -15,15 +15,8 @@ asserted through ``app.core`` (K's meta) and the public editor state.
 import asyncio
 
 from conftest import BlockingProvider, ErroringProvider
-from pilot_helpers import two_turns, wait_until
+from pilot_helpers import open_editor_on_range, two_turns, wait_until
 from textual.widgets import TextArea
-
-
-async def _open_editor_on_full_range(pilot) -> None:
-    await pilot.press("escape")  # → Edit mode
-    await pilot.press("home")  # cursor on the first node
-    await pilot.press("v", "down", "down", "down")  # range = all 4 nodes (ends at tip)
-    await pilot.press("c")  # open the draft editor
 
 
 def _last_k(app):
@@ -36,7 +29,7 @@ async def test_manual_commit_after_cancelled_draft_stamps_empty_prompt(app_facto
     app = app_factory()
     async with app.run_test() as pilot:
         await two_turns(app)
-        await _open_editor_on_full_range(pilot)
+        await open_editor_on_range(pilot)
 
         # Draft with a custom prompt, then cancel the live worker via Esc.
         app.query_one("#compress-prompt", TextArea).text = "focus on the decisions"
@@ -67,7 +60,7 @@ async def test_manual_commit_after_failed_draft_stamps_empty_prompt(app_factory)
     app = app_factory()
     async with app.run_test() as pilot:
         await two_turns(app)
-        await _open_editor_on_full_range(pilot)
+        await open_editor_on_range(pilot)
 
         app.query_one("#compress-prompt", TextArea).text = "focus on the decisions"
         app.core._provider = ErroringProvider()

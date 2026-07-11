@@ -11,25 +11,18 @@ inspector's ``NodeView``/``splits_visible`` (the split *contents* are an inspect
 detail describe_state omits).
 """
 
-from pilot_helpers import two_turns
+from pilot_helpers import open_editor_on_range, two_turns
 from textual.widgets import TextArea
 
 from ctx.core.conversation import DEFAULT_COMPRESSION_PROMPT
 from ctx.ui.widgets.detail_inspector import DetailInspector
 
 
-async def _open_editor_on_full_range(pilot) -> None:
-    await pilot.press("escape")  # → Edit mode
-    await pilot.press("home")  # cursor on the first node
-    await pilot.press("v", "down", "down", "down")  # range = all 4 nodes (ends at tip)
-    await pilot.press("c")  # open the draft editor
-
-
 async def test_drafted_k_inspector_shows_prompt_originals_summary(app_factory):
     app = app_factory()
     async with app.run_test() as pilot:
         await two_turns(app)
-        await _open_editor_on_full_range(pilot)
+        await open_editor_on_range(pilot)
 
         # Draft (Ctrl+D) so the committed K carries a non-empty prompt.
         await pilot.press("ctrl+d")
@@ -61,7 +54,7 @@ async def test_manual_k_inspector_hides_empty_prompt_split(app_factory):
     app = app_factory()
     async with app.run_test() as pilot:
         await two_turns(app)
-        await _open_editor_on_full_range(pilot)
+        await open_editor_on_range(pilot)
 
         app.query_one("#compress-output", TextArea).text = "MANUAL SUMMARY"
         await pilot.press("ctrl+s")  # manual commit → prompt == ""
@@ -84,7 +77,7 @@ async def test_k_inspector_originals_split_renders_compact_rows(app_factory):
     app = app_factory()
     async with app.run_test() as pilot:
         await two_turns(app)
-        await _open_editor_on_full_range(pilot)
+        await open_editor_on_range(pilot)
 
         app.query_one("#compress-output", TextArea).text = "SUMMARY"
         await pilot.press("ctrl+s")  # commit -> K folding all 4 nodes
@@ -106,7 +99,7 @@ async def test_number_keys_maximize_k_splits(app_factory):
     app = app_factory()
     async with app.run_test() as pilot:
         await two_turns(app)
-        await _open_editor_on_full_range(pilot)
+        await open_editor_on_range(pilot)
 
         app.query_one("#compress-output", TextArea).text = "SUMMARY"
         await pilot.press("ctrl+s")

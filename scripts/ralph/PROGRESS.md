@@ -131,3 +131,59 @@ Key decisions a future fresh iteration must know:
 No new tests (behavior-preserving refactor; floor is same-tests-collected-and-pass,
 met at 705). No qa-tester / visual check — test-only change, no runtime surface;
 green gate IS the verification.
+
+## 2026-07-11 — Task 4: compress-via-editor choreography in tests/pilot_helpers.py
+
+Added three helpers to `tests/pilot_helpers.py`: `open_editor_on_range(pilot, *,
+downs=3)` (form B: escape → home → `v` + downs×down → `c`), `compress_range(app,
+pilot, summary, *, downs=3)` (form A = form B + set `#compress-output` + `ctrl+s`;
+delegates to `open_editor_on_range`), and `select_tip_in_edit(app, pilot)` (the
+mode-guarded double-Esc). Removed the four hand-copied helpers across their files
+and migrated the inlined copies. Acceptance grep for the four `def`s returns
+nothing; collected count unchanged (705 → 705); gate green (ruff + mypy + 705
+pytest, 30s). `tests/README.md` gained a "Shared Pilot scaffolding" section naming
+both homes (conftest.py fixtures/doubles + pilot_helpers.py choreography) and the
+BlockingProvider deadlock trap. This was the final PRD task.
+
+Migration map (what moved where, for future audit):
+- `_compress_full_tip_range` → `compress_range`: deep_dive, expand, compress_payload,
+  deep_dive_hardening, new_resume_reset.
+- `_open_editor_on_full_range` → `open_editor_on_range`: draft_worker_lifecycle,
+  committed_k_inspector, new_resume_reset, draft_prompt_reset, draft_compression,
+  commit_compression.
+- `_select_k_in_edit`/`_select_tip_in_edit` → `select_tip_in_edit`: deep_dive,
+  deep_dive_hardening, expand; plus the inline double-Esc in new_resume_reset's
+  `_enter_deep_dive` and footer_context's `test_footer_advertises_expand...`.
+- Inlined `open_editor_on_range(pilot)`: transient_hints (empty-summary test),
+  commit_failures (streaming-refusal test).
+- `downs=1` real callers: compression_editor's two 2-node `open_editor_on_range(pilot,
+  downs=1)` opens, and drift/diff_view `_drift_scenario` → `compress_range(app, pilot,
+  "SUMMARY", downs=1)`. This is what justifies the `downs` knob's existence (deletion
+  test: without these callers `downs` would be speculative generality).
+
+Decisions a future fresh iteration must know:
+- **`compress_range` delegates to `open_editor_on_range`** — form A is literally form
+  B + type summary + `ctrl+s`, so they share the `downs` knob and there is one copy of
+  the escape/home/v/c sequence.
+- **footer_context's compress block was left INLINE** (only its select-tip migrated).
+  Its `home/v×3/c/settext/ctrl+s` block has NO leading `escape`: the test is already in
+  Edit mode (from an earlier `escape` + assertions), so calling `compress_range` — which
+  presses `escape` first — would toggle Edit→Insert and break it. Genuinely divergent
+  mode-entry; not force-fit.
+- **reconcile and range_selection got NO task-4 migration.** reconcile's only compress
+  block is the trailing-range `home,down,down / v,down` the PRD explicitly says to leave
+  alone. range_selection has no editor/compress choreography at all (pure `v`/`down`/`up`
+  selection-extent tests, no `c` press); its turn choreography was already migrated in
+  task 3. Both are in the PRD's file list but correctly resolve to no-op here.
+- **Left alone (genuinely divergent):** diff_view's `_middle_compress_scenario`
+  (non-tip range), `_two_region_drift_scenario` (per-region compress loop),
+  `_double_compress_and_dive`; commit_failures' double-compress test (suffix via `v,up`,
+  then a range containing a committed K); compression_editor's unanchored `escape/c`
+  single-node opens (no home/v).
+- `ruff check --fix tests/` dropped now-unused `TextArea` imports and fixed two E303
+  blank-line issues after def removals; drift.py's `TextArea` was hand-removed
+  (`Static` stays).
+
+No new tests (behavior-preserving refactor; floor = same-tests-collected-and-pass,
+met at 705). No qa-tester / visual check — test-only change, no runtime surface; the
+green gate IS the verification (per PRD).

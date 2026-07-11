@@ -40,31 +40,11 @@ must be written against shared helpers, not a 20th copy of the duplication.
 - [x] 1 — Shared provider doubles in `tests/conftest.py` (bodies in `PRD-done.md`)
 - [x] 2 — Shared app factory in `tests/conftest.py` (bodies in `PRD-done.md`)
 - [x] 3 — Turn/submit choreography in `tests/pilot_helpers.py` (bodies in `PRD-done.md`)
+- [x] 4 — Compress-via-editor choreography in `tests/pilot_helpers.py` (bodies in `PRD-done.md`)
 
 ## Tasks
 
-- [ ] **4. Compress-via-editor choreography in `tests/pilot_helpers.py`** — Add:
-      `open_editor_on_range(pilot, *, downs=3)` (escape → home → `v` + `downs`×down
-      → `c`; form B), `compress_range(app, pilot, summary, *, downs=3)` (form A =
-      form B + set `#compress-output` text + `ctrl+s`), and
-      `select_tip_in_edit(app, pilot)` (the mode-guarded double-escape that
-      replaces the inconsistent `if mode == "edit": escape` workarounds). The
-      `downs` knob absorbs the 2-node variants (`test_app_drift.py`,
-      `test_app_diff_view.py`). Migrate the extracted helpers
-      (`_compress_full_tip_range`, `_open_editor_on_full_range`,
-      `_select_k_in_edit`, `_select_tip_in_edit`) and the inlined copies in
-      `test_app_footer_context.py`, `test_app_transient_hints.py`,
-      `test_app_reconcile.py`, `test_app_compression_editor.py`,
-      `test_app_range_selection.py`, `test_app_commit_failures.py`. Leave genuinely
-      divergent choreography alone (e.g. `test_app_diff_view.py`'s
-      `_middle_compress_scenario` compressing a non-tip range, and
-      `test_app_reconcile.py`'s trailing-range navigation) — parameterize only if
-      it stays one obvious knob. Then document the shared scaffolding (conftest
-      fixtures + `pilot_helpers`) in `tests/README.md` so future sessions reuse
-      instead of re-declaring.
-      _Acceptance:_ `grep -rn "def _compress_full_tip_range\|def _open_editor_on_full_range\|def _select_k_in_edit\|def _select_tip_in_edit" tests/`
-      returns nothing; `tests/README.md` names both shared-scaffolding homes;
-      collected test count identical to before; `bash scripts/check.sh` green.
+_All tasks complete._
 
 ## Out of scope
 - Any change under `ctx/**` — this PRD touches only `tests/` (and `tests/README.md`).

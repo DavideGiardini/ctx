@@ -35,6 +35,31 @@ See `tests/specs/context.md` for a worked example.
   This is the home for repeatable "MCP smoke" coverage; the `qa-tester` subagent
   handles the exploratory/LLM-driven side.
 
+## Shared Pilot scaffolding
+
+The `test_app_*.py` family used to hand-copy ~420 lines of setup across ~19 files
+(the copies had already started to diverge). That scaffolding now lives in two
+shared homes — **reuse them; do not re-declare a 20th private copy:**
+
+- **`tests/conftest.py`** — the fixtures and provider *doubles*. The `app_factory`
+  fixture builds a wired `ChatApp` (`app_factory(provider=…, tokens=…, usage=…)`);
+  the provider classes (`TestProvider`/`RecordingProvider`/`BlockingProvider`/
+  `ErroringProvider`, …) are imported from here (`from conftest import …`). conftest
+  is auto-discovered by pytest and is **not** meant to be imported as a module, so
+  only fixtures and classes go here — not plain helper functions.
+- **`tests/pilot_helpers.py`** — the importable keystroke/turn *choreography*
+  functions (`from pilot_helpers import …`): `two_turns` / `turn` (submit + drain),
+  `wait_until` / `wait_until_streaming` (bounded spin on a live worker),
+  `open_editor_on_range(pilot, *, downs=3)` and `compress_range(app, pilot, summary,
+  *, downs=3)` (the `downs` knob sizes the folded range — `downs=1` for the 2-node
+  variants), and `select_tip_in_edit` (the mode-guarded double-Esc that re-selects
+  the tip after a commit).
+
+**Deadlock trap:** a `BlockingProvider` blocks forever on its gate, so it must
+**never** drive a setup turn that is awaited to completion (`two_turns`/`turn` drain
+fully) — that deadlocks the whole run. Set up with the scripted default provider and
+swap the blocking one in only for the single turn under test (see its docstring).
+
 ## Conventions
 
 - `pytest` with `asyncio_mode = "auto"` (configured in `pyproject.toml`) — async

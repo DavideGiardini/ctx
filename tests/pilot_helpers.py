@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from textual.widgets import TextArea
+
 from ctx.ui.widgets.input_bar import InputBar
 
 
@@ -67,3 +69,47 @@ async def wait_until_streaming(app, pilot, *, tries: int = 200) -> None:
     """
     live = await wait_until(pilot, lambda: app.core.streaming, tries=tries)
     assert live, "turn stream never became live within the bound"
+
+
+async def open_editor_on_range(pilot, *, downs: int = 3) -> None:
+    """Enter Edit, anchor a range at the top of the view and extend it ``downs``
+    rows down to the tip, then open the compression draft editor on it (form B).
+
+    ``downs=3`` selects the four-node ``U1,A1,U2,A2`` view most compression tests
+    start from; the knob absorbs the 2-node variants (``downs=1`` → the top turn
+    only). Assumes the app is in *Insert* mode on entry — the leading ``Esc`` toggles
+    into Edit. Callers already in Edit (or opening on a single unanchored node) drive
+    the keys inline instead.
+    """
+    await pilot.press("escape")  # → Edit mode
+    await pilot.press("home")  # cursor on the first node
+    await pilot.press("v", *(["down"] * downs))  # range = downs+1 nodes, ending at tip
+    await pilot.press("c")  # open the draft editor
+
+
+async def compress_range(app, pilot, summary: str, *, downs: int = 3) -> None:
+    """Fold a top-anchored range into a single committed K (form A).
+
+    Opens the editor on the range (:func:`open_editor_on_range`, same ``downs``
+    knob), writes ``summary`` into the Bottom split, and commits with ``Ctrl+S``.
+    A manual commit like this stamps an empty prompt on the K. Leaves the app in
+    Edit mode with the selection cleared (a commit clears it); use
+    :func:`select_tip_in_edit` to re-select the folded K.
+    """
+    await open_editor_on_range(pilot, downs=downs)
+    app.query_one("#compress-output", TextArea).text = summary
+    await pilot.press("ctrl+s")  # commit → one K in the view
+
+
+async def select_tip_in_edit(app, pilot) -> None:
+    """Land in Edit mode with the selection on the tip node.
+
+    A commit leaves the app in Edit mode with the selection cleared, so bounce out
+    to Insert and back: re-entering Edit re-selects the tip (e.g. a freshly folded
+    K). The leading Esc is mode-guarded so this is a no-op-safe way to reach
+    "Edit mode, tip selected" from either mode — replacing the hand-copied
+    ``if mode == "edit": escape`` workarounds that had drifted between files.
+    """
+    if app.mode == "edit":
+        await pilot.press("escape")  # → Insert
+    await pilot.press("escape")  # → Edit, selects the tip

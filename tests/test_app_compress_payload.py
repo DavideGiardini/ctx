@@ -13,20 +13,9 @@ provider actually receives on the turn *after* a commit.
 """
 
 from conftest import RecordingProvider
-from pilot_helpers import two_turns
-from textual.widgets import TextArea
+from pilot_helpers import compress_range, two_turns
 
 from ctx.ui.widgets.input_bar import InputBar
-
-
-async def _compress_full_tip_range(app, pilot, summary: str) -> None:
-    """Compress the whole (4-node) tip range into one K via the draft editor."""
-    await pilot.press("escape")  # → Edit mode
-    await pilot.press("home")  # cursor on the first node
-    await pilot.press("v", "down", "down", "down")  # range = all 4 nodes (ends at tip)
-    await pilot.press("c")  # open the draft editor
-    app.query_one("#compress-output", TextArea).text = summary
-    await pilot.press("ctrl+s")  # commit → one K in the view (Edit mode, no selection)
 
 
 async def test_next_turn_sees_summary_not_children_after_compress(app_factory):
@@ -34,7 +23,7 @@ async def test_next_turn_sees_summary_not_children_after_compress(app_factory):
     app = app_factory(provider=provider)
     async with app.run_test() as pilot:
         await two_turns(app)
-        await _compress_full_tip_range(app, pilot, "THE SUMMARY TEXT")
+        await compress_range(app, pilot, "THE SUMMARY TEXT")
         # The whole tip range is folded into a single K.
         assert (
             sum(

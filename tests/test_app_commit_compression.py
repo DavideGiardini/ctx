@@ -11,7 +11,7 @@ The oracle is the Task 8 acceptance criterion, asserted through the public
 detail describe_state deliberately omits).
 """
 
-from pilot_helpers import two_turns
+from pilot_helpers import open_editor_on_range, two_turns
 from textual.widgets import TextArea
 
 from ctx.ui.widgets.compression_editor import CompressionEditor
@@ -19,19 +19,11 @@ from ctx.ui.widgets.detail_inspector import DetailInspector
 from ctx.ui.widgets.message_list import MessageWidget
 
 
-async def _open_editor_on_full_range(pilot) -> None:
-    """Enter Edit, select the whole (4-node) view ending at the tip, open editor."""
-    await pilot.press("escape")  # → Edit mode
-    await pilot.press("home")  # cursor on the first node
-    await pilot.press("v", "down", "down", "down")  # range = all 4 nodes (ends at tip)
-    await pilot.press("c")  # open the draft editor
-
-
 async def test_ctrl_s_commits_folds_range_to_single_k(app_factory):
     app = app_factory()
     async with app.run_test() as pilot:
         await two_turns(app)
-        await _open_editor_on_full_range(pilot)
+        await open_editor_on_range(pilot)
 
         app.query_one("#compress-output", TextArea).text = "SUMMARY OF THE FIRST TWO TURNS"
         await pilot.press("ctrl+s")
@@ -60,7 +52,7 @@ async def test_tab_reaches_summary_split_for_keyboard_only_commit(app_factory):
     app = app_factory()
     async with app.run_test() as pilot:
         await two_turns(app)
-        await _open_editor_on_full_range(pilot)
+        await open_editor_on_range(pilot)
 
         # On open the prompt split is focused; Tab must reach the summary split
         # (the app routes Tab into the editor while it owns the left pane) so a
@@ -80,7 +72,7 @@ async def test_ctrl_s_empty_summary_breadcrumbs_no_commit(app_factory):
     app = app_factory()
     async with app.run_test() as pilot:
         await two_turns(app)
-        await _open_editor_on_full_range(pilot)
+        await open_editor_on_range(pilot)
 
         # Leave the summary empty.
         await pilot.press("ctrl+s")
@@ -134,7 +126,7 @@ async def test_committed_k_round_trips_across_app_instances(app_factory):
     async with app.run_test() as pilot:
         await two_turns(app)
         conv_id = app.core.conversation_id
-        await _open_editor_on_full_range(pilot)
+        await open_editor_on_range(pilot)
 
         app.query_one("#compress-output", TextArea).text = "ROUND TRIP SUMMARY"
         await pilot.press("ctrl+s")

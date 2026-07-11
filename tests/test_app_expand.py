@@ -22,44 +22,22 @@ provider (for the next turn's context).
 """
 
 from conftest import RecordingProvider
-from pilot_helpers import two_turns
-from textual.widgets import TextArea
+from pilot_helpers import compress_range, select_tip_in_edit, two_turns
 
 from ctx.ui.widgets.input_bar import InputBar
-
-
-async def _compress_full_tip_range(app, pilot, summary: str) -> None:
-    """Compress the whole (4-node) tip range into one K via the draft editor."""
-    await pilot.press("escape")  # → Edit mode
-    await pilot.press("home")  # cursor on the first node
-    await pilot.press("v", "down", "down", "down")  # range = all 4 nodes (ends at tip)
-    await pilot.press("c")  # open the draft editor
-    app.query_one("#compress-output", TextArea).text = summary
-    await pilot.press("ctrl+s")  # commit → one K in the view (Edit mode, no selection)
-
-
-async def _select_tip_in_edit(app, pilot) -> None:
-    """Land in Edit mode with the selection on the tip node.
-
-    A commit leaves us in Edit mode with the selection cleared, so we bounce out
-    to Insert and back: re-entering Edit re-selects the tip (the freshly folded
-    K)."""
-    if app.mode == "edit":
-        await pilot.press("escape")  # → Insert
-    await pilot.press("escape")  # → Edit, selects the tip
 
 
 async def test_expand_restores_children_and_removes_k(app_factory):
     app = app_factory()
     async with app.run_test() as pilot:
         await two_turns(app)
-        await _compress_full_tip_range(app, pilot, "SUMMARY")
+        await compress_range(app, pilot, "SUMMARY")
         assert sum(
             1 for n in app.describe_state()["nodes"] if n["node_type"] == "compression"
         ) == 1
 
         # Re-enter Edit (selects the tip = K), then expand it with the key.
-        await _select_tip_in_edit(app, pilot)
+        await select_tip_in_edit(app, pilot)
         assert app._get_selected_node().node_type == "compression"
         await pilot.press("x")
 
@@ -76,8 +54,8 @@ async def test_expand_survives_restart(app_factory):
     async with app.run_test() as pilot:
         await two_turns(app)
         conv_id = app.core.conversation_id
-        await _compress_full_tip_range(app, pilot, "SUMMARY")
-        await _select_tip_in_edit(app, pilot)
+        await compress_range(app, pilot, "SUMMARY")
+        await select_tip_in_edit(app, pilot)
         await pilot.press("x")
         assert not any(
             n["node_type"] == "compression" for n in app.describe_state()["nodes"]
@@ -98,8 +76,8 @@ async def test_next_turn_sees_children_verbatim_after_expand(app_factory):
     app = app_factory(provider=provider)
     async with app.run_test() as pilot:
         await two_turns(app)
-        await _compress_full_tip_range(app, pilot, "THE SUMMARY TEXT")
-        await _select_tip_in_edit(app, pilot)
+        await compress_range(app, pilot, "THE SUMMARY TEXT")
+        await select_tip_in_edit(app, pilot)
         await pilot.press("x")
 
         # Next turn: the recording provider must receive the children verbatim

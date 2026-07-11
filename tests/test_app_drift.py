@@ -15,8 +15,8 @@ while ``A1``'s did not. With the config off, no node drifts.
 
 import json
 
-from pilot_helpers import turn
-from textual.widgets import Static, TextArea
+from pilot_helpers import compress_range, turn
+from textual.widgets import Static
 
 import ctx.core.config
 from ctx.ui.widgets.message_list import MessageWidget
@@ -27,12 +27,7 @@ async def _drift_scenario(app, pilot) -> None:
     await turn(app, "first")  # → U1, A1
 
     # Compress the whole tip range [U1, A1] into one K via the draft editor.
-    await pilot.press("escape")  # → Edit mode
-    await pilot.press("home")  # cursor on U1
-    await pilot.press("v", "down")  # range = [U1, A1]
-    await pilot.press("c")  # open the draft editor
-    app.query_one("#compress-output", TextArea).text = "SUMMARY"
-    await pilot.press("ctrl+s")  # commit → view = [K], Edit mode, no selection
+    await compress_range(app, pilot, "SUMMARY", downs=1)
 
     await turn(app, "second")  # → K, U2, A2 (A2 saw K in context)
 
