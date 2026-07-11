@@ -19,17 +19,7 @@ import asyncio
 from conftest import BlockingProvider
 from textual.widgets import TextArea
 
-from ctx.core.provider import TestProvider as CannedProvider
-from ctx.ui.app import ChatApp
 from ctx.ui.widgets.input_bar import InputBar
-
-
-def _app(repo, workspace) -> ChatApp:
-    return ChatApp(
-        provider=CannedProvider(["ok"]),
-        workspace=workspace,
-        storage=repo,
-    )
 
 
 async def _two_turns(app) -> None:
@@ -49,10 +39,10 @@ def _hint_shown(app, needle: str) -> bool:
     return hint is not None and needle in hint.lower()
 
 
-async def test_commit_while_streaming_breadcrumbs_and_stays_responsive(repo, workspace):
+async def test_commit_while_streaming_breadcrumbs_and_stays_responsive(app_factory):
     # Trigger (2): a real turn is streaming (H2 guard) — `c` has no streaming
     # gate, so the editor opens fine and Ctrl+S then hits the guard.
-    app = _app(repo, workspace)
+    app = app_factory()
     async with app.run_test() as pilot:
         await _two_turns(app)
         await pilot.press("escape")
@@ -83,9 +73,9 @@ async def test_commit_while_streaming_breadcrumbs_and_stays_responsive(repo, wor
         await app.workers.wait_for_complete()
 
 
-async def test_commit_range_containing_k_breadcrumbs_and_stays_responsive(repo, workspace):
+async def test_commit_range_containing_k_breadcrumbs_and_stays_responsive(app_factory):
     # Trigger (3): a range that contains an already-committed K (Q7 flat guard).
-    app = _app(repo, workspace)
+    app = app_factory()
     async with app.run_test() as pilot:
         await _two_turns(app)
 

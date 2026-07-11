@@ -24,17 +24,7 @@ provider (for the next turn's context).
 from conftest import RecordingProvider
 from textual.widgets import TextArea
 
-from ctx.core.provider import TestProvider as CannedProvider
-from ctx.ui.app import ChatApp
 from ctx.ui.widgets.input_bar import InputBar
-
-
-def _app(repo, workspace, provider=None) -> ChatApp:
-    return ChatApp(
-        provider=provider or CannedProvider(["ok"]),
-        workspace=workspace,
-        storage=repo,
-    )
 
 
 async def _two_turns(app) -> None:
@@ -65,8 +55,8 @@ async def _select_tip_in_edit(app, pilot) -> None:
     await pilot.press("escape")  # → Edit, selects the tip
 
 
-async def test_expand_restores_children_and_removes_k(repo, workspace):
-    app = _app(repo, workspace)
+async def test_expand_restores_children_and_removes_k(app_factory):
+    app = app_factory()
     async with app.run_test() as pilot:
         await _two_turns(app)
         await _compress_full_tip_range(app, pilot, "SUMMARY")
@@ -87,8 +77,8 @@ async def test_expand_restores_children_and_removes_k(repo, workspace):
         assert state["nodes"][0]["selected"] is True
 
 
-async def test_expand_survives_restart(repo, workspace):
-    app = _app(repo, workspace)
+async def test_expand_survives_restart(app_factory):
+    app = app_factory()
     async with app.run_test() as pilot:
         await _two_turns(app)
         conv_id = app.core.conversation_id
@@ -101,7 +91,7 @@ async def test_expand_survives_restart(repo, workspace):
 
     # A second app on the same DB resolves the identical expanded view (the E
     # event + cleared pointers round-trip).
-    app2 = _app(repo, workspace)
+    app2 = app_factory()
     async with app2.run_test():
         app2.core.resume_conversation(conv_id)
         state = app2.describe_state()
@@ -109,9 +99,9 @@ async def test_expand_survives_restart(repo, workspace):
         assert len(state["nodes"]) == 4
 
 
-async def test_next_turn_sees_children_verbatim_after_expand(repo, workspace):
+async def test_next_turn_sees_children_verbatim_after_expand(app_factory):
     provider = RecordingProvider(["reply"])
-    app = _app(repo, workspace, provider=provider)
+    app = app_factory(provider=provider)
     async with app.run_test() as pilot:
         await _two_turns(app)
         await _compress_full_tip_range(app, pilot, "THE SUMMARY TEXT")
@@ -131,8 +121,8 @@ async def test_next_turn_sees_children_verbatim_after_expand(repo, workspace):
         assert "second" in blob
 
 
-async def test_expand_on_non_compression_is_a_silent_no_op(repo, workspace):
-    app = _app(repo, workspace)
+async def test_expand_on_non_compression_is_a_silent_no_op(app_factory):
+    app = app_factory()
     async with app.run_test() as pilot:
         await _two_turns(app)
         await pilot.press("escape")  # Edit mode, cursor on the last (assistant) node

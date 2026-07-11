@@ -15,17 +15,7 @@ provider actually receives on the turn *after* a commit.
 from conftest import RecordingProvider
 from textual.widgets import TextArea
 
-from ctx.core.provider import TestProvider as CannedProvider
-from ctx.ui.app import ChatApp
 from ctx.ui.widgets.input_bar import InputBar
-
-
-def _app(repo, workspace, provider=None) -> ChatApp:
-    return ChatApp(
-        provider=provider or CannedProvider(["ok"]),
-        workspace=workspace,
-        storage=repo,
-    )
 
 
 async def _two_turns(app) -> None:
@@ -45,9 +35,9 @@ async def _compress_full_tip_range(app, pilot, summary: str) -> None:
     await pilot.press("ctrl+s")  # commit → one K in the view (Edit mode, no selection)
 
 
-async def test_next_turn_sees_summary_not_children_after_compress(repo, workspace):
+async def test_next_turn_sees_summary_not_children_after_compress(app_factory):
     provider = RecordingProvider(["reply"])
-    app = _app(repo, workspace, provider=provider)
+    app = app_factory(provider=provider)
     async with app.run_test() as pilot:
         await _two_turns(app)
         await _compress_full_tip_range(app, pilot, "THE SUMMARY TEXT")

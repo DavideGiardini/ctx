@@ -13,10 +13,11 @@ from pathlib import Path
 
 import pytest
 
-from ctx.core.provider import TestProvider, Usage
+from ctx.core.provider import Provider, TestProvider, Usage
 from ctx.core.storage import ConversationRepository
 from ctx.core.workspace import Workspace
 from ctx.models.nodes import Node
+from ctx.ui.app import ChatApp
 
 
 @pytest.fixture
@@ -217,6 +218,41 @@ class BlockingProvider:
 
     async def check_connectivity(self, model=None):  # type: ignore[no-untyped-def]
         return (True, "ok")
+
+
+@pytest.fixture
+def app_factory(
+    repo: ConversationRepository, workspace: Workspace
+) -> Callable[..., ChatApp]:
+    """Factory constructing a ChatApp wired to the shared ``repo``/``workspace``.
+
+    The single home for the Pilot tests' app construction — formerly an ``_app``
+    factory copy in every ``test_app_*.py`` file. Call it with no arguments for the
+    common case: a ``TestProvider(["ok"])`` streaming one canned token. Override
+    either the whole provider or just the default provider's script:
+
+    * ``app_factory(provider=some_provider)`` — inject a specific provider double
+      (e.g. a ``BlockingProvider`` or a compression-payload ``RecordingProvider``).
+    * ``app_factory(tokens=[...], usage=Usage(...))`` — build the default
+      ``TestProvider`` with a custom token script and/or reported usage (the
+      gauge / weights / draft-compression variants).
+
+    ``provider`` takes precedence over ``tokens``/``usage`` when both are given.
+    Each call returns a fresh ChatApp over the *same* shared repo/workspace, so a
+    single test can build two apps against one store (e.g. expand-survives-restart).
+    """
+
+    def _build(
+        provider: Provider | None = None,
+        *,
+        tokens: list[str] | None = None,
+        usage: Usage | None = None,
+    ) -> ChatApp:
+        if provider is None:
+            provider = TestProvider(list(tokens) if tokens is not None else ["ok"], usage)
+        return ChatApp(provider=provider, workspace=workspace, storage=repo)
+
+    return _build
 
 
 class RecordingProvider:

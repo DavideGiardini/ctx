@@ -19,8 +19,6 @@ import contextlib
 from conftest import BlockingProvider
 from textual.worker import WorkerCancelled
 
-from ctx.core.provider import TestProvider as CannedProvider
-from ctx.ui.app import ChatApp
 from ctx.ui.widgets.input_bar import InputBar
 
 
@@ -34,14 +32,6 @@ async def _cancel_and_settle(app) -> None:
     app.action_cancel_stream()
     with contextlib.suppress(WorkerCancelled):
         await worker.wait()
-
-
-def _app(repo, workspace) -> ChatApp:
-    return ChatApp(
-        provider=CannedProvider(["ok"]),
-        workspace=workspace,
-        storage=repo,
-    )
 
 
 async def _submit_blocked(app, pilot, before: list[str], gate: asyncio.Event) -> None:
@@ -68,8 +58,8 @@ def _nodes(app) -> list[dict]:
     return nodes
 
 
-async def test_zero_token_cancel_drops_the_empty_node(repo, workspace):
-    app = _app(repo, workspace)
+async def test_zero_token_cancel_drops_the_empty_node(app_factory):
+    app = app_factory()
     async with app.run_test() as pilot:
         gate = asyncio.Event()
         await _submit_blocked(app, pilot, before=[], gate=gate)
@@ -92,8 +82,8 @@ async def test_zero_token_cancel_drops_the_empty_node(repo, workspace):
         await app.workers.wait_for_complete()
 
 
-async def test_partial_cancel_keeps_the_node(repo, workspace):
-    app = _app(repo, workspace)
+async def test_partial_cancel_keeps_the_node(app_factory):
+    app = app_factory()
     async with app.run_test() as pilot:
         gate = asyncio.Event()
         await _submit_blocked(app, pilot, before=["partial"], gate=gate)

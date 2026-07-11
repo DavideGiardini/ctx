@@ -17,17 +17,7 @@ import asyncio
 from conftest import BlockingProvider, ErroringProvider
 from textual.widgets import TextArea
 
-from ctx.core.provider import TestProvider as CannedProvider
-from ctx.ui.app import ChatApp
 from ctx.ui.widgets.input_bar import InputBar
-
-
-def _app(repo, workspace) -> ChatApp:
-    return ChatApp(
-        provider=CannedProvider(["ok"]),
-        workspace=workspace,
-        storage=repo,
-    )
 
 
 async def _two_turns(app) -> None:
@@ -50,8 +40,8 @@ def _last_k(app):
     return k
 
 
-async def test_manual_commit_after_cancelled_draft_stamps_empty_prompt(repo, workspace):
-    app = _app(repo, workspace)
+async def test_manual_commit_after_cancelled_draft_stamps_empty_prompt(app_factory):
+    app = app_factory()
     async with app.run_test() as pilot:
         await _two_turns(app)
         await _open_editor_on_full_range(pilot)
@@ -86,8 +76,8 @@ async def test_manual_commit_after_cancelled_draft_stamps_empty_prompt(repo, wor
         await app.workers.wait_for_complete()
 
 
-async def test_manual_commit_after_failed_draft_stamps_empty_prompt(repo, workspace):
-    app = _app(repo, workspace)
+async def test_manual_commit_after_failed_draft_stamps_empty_prompt(app_factory):
+    app = app_factory()
     async with app.run_test() as pilot:
         await _two_turns(app)
         await _open_editor_on_full_range(pilot)

@@ -10,18 +10,8 @@ appears in place.
 
 from textual.widgets import TextArea
 
-from ctx.core.provider import TestProvider as CannedProvider
-from ctx.ui.app import ChatApp
 from ctx.ui.widgets.input_bar import InputBar
 from ctx.ui.widgets.message_list import MessageList, MessageWidget
-
-
-def _app(repo, workspace) -> ChatApp:
-    return ChatApp(
-        provider=CannedProvider(["ok"]),
-        workspace=workspace,
-        storage=repo,
-    )
 
 
 async def _two_turns(app) -> None:
@@ -31,8 +21,8 @@ async def _two_turns(app) -> None:
     await app.workers.wait_for_complete()
 
 
-async def test_commit_preserves_surviving_widget_instances(repo, workspace):
-    app = _app(repo, workspace)
+async def test_commit_preserves_surviving_widget_instances(app_factory):
+    app = app_factory()
     async with app.run_test() as pilot:
         await _two_turns(app)  # view: [u1, a1, u2, a2]
 

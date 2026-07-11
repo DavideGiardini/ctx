@@ -19,17 +19,7 @@ import asyncio
 from conftest import BlockingProvider
 from textual.widgets import TextArea
 
-from ctx.core.provider import TestProvider as CannedProvider
-from ctx.ui.app import ChatApp
 from ctx.ui.widgets.input_bar import InputBar
-
-
-def _app(repo, workspace) -> ChatApp:
-    return ChatApp(
-        provider=CannedProvider(["ok"]),
-        workspace=workspace,
-        storage=repo,
-    )
 
 
 async def _two_turns(app) -> None:
@@ -72,8 +62,8 @@ def _hint_shown(app, needle: str) -> bool:
     return hint is not None and needle in hint.lower()
 
 
-async def test_commit_mid_draft_is_refused(repo, workspace):
-    app = _app(repo, workspace)
+async def test_commit_mid_draft_is_refused(app_factory):
+    app = app_factory()
     async with app.run_test() as pilot:
         await _two_turns(app)
         await _open_editor_on_full_range(pilot)
@@ -91,8 +81,8 @@ async def test_commit_mid_draft_is_refused(repo, workspace):
         await app.workers.wait_for_complete()
 
 
-async def test_esc_cancels_a_live_draft(repo, workspace):
-    app = _app(repo, workspace)
+async def test_esc_cancels_a_live_draft(app_factory):
+    app = app_factory()
     async with app.run_test() as pilot:
         await _two_turns(app)
         await _open_editor_on_full_range(pilot)
@@ -111,10 +101,10 @@ async def test_esc_cancels_a_live_draft(repo, workspace):
         await app.workers.wait_for_complete()
 
 
-async def test_close_cancels_a_live_worker(repo, workspace):
+async def test_close_cancels_a_live_worker(app_factory):
     # The close seam itself (used by future conversation-switch paths, not just
     # Esc) must cancel a live worker before dropping the reference.
-    app = _app(repo, workspace)
+    app = app_factory()
     async with app.run_test() as pilot:
         await _two_turns(app)
         await _open_editor_on_full_range(pilot)
@@ -136,10 +126,10 @@ async def test_close_cancels_a_live_worker(repo, workspace):
         await app.workers.wait_for_complete()
 
 
-async def test_reopened_editor_summary_is_clean_after_orphan(repo, workspace):
+async def test_reopened_editor_summary_is_clean_after_orphan(app_factory):
     # Without the cancel-on-close fix, the orphaned worker unblocks and writes
     # its draft into the RE-OPENED editor's Summary. With the fix it is dead.
-    app = _app(repo, workspace)
+    app = app_factory()
     async with app.run_test() as pilot:
         await _two_turns(app)
         await _open_editor_on_full_range(pilot)

@@ -18,14 +18,8 @@ and the rendered widget count.
 
 from textual.widgets import TextArea
 
-from ctx.core.provider import TestProvider as CannedProvider
-from ctx.ui.app import ChatApp
 from ctx.ui.widgets.input_bar import InputBar
 from ctx.ui.widgets.message_list import MessageWidget
-
-
-def _app(repo, workspace) -> ChatApp:
-    return ChatApp(provider=CannedProvider(["ok"]), workspace=workspace, storage=repo)
 
 
 async def _two_turns(app) -> None:
@@ -50,10 +44,10 @@ async def _select_k_in_edit(app, pilot) -> None:
     await pilot.press("escape")  # → Edit, selects the tip (K)
 
 
-async def test_single_esc_pops_dive_when_anchored_before_diving(repo, workspace):
+async def test_single_esc_pops_dive_when_anchored_before_diving(app_factory):
     """(a) `v` on a K then `g d`: the pre-dive anchor is cleared on entry, so a
     SINGLE Esc pops the dive rather than being eaten by a stale range clear."""
-    app = _app(repo, workspace)
+    app = app_factory()
     async with app.run_test() as pilot:
         await _two_turns(app)
         await _compress_full_tip_range(app, pilot, "SUMMARY")
@@ -76,10 +70,10 @@ async def test_single_esc_pops_dive_when_anchored_before_diving(repo, workspace)
         assert state["mode"] == "edit"  # popped the dive, did not toggle mode
 
 
-async def test_connectivity_node_gated_out_of_dive_then_surfaces(repo, workspace):
+async def test_connectivity_node_gated_out_of_dive_then_surfaces(app_factory):
     """(b) A connectivity worker completing mid-dive must not mount into the dive
     frame; exiting the dive surfaces it in the live view."""
-    app = _app(repo, workspace)
+    app = app_factory()
     async with app.run_test() as pilot:
         await _two_turns(app)
         await _compress_full_tip_range(app, pilot, "SUMMARY")
@@ -102,12 +96,12 @@ async def test_connectivity_node_gated_out_of_dive_then_surfaces(repo, workspace
         assert any("Connected to some/model" in c for c in contents)
 
 
-async def test_model_command_gated_out_of_dive_then_surfaces(repo, workspace):
+async def test_model_command_gated_out_of_dive_then_surfaces(app_factory):
     """(b, task 31) `/model x` issued mid-dive must not mount its reply widget into
     the read-only dive frame; exiting the dive surfaces the switch breadcrumb in the
     live view. Completes 13h#2 — the command handler appended directly, bypassing the
     dive gate."""
-    app = _app(repo, workspace)
+    app = app_factory()
     async with app.run_test() as pilot:
         await _two_turns(app)
         await _compress_full_tip_range(app, pilot, "SUMMARY")
@@ -132,10 +126,10 @@ async def test_model_command_gated_out_of_dive_then_surfaces(repo, workspace):
         assert any("Model set to: gpt-test" in c for c in contents)
 
 
-async def test_commit_resets_inspector_to_placeholder(repo, workspace):
+async def test_commit_resets_inspector_to_placeholder(app_factory):
     """(c) After Ctrl+S the inspector shows the empty/placeholder state, not the
     node that was just folded away."""
-    app = _app(repo, workspace)
+    app = app_factory()
     async with app.run_test() as pilot:
         await _two_turns(app)
         await _compress_full_tip_range(app, pilot, "SUMMARY")

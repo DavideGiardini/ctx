@@ -18,18 +18,8 @@ import json
 from textual.widgets import Static, TextArea
 
 import ctx.core.config
-from ctx.core.provider import TestProvider as CannedProvider
-from ctx.ui.app import ChatApp
 from ctx.ui.widgets.input_bar import InputBar
 from ctx.ui.widgets.message_list import MessageWidget
-
-
-def _app(repo, workspace) -> ChatApp:
-    return ChatApp(
-        provider=CannedProvider(["ok"]),
-        workspace=workspace,
-        storage=repo,
-    )
 
 
 async def _turn(app, text: str) -> None:
@@ -60,8 +50,8 @@ async def _drift_scenario(app, pilot) -> None:
     await pilot.press("x")  # expand → view = [U1, A1, U2, A2]
 
 
-async def test_expanded_turn_drifts_and_prior_turn_does_not(repo, workspace):
-    app = _app(repo, workspace)
+async def test_expanded_turn_drifts_and_prior_turn_does_not(app_factory):
+    app = app_factory()
     async with app.run_test() as pilot:
         await _drift_scenario(app, pilot)
 
@@ -81,12 +71,12 @@ async def test_expanded_turn_drifts_and_prior_turn_does_not(repo, workspace):
         assert str(a1_w.query_one(".drift", Static).render()) == ""
 
 
-async def test_no_drift_marker_when_config_disabled(repo, workspace, monkeypatch, tmp_path):
+async def test_no_drift_marker_when_config_disabled(app_factory, monkeypatch, tmp_path):
     config_path = tmp_path / "config.json"
     config_path.write_text(json.dumps({"ui": {"show_context_drift": False}}))
     monkeypatch.setattr(ctx.core.config, "CONFIG_PATH", config_path)
 
-    app = _app(repo, workspace)
+    app = app_factory()
     async with app.run_test() as pilot:
         await _drift_scenario(app, pilot)
 
@@ -97,7 +87,7 @@ async def test_no_drift_marker_when_config_disabled(repo, workspace, monkeypatch
 
 
 async def test_gd_diff_is_noop_on_drifted_turn_when_config_disabled(
-    repo, workspace, monkeypatch, tmp_path
+    app_factory, monkeypatch, tmp_path
 ):
     """With drift display off, ``g d`` on a drifted assistant turn opens nothing.
 
@@ -109,7 +99,7 @@ async def test_gd_diff_is_noop_on_drifted_turn_when_config_disabled(
     config_path.write_text(json.dumps({"ui": {"show_context_drift": False}}))
     monkeypatch.setattr(ctx.core.config, "CONFIG_PATH", config_path)
 
-    app = _app(repo, workspace)
+    app = app_factory()
     async with app.run_test() as pilot:
         await _drift_scenario(app, pilot)  # view = [U1, A1, U2, A2], A2 drifted
 

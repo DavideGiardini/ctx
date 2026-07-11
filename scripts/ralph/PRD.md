@@ -38,22 +38,9 @@ must be written against shared helpers, not a 20th copy of the duplication.
 
 ## Completed
 - [x] 1 — Shared provider doubles in `tests/conftest.py` (bodies in `PRD-done.md`)
+- [x] 2 — Shared app factory in `tests/conftest.py` (bodies in `PRD-done.md`)
 
 ## Tasks
-
-- [ ] **2. Shared app factory in `tests/conftest.py`** — Add an `app_factory`
-      fixture (built on the existing `repo`/`workspace` fixtures) returning a
-      function that constructs `ChatApp` with a `TestProvider(["ok"])` default and
-      covers the observed variations: injectable provider instance, or scripted
-      tokens + usage (e.g. `test_app_draft_compression.py` uses scripted tokens with
-      `Usage(12, 5, 17)`). Migrate the 19 `def _app` copies (list in
-      `docs/Code Quality Review 2026-07.md` §Test choreography helpers; find them
-      with `grep -rn "def _app" tests/`), the misnamed async `_four_node_app` in
-      `test_app_range_selection.py`, and the inlined `ChatApp(...)` constructions in
-      `test_app_gauge.py` / `test_app_weights.py` where per-test usage scripting
-      maps cleanly onto the factory.
-      _Acceptance:_ `grep -rn "def _app\b" tests/` returns nothing; collected test
-      count identical to before; `bash scripts/check.sh` green.
 
 - [ ] **3. Turn/submit choreography in `tests/pilot_helpers.py`** — Create the
       module with: `two_turns(app)` (submit "first"/"second" via

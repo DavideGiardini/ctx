@@ -13,20 +13,10 @@ detail describe_state deliberately omits).
 
 from textual.widgets import TextArea
 
-from ctx.core.provider import TestProvider as CannedProvider
-from ctx.ui.app import ChatApp
 from ctx.ui.widgets.compression_editor import CompressionEditor
 from ctx.ui.widgets.detail_inspector import DetailInspector
 from ctx.ui.widgets.input_bar import InputBar
 from ctx.ui.widgets.message_list import MessageWidget
-
-
-def _app(repo, workspace) -> ChatApp:
-    return ChatApp(
-        provider=CannedProvider(["ok"]),
-        workspace=workspace,
-        storage=repo,
-    )
 
 
 async def _two_turns(app) -> None:
@@ -44,8 +34,8 @@ async def _open_editor_on_full_range(pilot) -> None:
     await pilot.press("c")  # open the draft editor
 
 
-async def test_ctrl_s_commits_folds_range_to_single_k(repo, workspace):
-    app = _app(repo, workspace)
+async def test_ctrl_s_commits_folds_range_to_single_k(app_factory):
+    app = app_factory()
     async with app.run_test() as pilot:
         await _two_turns(app)
         await _open_editor_on_full_range(pilot)
@@ -73,8 +63,8 @@ async def test_ctrl_s_commits_folds_range_to_single_k(repo, workspace):
         assert len(k.meta["range"]) == 4
 
 
-async def test_tab_reaches_summary_split_for_keyboard_only_commit(repo, workspace):
-    app = _app(repo, workspace)
+async def test_tab_reaches_summary_split_for_keyboard_only_commit(app_factory):
+    app = app_factory()
     async with app.run_test() as pilot:
         await _two_turns(app)
         await _open_editor_on_full_range(pilot)
@@ -93,8 +83,8 @@ async def test_tab_reaches_summary_split_for_keyboard_only_commit(repo, workspac
         assert comp[0]["content"] == "test"
 
 
-async def test_ctrl_s_empty_summary_breadcrumbs_no_commit(repo, workspace):
-    app = _app(repo, workspace)
+async def test_ctrl_s_empty_summary_breadcrumbs_no_commit(app_factory):
+    app = app_factory()
     async with app.run_test() as pilot:
         await _two_turns(app)
         await _open_editor_on_full_range(pilot)
@@ -111,8 +101,8 @@ async def test_ctrl_s_empty_summary_breadcrumbs_no_commit(repo, workspace):
         assert "summary" in state["last_hint"].lower()
 
 
-async def test_ctrl_s_inert_when_editor_closed(repo, workspace):
-    app = _app(repo, workspace)
+async def test_ctrl_s_inert_when_editor_closed(app_factory):
+    app = app_factory()
     async with app.run_test() as pilot:
         await _two_turns(app)
         await pilot.press("escape")  # Edit mode, editor NOT open
@@ -124,11 +114,11 @@ async def test_ctrl_s_inert_when_editor_closed(repo, workspace):
         assert state["compression_editor"]["open"] is False
 
 
-async def test_committed_k_after_assistant_carries_pass_start_margin(repo, workspace):
+async def test_committed_k_after_assistant_carries_pass_start_margin(app_factory):
     # Compress only the *last two* nodes (user2 + assistant2) so the K lands
     # right after assistant1 in the view. Both are on the assistant side, so
     # without the task-40 fix the K would hug the reply above it with no gap.
-    app = _app(repo, workspace)
+    app = app_factory()
     async with app.run_test() as pilot:
         await _two_turns(app)  # view = [user1, assistant1, user2, assistant2]
         await pilot.press("escape")  # → Edit mode
@@ -146,8 +136,8 @@ async def test_committed_k_after_assistant_carries_pass_start_margin(repo, works
         assert k_widgets[0].has_class("pass-start")
 
 
-async def test_committed_k_round_trips_across_app_instances(repo, workspace):
-    app = _app(repo, workspace)
+async def test_committed_k_round_trips_across_app_instances(app_factory):
+    app = app_factory()
     async with app.run_test() as pilot:
         await _two_turns(app)
         conv_id = app.core.conversation_id
@@ -160,7 +150,7 @@ async def test_committed_k_round_trips_across_app_instances(repo, workspace):
         ) == 1
 
     # A second app on the same DB resolves the identical folded view.
-    app2 = _app(repo, workspace)
+    app2 = app_factory()
     async with app2.run_test():
         app2.core.resume_conversation(conv_id)
         state = app2.describe_state()

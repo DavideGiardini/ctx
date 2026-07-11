@@ -21,13 +21,7 @@ import asyncio
 from conftest import BlockingProvider
 from textual.widgets import TextArea
 
-from ctx.core.provider import TestProvider as CannedProvider
-from ctx.ui.app import ChatApp
 from ctx.ui.widgets.input_bar import InputBar
-
-
-def _app(repo, workspace) -> ChatApp:
-    return ChatApp(provider=CannedProvider(["ok"]), workspace=workspace, storage=repo)
 
 
 async def _two_turns(app) -> None:
@@ -75,8 +69,8 @@ async def _start_blocked_draft(app, pilot, gate) -> None:
     assert app._draft_worker is not None and not app._draft_worker.is_finished
 
 
-async def test_new_resets_a_live_deep_dive(repo, workspace):
-    app = _app(repo, workspace)
+async def test_new_resets_a_live_deep_dive(app_factory):
+    app = app_factory()
     async with app.run_test() as pilot:
         await _enter_deep_dive(app, pilot)
 
@@ -93,8 +87,8 @@ async def test_new_resets_a_live_deep_dive(repo, workspace):
         assert "read-only" not in state["footer"]
 
 
-async def test_resume_resets_a_live_deep_dive(repo, workspace, monkeypatch):
-    app = _app(repo, workspace)
+async def test_resume_resets_a_live_deep_dive(app_factory, monkeypatch):
+    app = app_factory()
     async with app.run_test() as pilot:
         await _enter_deep_dive(app, pilot)
         conv_id = app.core.conversation_id
@@ -115,8 +109,8 @@ async def test_resume_resets_a_live_deep_dive(repo, workspace, monkeypatch):
         assert state["nodes"][0]["node_type"] == "compression"
 
 
-async def test_new_closes_an_open_editor_without_committing(repo, workspace):
-    app = _app(repo, workspace)
+async def test_new_closes_an_open_editor_without_committing(app_factory):
+    app = app_factory()
     async with app.run_test() as pilot:
         await _two_turns(app)
         await _open_editor_on_full_range(pilot)
@@ -131,8 +125,8 @@ async def test_new_closes_an_open_editor_without_committing(repo, workspace):
         assert not any(n["node_type"] == "compression" for n in state["nodes"])
 
 
-async def test_new_cancels_a_live_draft_worker(repo, workspace):
-    app = _app(repo, workspace)
+async def test_new_cancels_a_live_draft_worker(app_factory):
+    app = app_factory()
     async with app.run_test() as pilot:
         await _two_turns(app)
         await _open_editor_on_full_range(pilot)

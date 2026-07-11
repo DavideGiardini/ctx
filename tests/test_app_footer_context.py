@@ -8,14 +8,8 @@ tracks the selected node type. The oracle is the public ``describe_state()``
 
 from textual.widgets import TextArea
 
-from ctx.core.provider import TestProvider as CannedProvider
-from ctx.ui.app import ChatApp
 from ctx.ui.widgets.app_footer import _HINTS
 from ctx.ui.widgets.input_bar import InputBar
-
-
-def _app(repo, workspace) -> ChatApp:
-    return ChatApp(provider=CannedProvider(["ok"]), workspace=workspace, storage=repo)
 
 
 async def _two_turns(app) -> None:
@@ -25,8 +19,8 @@ async def _two_turns(app) -> None:
     await app.workers.wait_for_complete()
 
 
-async def test_footer_advertises_expand_only_on_a_compression_node(repo, workspace):
-    app = _app(repo, workspace)
+async def test_footer_advertises_expand_only_on_a_compression_node(app_factory):
+    app = app_factory()
     async with app.run_test() as pilot:
         await _two_turns(app)
 

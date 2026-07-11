@@ -11,20 +11,10 @@ and the CSS ``display`` state the qa-tester harness can query.
 """
 
 from ctx.core.conversation import DEFAULT_COMPRESSION_PROMPT
-from ctx.core.provider import TestProvider as CannedProvider
-from ctx.ui.app import ChatApp
 from ctx.ui.widgets.app_footer import _HINTS
 from ctx.ui.widgets.compression_editor import CompressionEditor
 from ctx.ui.widgets.detail_inspector import DetailInspector
 from ctx.ui.widgets.input_bar import InputBar
-
-
-def _app(repo, workspace) -> ChatApp:
-    return ChatApp(
-        provider=CannedProvider(["ok"]),
-        workspace=workspace,
-        storage=repo,
-    )
 
 
 async def _two_turns(app) -> None:
@@ -34,8 +24,8 @@ async def _two_turns(app) -> None:
     await app.workers.wait_for_complete()
 
 
-async def test_c_opens_editor_with_default_prompt_and_empty_output(repo, workspace):
-    app = _app(repo, workspace)
+async def test_c_opens_editor_with_default_prompt_and_empty_output(app_factory):
+    app = app_factory()
     async with app.run_test() as pilot:
         await _two_turns(app)
 
@@ -54,7 +44,7 @@ async def test_c_opens_editor_with_default_prompt_and_empty_output(repo, workspa
         assert app.query_one(DetailInspector).display is False
 
 
-async def test_c_prefills_editor_with_config_override(repo, workspace, monkeypatch, tmp_path):
+async def test_c_prefills_editor_with_config_override(app_factory, monkeypatch, tmp_path):
     # Task 18: the editor's Top prefill reads the user-overridable
     # get_config()["compression"]["default_prompt"], not the hard-coded constant.
     import json
@@ -65,7 +55,7 @@ async def test_c_prefills_editor_with_config_override(repo, workspace, monkeypat
     config_path.write_text(json.dumps({"compression": {"default_prompt": "custom override"}}))
     monkeypatch.setattr(ctx.core.config, "CONFIG_PATH", config_path)
 
-    app = _app(repo, workspace)
+    app = app_factory()
     async with app.run_test() as pilot:
         await _two_turns(app)
 
@@ -75,8 +65,8 @@ async def test_c_prefills_editor_with_config_override(repo, workspace, monkeypat
         assert app.describe_state()["compression_editor"]["prompt"] == "custom override"
 
 
-async def test_c_on_single_node_opens_editor(repo, workspace):
-    app = _app(repo, workspace)
+async def test_c_on_single_node_opens_editor(app_factory):
+    app = app_factory()
     async with app.run_test() as pilot:
         await _two_turns(app)
 
@@ -86,8 +76,8 @@ async def test_c_on_single_node_opens_editor(repo, workspace):
         assert app.describe_state()["compression_editor"]["open"] is True
 
 
-async def test_esc_closes_editor_restores_inspector_keeps_selection(repo, workspace):
-    app = _app(repo, workspace)
+async def test_esc_closes_editor_restores_inspector_keeps_selection(app_factory):
+    app = app_factory()
     async with app.run_test() as pilot:
         await _two_turns(app)
 
@@ -108,10 +98,10 @@ async def test_esc_closes_editor_restores_inspector_keeps_selection(repo, worksp
         assert app.query_one(CompressionEditor).display is False
 
 
-async def test_footer_shows_editor_hint_while_open_then_restores(repo, workspace):
+async def test_footer_shows_editor_hint_while_open_then_restores(app_factory):
     """13i: the editor's own keys must be advertised while it is open, and the
     Edit-mode hint restored the moment it closes."""
-    app = _app(repo, workspace)
+    app = app_factory()
     async with app.run_test() as pilot:
         await _two_turns(app)
 
