@@ -1,9 +1,9 @@
 # Tests
 
-This is the home of the **deterministic test layer** — the required next step in
-hardening `ctx`'s back pressure. The first unit tests have landed
-(`test_context.py`), so `scripts/check.sh` now runs them for real; the historical
-"no tests collected" pass-through is dormant.
+This is the home of the **deterministic test layer** that `scripts/check.sh` runs on
+every commit. It has two halves: unit tests of the framework-free core (`ctx/core/*`)
+through its interfaces, and Pilot-driven tests that drive the real TUI headless (the
+`test_app_*.py` family) — the deterministic counterpart to the agent-driven MCP QA.
 
 ## How tests are authored here
 
@@ -29,11 +29,11 @@ See `tests/specs/context.md` for a worked example.
   `ConversationCore`, `ConversationRepository` (use `:memory:`), the pure
   `build_context`, `Workspace` (use a temp dir), and the `Provider` protocol via
   `TestProvider`.
-- **Pilot-driven smoke tests** of the TUI — the deterministic counterpart to the
-  agent-driven MCP QA. Drive `tools.agent.harness:HarnessApp` (or `ChatApp` wired
-  with `TestProvider`) through Textual's `App.run_test()` / `Pilot`, press keys,
-  and assert on `describe_state()`. This is the proper home for repeatable "MCP
-  smoke" coverage; the `qa-tester` subagent handles the exploratory/LLM-driven side.
+- **Pilot-driven tests** of the TUI (`test_app_*.py`). Drive
+  `tools.agent.harness:HarnessApp` (or `ChatApp` wired with `TestProvider`) through
+  Textual's `App.run_test()` / `Pilot`, press keys, and assert on `describe_state()`.
+  This is the home for repeatable "MCP smoke" coverage; the `qa-tester` subagent
+  handles the exploratory/LLM-driven side.
 
 ## Conventions
 
