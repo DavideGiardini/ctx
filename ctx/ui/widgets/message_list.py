@@ -175,3 +175,13 @@ class MessageList(VerticalScroll):
             return
         widget.update_content(content)
         self.call_after_refresh(self.scroll_end)
+
+    def refresh_ending(self, node_id: str) -> None:
+        """Re-render a row from its node's durable state (post ``end_turn``).
+        A missing row (the list was already rebuilt by /new or /resume) is a
+        no-op — the stale turn has nothing on screen to refresh."""
+        try:
+            widget = self.query_one(f"#msg-{node_id}", MessageWidget)
+        except Exception:
+            return
+        widget.refresh_ending()

@@ -95,3 +95,8 @@ PE6. ProviderError flows through ConversationCore.stream unchanged; partial pers
 - A4 (PE3): I assume the kwarg name handed to the backend is literally `timeout`
   (per the repo convention note: "assert a `timeout` was passed"). If the backend
   arg is named differently, PE3's kwarg-name assertion must change.
+
+### PE6 amendment (ctx0 Phase 1)
+PE6's persistence half now flows through `end_turn(node, error=…)` — `stream()`
+no longer persists (conversation.md C104/C107). The identity-propagation half
+(the SAME ProviderError object surfaces unchanged) is unchanged.

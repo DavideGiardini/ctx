@@ -35,6 +35,7 @@ async def _core_turn(core, prompt):
     _user, assistant = core.submit(prompt)
     async for _ in core.stream(assistant):
         pass
+    core.end_turn(assistant)
     return assistant
 
 

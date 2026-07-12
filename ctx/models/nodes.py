@@ -27,7 +27,17 @@ class Node:
 
     @classmethod
     def assistant(cls, conversation_id: str, content: str = "") -> Node:
-        """Build an assistant chat turn (content is filled in as it streams)."""
+        """Build an assistant chat turn (content is filled in as it streams).
+
+        ``meta`` keys stamped later by ``ConversationCore`` (the canonical
+        vocabulary for assistant turns — do not improvise new keys):
+          - ``meta["ctx_hash"]`` — digest of the exact context sent to the
+            model, stamped at the turn's first tick (ADR-0016 A#3 §4);
+          - ``meta["interrupted"]`` — ``True`` when the turn was cancelled
+            mid-stream (stamped durably by ``end_turn``);
+          - ``meta["error"]`` — the provider/build error message when the turn
+            failed (stamped durably by ``end_turn``).
+        """
         return cls(role="assistant", content=content, conversation_id=conversation_id)
 
     @classmethod

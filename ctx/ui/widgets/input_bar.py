@@ -59,7 +59,9 @@ class InputBar(Input):
             self.value = ""
             self.post_message(self.Submitted(cmd))
             return
-        self.value = ""
+        # Deliberately no self.value = "" here: clearing is a consequence of the
+        # app ACCEPTING the submission (review §Turn lifecycle). A submit refused
+        # mid-stream keeps the typed text in place.
         self.post_message(self.Submitted(text))
 
     def action_prev_command(self) -> None:

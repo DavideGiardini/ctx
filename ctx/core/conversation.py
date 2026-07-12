@@ -1,4 +1,3 @@
-import asyncio
 from collections.abc import AsyncIterator, Callable
 from uuid import uuid4
 
@@ -90,8 +89,8 @@ class ConversationCore:
 
         ``True`` from ``submit()`` (which stamps the assistant node's
         ``created_seq`` but does not yet build its context) until the turn's
-        ``stream()`` completes, errors, or is cancelled (cleared in a
-        ``finally``). The compression commands read it to enforce the H2
+        ending is recorded by ``end_turn`` — or the conversation is abandoned
+        by new/resume. The compression commands read it to enforce the H2
         invariant: no commit/expand/draft may mutate the graph mid-turn, so no
         event can land in the ``submit()``→first-tick window and fold into what
         the model actually saw while reconstruction says it didn't (A#3 §2).
@@ -333,7 +332,14 @@ class ConversationCore:
         )
 
     def submit(self, text: str) -> tuple[Node, Node]:
-        """Handle a user message. Returns (user_node, assistant_node)."""
+        """Handle a user message. Returns (user_node, assistant_node).
+
+        Raises ``ValueError`` while a turn is already in flight: a second
+        submit is refused, never queued. This is the authoritative backstop —
+        the UI's own streaming check is a courtesy hint, not the guard.
+        """
+        if self._streaming:
+            raise ValueError("cannot submit while a turn is streaming")
         self._ensure_conversation(text)
         user_node = Node.user(text, self.conversation_id)
         self._append_to_line(user_node)
@@ -347,10 +353,46 @@ class ConversationCore:
         # but its context/ctx_hash isn't built until stream()'s first tick. Flag it
         # now so no compression event can land in that window (else it folds into
         # what was actually sent while seq-based reconstruction says it didn't —
-        # ADR-0016 A#3 §2, task 28). stream()'s finally clears it; new/resume reset
-        # it for the tests-only "submit never followed by stream()" path.
+        # ADR-0016 A#3 §2, task 28). end_turn() lowers it; new/resume reset it
+        # for the tests-only "submit never followed by stream()" path.
         self._streaming = True
         return user_node, assistant_node
+
+    def end_turn(
+        self, node: Node, *, cancelled: bool = False, error: str | None = None
+    ) -> None:
+        """Record the ending of the turn anchored on ``node`` — the single door
+        every ending passes through (clean finish, cancel, or error).
+
+        Always lowers the in-flight ``streaming`` flag. Then, provided ``node``
+        is still part of the current conversation graph (i.e. the conversation
+        was not switched away mid-turn by new/resume), records what the turn
+        became and persists — in that order, so the durable mark can never be
+        lost to an earlier save:
+
+        - clean finish (no keyword): nothing stamped; the final content and
+          the whole graph are persisted;
+        - ``cancelled=True``: stamps ``node.meta["interrupted"] = True``;
+        - ``error=<message>``: stamps ``node.meta["error"] = <message>``.
+
+        ``cancelled`` and ``error`` are mutually exclusive; passing both raises
+        ``ValueError``. A turn whose conversation was abandoned (``node`` no
+        longer in the graph) lowers the flag and otherwise no-ops: nothing may
+        be stamped into — or persisted over — the newly loaded conversation.
+        """
+        if cancelled and error is not None:
+            raise ValueError("a turn ends cancelled or errored, never both")
+        self._streaming = False
+        # AIDEV-NOTE: identity check, not id membership — a resume of the SAME
+        # conversation rebuilds the graph with fresh Node objects, and stamping
+        # the stale object would silently miss the live copy.
+        if self._graph.get(node.id) is not node:
+            return
+        if cancelled:
+            node.meta["interrupted"] = True
+        elif error is not None:
+            node.meta["error"] = error
+        self.persist()
 
     def set_model(self, model: str) -> Node:
         self.model = model
@@ -682,39 +724,24 @@ class ConversationCore:
         ``last_usage`` and ``calibration`` for this turn; otherwise both are left
         unchanged. The yielded values stay plain ``str``.
 
-        The in-flight ``streaming`` flag is raised on entry and always lowered on
-        exit, including when the pre-stream context build itself raises (e.g. an
-        unreadable ``/include``d file surfacing through ``build_context``); a stuck
-        flag would otherwise permanently block every later compression op.
+        This generator never touches the ``streaming`` flag and never persists:
+        every ending — clean finish, cancel, error (including a pre-stream
+        context-build failure, e.g. an unreadable ``/include``d file) — is
+        recorded by the caller through ``end_turn``, the single owner of how a
+        turn ends. A generator ``finally`` cannot own the flag: a worker
+        cancelled before its first tick never runs it, which is exactly the
+        stuck-flag bug ``end_turn`` retires.
         """
-        self._streaming = True
-        try:
-            context_nodes = [n for n in self.nodes if n is not assistant_node]
-            messages = build_context(context_nodes, self._workspace.read_file)
-            # AIDEV-NOTE: stamp the per-turn ctx_hash once, at the real generation
-            # moment — immutable after (ADR-0016 A#3 §4 tripwire, reconstruction oracle).
-            assistant_node.meta["ctx_hash"] = hash_context(messages)
-            local_sum = tokens.count_messages(messages, self.model)
+        context_nodes = [n for n in self.nodes if n is not assistant_node]
+        messages = build_context(context_nodes, self._workspace.read_file)
+        # AIDEV-NOTE: stamp the per-turn ctx_hash once, at the real generation
+        # moment — immutable after (ADR-0016 A#3 §4 tripwire, reconstruction oracle).
+        assistant_node.meta["ctx_hash"] = hash_context(messages)
+        local_sum = tokens.count_messages(messages, self.model)
 
-            def on_usage(usage: Usage) -> None:
-                self._calibrate(local_sum, usage)
+        def on_usage(usage: Usage) -> None:
+            self._calibrate(local_sum, usage)
 
-            # AIDEV-NOTE: persist only once the stream loop is entered — a pre-stream
-            # build failure must NOT persist the empty assistant node (submit already
-            # persisted the user tip so resume lands cleanly on the user turn, task 33).
-            try:
-                async for token in self._provider.stream(
-                    messages, self.model, on_usage
-                ):
-                    assistant_node.content += token
-                    yield token
-            except asyncio.CancelledError:
-                self.persist()
-                raise
-            except Exception:
-                self.persist()
-                raise
-            else:
-                self.persist()
-        finally:
-            self._streaming = False
+        async for token in self._provider.stream(messages, self.model, on_usage):
+            assistant_node.content += token
+            yield token

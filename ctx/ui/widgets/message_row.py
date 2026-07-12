@@ -46,6 +46,23 @@ _TALL_ROLES = ("user", "assistant", "context", "compression")
 _KIND_GLYPH = {"compression": "Σ"}
 
 
+def display_content(node: Node) -> str:
+    """What a node's row shows: its content plus any durable ending mark.
+
+    The single rule for rendering a turn's ending (review §Aborted-turn policy,
+    Option B): an error or interruption is read from the *persisted*
+    ``node.meta``, never from one-shot widget text — so the mark renders
+    identically live (after ``end_turn``), through a reconcile, and on resume.
+    """
+    if node.meta.get("error"):
+        mark = f"**Error:** {node.meta['error']}"
+        return f"{node.content}\n\n{mark}" if node.content else mark
+    if node.meta.get("interrupted"):
+        mark = "*⊘ interrupted*"
+        return f"{node.content}\n\n{mark}" if node.content else mark
+    return node.content
+
+
 class MessageRow(Vertical):
     """A compact two-line node row (see module docstring)."""
 
@@ -54,7 +71,7 @@ class MessageRow(Vertical):
     def __init__(self, node: Node, *, truncate: bool = True, **kwargs) -> None:
         self.node = node
         self._role = node.role
-        self._content = node.content
+        self._content = display_content(node)
         # Rows in the diff *drill* view show a region's blocks in full (task 21);
         # the list and diff *overview* rows truncate per the role config.
         self._truncate = truncate
@@ -127,3 +144,9 @@ class MessageRow(Vertical):
         self._content = content
         placeholder = "" if self._role == "system" else "▌"
         self.query_one(".content").update(content or placeholder)  # type: ignore[attr-defined]
+
+    def refresh_ending(self) -> None:
+        """Re-derive the row text from the node's durable state — called once
+        after ``end_turn`` so a just-stamped error/interrupted mark shows
+        without waiting for a reconcile."""
+        self.update_content(display_content(self.node))

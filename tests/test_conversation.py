@@ -15,11 +15,9 @@ and we `await task` so the stream's cancellation handling (and its persist)
 completes deterministically before we assert. No use of athrow.
 """
 
-import asyncio
 import sqlite3
 
 import pytest
-from conftest import BlockingProvider
 
 from ctx.core.config import DEFAULT_MODEL
 from ctx.core.conversation import MAX_TITLE_LENGTH, ConversationCore
@@ -214,9 +212,11 @@ def test_second_submit_keeps_conversation_id(repo, test_provider, workspace):
     # C10
     core = ConversationCore(repo, test_provider(["hi"]), workspace)
     core.setup()
-    core.submit("First question about the schema")
+    _, _a = core.submit("First question about the schema")
+    core.end_turn(_a)
     first_id = core.conversation_id
-    core.submit("Second follow-up question")
+    _, _a = core.submit("Second follow-up question")
+    core.end_turn(_a)
     assert core.conversation_id == first_id
     assert core.conversation_id != ""
 
@@ -226,8 +226,10 @@ def test_title_fixed_after_first_message(repo, test_provider, workspace):
     core = ConversationCore(repo, test_provider(["hi"]), workspace)
     core.setup()
     first_text = "Design the billing module"
-    core.submit(first_text)
-    core.submit("Now describe the refund flow instead")
+    _, _a = core.submit(first_text)
+    core.end_turn(_a)
+    _, _a = core.submit("Now describe the refund flow instead")
+    core.end_turn(_a)
     assert core.conversation_title == first_text
 
 
@@ -235,10 +237,12 @@ def test_second_submit_grows_nodes_by_two(repo, test_provider, workspace):
     # C12
     core = ConversationCore(repo, test_provider(["hi"]), workspace)
     core.setup()
-    core.submit("Initial question on caching")
+    _, _a = core.submit("Initial question on caching")
+    core.end_turn(_a)
     n = len(core.nodes)
     text2 = "Follow up about cache invalidation"
-    core.submit(text2)
+    _, _a = core.submit(text2)
+    core.end_turn(_a)
     assert len(core.nodes) == n + 2
     assert core.nodes[-2].content == text2
     assert core.nodes[-1].content == ""
@@ -405,8 +409,10 @@ def test_resume_restores_node_list(repo, test_provider, workspace):
     # C25
     first = ConversationCore(repo, test_provider(["hi"]), workspace)
     first.setup()
-    first.submit("First question for the resumed list")
-    first.submit("Second question for the resumed list")
+    _, _a = first.submit("First question for the resumed list")
+    first.end_turn(_a)
+    _, _a = first.submit("Second question for the resumed list")
+    first.end_turn(_a)
     saved_id = first.conversation_id
     expected = repo.load(saved_id)
 
@@ -550,6 +556,7 @@ async def test_stream_yields_tokens_in_order(repo, test_provider, workspace):
     core.setup()
     _, assistant_node = core.submit("Greet the world")
     tokens = await _collect(core.stream(assistant_node))
+    core.end_turn(assistant_node)
     assert tokens == ["Hello", ", ", "world"]
 
 
@@ -559,6 +566,7 @@ async def test_stream_accumulates_into_assistant_content(repo, test_provider, wo
     core.setup()
     _, assistant_node = core.submit("Greet the world")
     await _collect(core.stream(assistant_node))
+    core.end_turn(assistant_node)
     assert assistant_node.content == "Hello, world"
 
 
@@ -570,6 +578,7 @@ async def test_stream_sends_prior_user_text_not_empty_assistant(repo, workspace)
     user_text = "What messages get sent to the provider?"
     _, assistant_node = core.submit(user_text)
     await _collect(core.stream(assistant_node))
+    core.end_turn(assistant_node)
     messages = provider.captured_messages
     assert messages is not None
     # The prior user text must be carried to the provider.
@@ -597,6 +606,7 @@ async def test_stream_excludes_streamed_node_by_identity(repo, workspace):
     # a read-only projection over the append-only graph, ADR-0016).
     core._append_to_line(Node.user("A later user turn", core.conversation_id))
     await _collect(core.stream(assistant_node))
+    core.end_turn(assistant_node)
     messages = provider.captured_messages
     assert messages is not None
     # The streamed node's own content must NOT be fed back as context...
@@ -605,109 +615,6 @@ async def test_stream_excludes_streamed_node_by_identity(repo, workspace):
     assert any("A later user turn" in str(m) for m in messages)
 
 
-async def test_stream_persists_full_assistant_content(repo, test_provider, workspace):
-    # C39
-    core = ConversationCore(repo, test_provider(["The ", "answer ", "is ", "42"]), workspace)
-    core.setup()
-    _, assistant_node = core.submit("What is the answer?")
-    await _collect(core.stream(assistant_node))
-    loaded = repo.load(core.conversation_id)
-    assert any(
-        n.role == "assistant" and n.content == "The answer is 42" for n in loaded
-    )
-
-
-async def test_stream_cancel_persists_partial_content(repo, workspace):
-    # C40 — realistic mid-stream cancel: provider yields "a" then blocks; the
-    # consuming task is cancelled while suspended awaiting the next token, and
-    # we await the task so cancellation handling (persist) completes before we
-    # assert. The streamed-so-far token "a" must be persisted.
-    gate = asyncio.Event()
-    core = ConversationCore(repo, BlockingProvider(["a"], gate), workspace)
-    core.setup()
-    _, assistant_node = core.submit("Stream something cancellable")
-    first_seen = asyncio.Event()
-
-    async def _consume():
-        async for tok in core.stream(assistant_node):
-            if tok == "a":
-                first_seen.set()
-
-    task = asyncio.create_task(_consume())
-    await first_seen.wait()      # ensure the first token was streamed
-    await asyncio.sleep(0)       # let the consumer suspend awaiting the next token
-    task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task               # cancellation handling (persist) completes here
-
-    loaded = repo.load(core.conversation_id)
-    assert any(n.role == "assistant" and n.content == "a" for n in loaded)
-
-
-async def test_stream_error_persists_partial_content(repo, workspace):
-    # C41
-    core = ConversationCore(repo, FailingProvider(["x", "y"]), workspace)
-    core.setup()
-    _, assistant_node = core.submit("Stream that will fail")
-    with pytest.raises(RuntimeError):
-        await _collect(core.stream(assistant_node))
-    loaded = repo.load(core.conversation_id)
-    assert any(n.role == "assistant" and n.content == "xy" for n in loaded)
-
-
-# --------------------------------------------------------------------------
-# Persist count invariant on stream completion
-# --------------------------------------------------------------------------
-
-async def test_stream_success_saves_exactly_once(repo, test_provider, workspace):
-    # C42 success
-    storage = SaveCountingStorage(repo)
-    core = ConversationCore(storage, test_provider(["done"]), workspace)
-    core.setup()
-    _, assistant_node = core.submit("A successful stream")
-    before = storage.save_count
-    await _collect(core.stream(assistant_node))
-    assert storage.save_count == before + 1
-
-
-async def test_stream_cancel_saves_exactly_once(repo, workspace):
-    # C42 cancellation — same realistic mid-stream cancel pattern as C40, but
-    # with SaveCountingStorage. The cancellation handling must persist exactly
-    # once. Snapshot save_count right before cancelling (after the stream has
-    # started), then assert it increased by exactly 1 after the task raises.
-    gate = asyncio.Event()
-    storage = SaveCountingStorage(repo)
-    core = ConversationCore(storage, BlockingProvider(["a"], gate), workspace)
-    core.setup()
-    _, assistant_node = core.submit("Stream something cancellable")
-    first_seen = asyncio.Event()
-
-    async def _consume():
-        async for tok in core.stream(assistant_node):
-            if tok == "a":
-                first_seen.set()
-
-    task = asyncio.create_task(_consume())
-    await first_seen.wait()      # ensure the first token was streamed
-    await asyncio.sleep(0)       # let the consumer suspend awaiting the next token
-    before = storage.save_count  # snapshot AFTER stream started, BEFORE cancel
-    task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task               # cancellation handling (persist) completes here
-
-    assert storage.save_count == before + 1
-
-
-async def test_stream_error_saves_exactly_once(repo, workspace):
-    # C42 error
-    storage = SaveCountingStorage(repo)
-    core = ConversationCore(storage, FailingProvider(["x", "y"]), workspace)
-    core.setup()
-    _, assistant_node = core.submit("A stream that errors")
-    before = storage.save_count
-    with pytest.raises(RuntimeError):
-        await _collect(core.stream(assistant_node))
-    assert storage.save_count == before + 1
 
 
 # --------------------------------------------------------------------------
@@ -903,6 +810,7 @@ async def test_c54_stream_expands_included_file(repo, workspace):
     core.include_files(["notes.txt"])
     _, assistant_node = core.submit("Please use the included notes")
     await _collect(core.stream(assistant_node))
+    core.end_turn(assistant_node)
     assert provider.captured_messages is not None
     assert any("UNIQUE_FILE_BODY_XYZ" in str(m) for m in provider.captured_messages)
 
@@ -915,9 +823,11 @@ async def test_c55_stream_includes_full_history(repo, workspace):
 
     _, first_assistant = core.submit("first question alpha")
     await _collect(core.stream(first_assistant))
+    core.end_turn(first_assistant)
 
     _, second_assistant = core.submit("second question beta")
     await _collect(core.stream(second_assistant))
+    core.end_turn(second_assistant)
 
     captured = str(provider.captured_messages)
     assert "first question alpha" in captured
@@ -932,6 +842,7 @@ async def test_c56_stream_uses_current_model(repo, workspace):
     core.set_model("vendor/specific-model")
     _, assistant_node = core.submit("Which model is this?")
     await _collect(core.stream(assistant_node))
+    core.end_turn(assistant_node)
     assert provider.captured_model == "vendor/specific-model"
     assert provider.captured_model == core.model
 
@@ -961,6 +872,7 @@ async def _run_turn(core, message):
     """Submit a message and fully drain the resulting stream."""
     _, assistant = core.submit(message)
     tokens = [tok async for tok in core.stream(assistant)]
+    core.end_turn(assistant)
     return tokens
 
 
@@ -1194,7 +1106,9 @@ def test_c68_two_turns_root_first_order(repo, test_provider, workspace):
     core = ConversationCore(repo, test_provider(["hi"]), workspace)
     core.setup()
     u1, a1 = core.submit("What is the capital of France?")
+    core.end_turn(a1)
     u2, a2 = core.submit("And its population?")
+    core.end_turn(a2)
     view = core.current_view()
     assert [n.id for n in view] == [u1.id, a1.id, u2.id, a2.id]
     assert view[0].id == u1.id
@@ -1210,9 +1124,11 @@ def test_c69_nodes_property_recomputed(repo, test_provider, workspace):
     core = ConversationCore(repo, test_provider(["hi"]), workspace)
     core.setup()
     u1, a1 = core.submit("Explain recursion briefly.")
+    core.end_turn(a1)
     assert [n.id for n in core.nodes] == [n.id for n in core.current_view()]
     assert [n.id for n in core.nodes] == [u1.id, a1.id]
     u2, a2 = core.submit("Now give an example.")
+    core.end_turn(a2)
     # A fresh read of the property reflects the new state, not a frozen snapshot.
     assert [n.id for n in core.nodes] == [u1.id, a1.id, u2.id, a2.id]
 
@@ -1222,8 +1138,11 @@ def test_c70_rewind_shortens_view(repo, test_provider, workspace):
     core = ConversationCore(repo, test_provider(["hi"]), workspace)
     core.setup()
     u1, a1 = core.submit("First question about databases.")
+    core.end_turn(a1)
     u2, a2 = core.submit("Second follow-up question.")
+    core.end_turn(a2)
     u3, a3 = core.submit("Third follow-up question.")
+    core.end_turn(a3)
     core.rewind(a1.id)
     view = core.current_view()
     assert [n.id for n in view] == [u1.id, a1.id]
@@ -1238,8 +1157,11 @@ def test_c71_rewind_returns_current_view(repo, test_provider, workspace):
     core = ConversationCore(repo, test_provider(["hi"]), workspace)
     core.setup()
     u1, a1 = core.submit("Question one.")
+    core.end_turn(a1)
     u2, a2 = core.submit("Question two.")
+    core.end_turn(a2)
     u3, a3 = core.submit("Question three.")
+    core.end_turn(a3)
     r = core.rewind(a1.id)
     after = core.current_view()
     assert [n.id for n in r] == [n.id for n in after]
@@ -1251,7 +1173,9 @@ def test_c72_rewind_to_tip_is_noop(repo, test_provider, workspace):
     core = ConversationCore(repo, test_provider(["hi"]), workspace)
     core.setup()
     u1, a1 = core.submit("Tell me about oceans.")
+    core.end_turn(a1)
     u2, a2 = core.submit("Tell me about mountains.")
+    core.end_turn(a2)
     view_before = [n.id for n in core.current_view()]
     assert view_before == [u1.id, a1.id, u2.id, a2.id]
     core.rewind(a2.id)
@@ -1262,8 +1186,10 @@ def test_c72_rewind_to_tip_is_noop(repo, test_provider, workspace):
 def test_c73_rewind_unknown_id_raises(repo, test_provider, workspace):
     core = ConversationCore(repo, test_provider(["hi"]), workspace)
     core.setup()
-    core.submit("Some initial question.")
-    core.submit("A second question.")
+    _, _a = core.submit("Some initial question.")
+    core.end_turn(_a)
+    _, _a = core.submit("A second question.")
+    core.end_turn(_a)
     view_before = [n.id for n in core.current_view()]
     with pytest.raises(ValueError):
         core.rewind("nonexistent-node-id")
@@ -1275,8 +1201,11 @@ def test_c74_rewind_to_abandoned_tail_raises(repo, test_provider, workspace):
     core = ConversationCore(repo, test_provider(["hi"]), workspace)
     core.setup()
     u1, a1 = core.submit("Original question one.")
+    core.end_turn(a1)
     u2, a2 = core.submit("Original question two.")
+    core.end_turn(a2)
     u3, a3 = core.submit("Original question three.")
+    core.end_turn(a3)
     core.rewind(a1.id)
     core.submit("A divergent branch question.")  # u4, a4
     view_before = [n.id for n in core.current_view()]
@@ -1290,8 +1219,11 @@ def test_c75_resume_after_rewind_uses_rewind_tip(repo, test_provider, workspace)
     core = ConversationCore(repo, test_provider(["hi"]), workspace)
     core.setup()
     u1, a1 = core.submit("Persisted question one.")
+    core.end_turn(a1)
     u2, a2 = core.submit("Persisted question two.")
+    core.end_turn(a2)
     u3, a3 = core.submit("Persisted question three.")
+    core.end_turn(a3)
     cid = core.conversation_id
     core.rewind(a1.id)
 
@@ -1311,8 +1243,11 @@ def test_c76_abandoned_tail_preserved_after_reload(repo, test_provider, workspac
     core = ConversationCore(repo, test_provider(["hi"]), workspace)
     core.setup()
     u1, a1 = core.submit("Branching question one.")
+    core.end_turn(a1)
     u2, a2 = core.submit("Branching question two.")
+    core.end_turn(a2)
     u3, a3 = core.submit("Branching question three.")
+    core.end_turn(a3)
     core.rewind(a1.id)
     core.submit("Divergent branch question.")  # u4, a4
     cid = core.conversation_id
@@ -1338,10 +1273,14 @@ def test_c77_divergent_branch_same_core(repo, test_provider, workspace):
     core = ConversationCore(repo, test_provider(["hi"]), workspace)
     core.setup()
     u1, a1 = core.submit("Same-core question one.")
+    core.end_turn(a1)
     u2, a2 = core.submit("Same-core question two.")
+    core.end_turn(a2)
     u3, a3 = core.submit("Same-core question three.")
+    core.end_turn(a3)
     core.rewind(a1.id)
     u4, a4 = core.submit("Same-core divergent question.")
+    core.end_turn(a4)
     view = core.current_view()
     assert [n.id for n in view] == [u1.id, a1.id, u4.id, a4.id]
     view_ids = {n.id for n in view}
@@ -1720,8 +1659,10 @@ async def test_c99_expand_then_recompress_overlap(repo, test_provider, workspace
     core.setup()
     _u1, a1 = core.submit("First question")
     await _collect(core.stream(a1))
+    core.end_turn(a1)
     u2, a2 = core.submit("Second question")
     await _collect(core.stream(a2))
+    core.end_turn(a2)
     view = core.current_view()
     k = core.commit_compression(view[0].id, view[-1].id, "whole summary")
     core.expand_compression(k.id)
@@ -1753,8 +1694,10 @@ async def test_c91_resume_whole_tip_folded_keeps_stored_title(
     core.setup()
     _u1, a1 = core.submit(original)
     await _collect(core.stream(a1))
+    core.end_turn(a1)
     _u2, a2 = core.submit("A follow-up question")
     await _collect(core.stream(a2))
+    core.end_turn(a2)
     cid = core.conversation_id
     view = core.current_view()
     core.commit_compression(view[0].id, view[-1].id, "summary of everything")
@@ -1779,8 +1722,10 @@ async def test_c92_resume_empty_stored_title_derives_from_raw_line(
     core.setup()
     _u1, a1 = core.submit("Raw line first user turn")
     await _collect(core.stream(a1))
+    core.end_turn(a1)
     _u2, a2 = core.submit("Second turn")
     await _collect(core.stream(a2))
+    core.end_turn(a2)
     cid = core.conversation_id
     view = core.current_view()
     core.commit_compression(view[0].id, view[-1].id, "summary")
@@ -1830,8 +1775,10 @@ async def test_c94_rewind_to_compression_node_raises(repo, test_provider, worksp
     core.setup()
     _u1, a1 = core.submit("First question")
     await _collect(core.stream(a1))
+    core.end_turn(a1)
     _u2, a2 = core.submit("Second question")
     await _collect(core.stream(a2))
+    core.end_turn(a2)
     view = core.current_view()
     k = core.commit_compression(view[0].id, view[-1].id, "summary")
     leaf_before = core._active_leaf_id
@@ -1851,8 +1798,10 @@ async def test_c95_rewind_to_folded_child_raises(repo, test_provider, workspace)
     core.setup()
     u1, a1 = core.submit("First question")
     await _collect(core.stream(a1))
+    core.end_turn(a1)
     _u2, a2 = core.submit("Second question")
     await _collect(core.stream(a2))
+    core.end_turn(a2)
     view = core.current_view()
     core.commit_compression(view[0].id, view[-1].id, "summary")
     leaf_before = core._active_leaf_id
@@ -1868,8 +1817,10 @@ async def test_c96_rewind_to_expand_event_raises(repo, test_provider, workspace)
     core.setup()
     _u1, a1 = core.submit("First question")
     await _collect(core.stream(a1))
+    core.end_turn(a1)
     _u2, a2 = core.submit("Second question")
     await _collect(core.stream(a2))
+    core.end_turn(a2)
     view = core.current_view()
     k = core.commit_compression(view[0].id, view[-1].id, "summary")
     core.expand_compression(k.id)
