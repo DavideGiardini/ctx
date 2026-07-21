@@ -101,7 +101,7 @@ class DetailInspector(Container):
 
     can_focus = True
 
-    node_state: reactive[NodeView | None] = reactive(None, layout=True)
+    node_state: reactive[NodeView | None] = reactive(None)
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -113,6 +113,9 @@ class DetailInspector(Container):
         self._highlight: str | None = None
         self._max_box: str | None = None
         self._maximized_name: str | None = None
+        # Node ids the compact rows currently mounted in #detail-content-rows
+        # represent (see ``_render_content_split``).
+        self._rows_node_ids: tuple[str, ...] = ()
 
     def compose(self) -> ComposeResult:
         with _Split(id="detail-standard"):
@@ -351,11 +354,18 @@ class DetailInspector(Container):
         compact rows (task 38); otherwise fall back to the plain-text body."""
         rows = self.query_one("#detail-content-rows", Vertical)
         text_widget = self.query_one("#detail-content-text", Static)
-        rows.remove_children()
         if view.content_nodes:
             text_widget.display = False
             rows.display = True
-            rows.mount_all([MessageRow(node) for node in view.content_nodes])
+            ids = tuple(node.id for node in view.content_nodes)
+            # AIDEV-NOTE: remove_children/mount_all are fire-and-forget; two
+            # rebuilds in one message batch interleave and crash a MessageRow
+            # mid-mount. Nodes are immutable (append-only graph), so same ids ⇒
+            # same rows — rebuild only when the row set actually changes.
+            if ids != self._rows_node_ids:
+                self._rows_node_ids = ids
+                rows.remove_children()
+                rows.mount_all([MessageRow(node) for node in view.content_nodes])
         else:
             rows.display = False
             text_widget.display = True

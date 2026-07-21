@@ -11,7 +11,7 @@ inspector's ``NodeView``/``splits_visible`` (the split *contents* are an inspect
 detail describe_state omits).
 """
 
-from pilot_helpers import open_editor_on_range, two_turns
+from pilot_helpers import inspector_settled, open_editor_on_range, two_turns
 from textual.widgets import TextArea
 
 from ctx.core.conversation import DEFAULT_COMPRESSION_PROMPT
@@ -30,7 +30,7 @@ async def test_drafted_k_inspector_shows_prompt_originals_summary(app_factory):
         await pilot.press("ctrl+s")  # commit; summary = drafted tokens
 
         await pilot.press("home")  # select the (only) node — the K
-        await pilot.pause()
+        await inspector_settled(pilot)
 
         view = app.query_one(DetailInspector).node_state
         assert view is not None
@@ -60,7 +60,7 @@ async def test_manual_k_inspector_hides_empty_prompt_split(app_factory):
         await pilot.press("ctrl+s")  # manual commit → prompt == ""
 
         await pilot.press("home")  # select the K
-        await pilot.pause()
+        await inspector_settled(pilot)
 
         inspector = app.query_one(DetailInspector)
         view = inspector.node_state
@@ -82,8 +82,7 @@ async def test_k_inspector_originals_split_renders_compact_rows(app_factory):
         app.query_one("#compress-output", TextArea).text = "SUMMARY"
         await pilot.press("ctrl+s")  # commit -> K folding all 4 nodes
         await pilot.press("home")  # select the K
-        await pilot.pause()
-        await pilot.pause()
+        await inspector_settled(pilot)
 
         inspector = app.query_one(DetailInspector)
         # One compact row per folded child (user1, assistant1, user2, assistant2).

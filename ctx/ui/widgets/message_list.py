@@ -172,6 +172,10 @@ class MessageList(VerticalScroll):
         (task 41). A separator bridging two selected rows turns grey; state only
         recolors — geometry is untouched. Pass an empty set to clear. Centralizes
         the per-row flags so the app never has to know a row's neighbours."""
+        if selected_ids == self._selected_ids:
+            # Reapplying the identical selection would re-flag every row and
+            # recompute every bridge for no visible change — skip the O(N) work.
+            return
         self._selected_ids = set(selected_ids)
         for widget in self.query(MessageWidget):
             widget.set_range_selected(widget.node.id in self._selected_ids)

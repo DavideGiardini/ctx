@@ -6,6 +6,8 @@ from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
+from textual.css.query import NoMatches
+from textual.timer import Timer
 from textual.widgets import Input, Static, TextArea
 from textual.worker import Worker, WorkerState
 
@@ -31,6 +33,15 @@ from ctx.ui.widgets.include_screen import IncludeScreen
 from ctx.ui.widgets.input_bar import InputBar
 from ctx.ui.widgets.message_list import MessageList, MessageWidget
 from ctx.ui.widgets.message_row import truncation_key
+
+# How long the Detail Inspector render waits after the last cursor move before
+# it re-parses the selected node's Markdown. Every move just restarts this
+# settle timer, so the expensive parse runs once movement stops rather than
+# once per keystroke (edit-mode scroll-lag fix). Selection state (row
+# highlight, footer, scroll) stays immediate — only the render debounces.
+# AIDEV-NOTE: must exceed the fast-tapping cadence (~100-200ms between presses)
+# or taps escape the window and each one pays a full render.
+_INSPECTOR_DEBOUNCE = 0.10
 
 
 class ChatApp(App):
@@ -89,6 +100,10 @@ class ChatApp(App):
         self._last_drafted_prompt: str = ""
         self.mode = "insert"
         self._selected_node_id: str | None = None
+        # Detail Inspector render debounce (see ``_schedule_inspector_render``).
+        # The pending settle timer; ``None`` when idle. Invariant: timer running
+        # ⇔ a render is owed for the current selection.
+        self._inspector_timer: Timer | None = None
         # Anchor of a vim-style range selection (Edit mode). ``None`` when no
         # range is active; while set, up/down extend the contiguous highlight
         # between it and the cursor (``_selected_node_id``). See ADR-0016 Q5.
@@ -260,6 +275,9 @@ class ChatApp(App):
         )
 
     def _lock_inspector_to_last(self) -> None:
+        # Drop any queued debounced render so it can't fire after this direct
+        # show() and clobber the locked-to-last view.
+        self._cancel_inspector_timer()
         inspector = self.query_one(DetailInspector)
         last = self.core.nodes[-1] if self.core.nodes else None
         inspector.show(self._node_view(last) if last else None)
@@ -274,18 +292,59 @@ class ChatApp(App):
                 pass
         self._selected_node_id = node_id
         if node_id is None:
-            self.query_one(DetailInspector).show(None)
+            self._schedule_inspector_render()
             self._sync_footer()
             return
         try:
             widget = message_list.query_one(f"#msg-{node_id}", MessageWidget)
             widget.set_selected(True)
-            widget.scroll_visible()
+            widget.scroll_visible(animate=False)
         except Exception:
             pass
-        node = self._get_selected_node()
-        self.query_one(DetailInspector).show(self._node_view(node) if node else None)
+        self._schedule_inspector_render()
         self._sync_footer()
+
+    def _schedule_inspector_render(self) -> None:
+        """Trailing-edge debounce for the Detail Inspector render.
+
+        A cursor move does **zero** inspector work — it only restarts the settle
+        timer, keeping the keypress path cheap no matter how fast the cursor
+        moves (held auto-repeat or rapid tapping). The expensive Markdown parse
+        runs once, ``_INSPECTOR_DEBOUNCE`` after the *last* move, and reads the
+        *current* selection — never a stale captured one. Until then the pane
+        shows the previously settled node, editor-preview style."""
+        self._cancel_inspector_timer()
+        self._inspector_timer = self.set_timer(
+            _INSPECTOR_DEBOUNCE, self._inspector_settled
+        )
+
+    def _inspector_settled(self) -> None:
+        self._inspector_timer = None
+        self._render_inspector_now()
+
+    def _render_inspector_now(self) -> None:
+        try:
+            inspector = self.query_one(DetailInspector)
+        except NoMatches:
+            # The settle timer can land after shutdown tore the widgets down.
+            return
+        node = self._get_selected_node()
+        inspector.show(self._node_view(node) if node else None)
+
+    def _cancel_inspector_timer(self) -> None:
+        if self._inspector_timer is not None:
+            self._inspector_timer.stop()
+            self._inspector_timer = None
+
+    def _flush_inspector_render(self) -> None:
+        """Land any owed debounced render synchronously — called before anything
+        reads the inspector's ``node_state`` (entering the pane, the 1/2/3
+        maximize shortcuts, Enter) so those never act on a stale node. With the
+        trailing-edge debounce, a running timer ⇔ a render is owed; no timer
+        means the pane already shows the settled selection and this is a no-op."""
+        if self._inspector_timer is not None:
+            self._cancel_inspector_timer()
+            self._render_inspector_now()
 
     def _clear_selection(self) -> None:
         if self._selected_node_id:
@@ -638,6 +697,7 @@ class ChatApp(App):
             return
         if not self._focus_in_detail():
             return
+        self._flush_inspector_render()
         inspector = self.query_one(DetailInspector)
         if inspector.pane_mode == "browse":
             inspector.maximize()
@@ -656,6 +716,7 @@ class ChatApp(App):
         node = self._get_selected_node()
         if not node or node.node_type not in _SPLIT_VIEW_TYPES:
             return
+        self._flush_inspector_render()
         if self.query_one(DetailInspector).maximize_named(which):
             self._sync_footer()
 
@@ -674,6 +735,9 @@ class ChatApp(App):
             inspector.exit_pane()
             message_list.focus()
         else:
+            # Entering the pane reads node_state; make sure a pending debounced
+            # render has landed so we enter on the current selection.
+            self._flush_inspector_render()
             mode = inspector.enter_pane()
             if mode == "browse":
                 inspector.focus()

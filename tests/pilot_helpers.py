@@ -71,6 +71,18 @@ async def wait_until_streaming(app, pilot, *, tries: int = 200) -> None:
     assert live, "turn stream never became live within the bound"
 
 
+async def inspector_settled(pilot) -> None:
+    """Wait out the Detail Inspector's trailing-edge render debounce.
+
+    A cursor move no longer renders the inspector — the render fires
+    ``_INSPECTOR_DEBOUNCE`` after the *last* move. Tests that select a node and
+    then assert on the inspector call this so the settle timer genuinely fires
+    (exercising the real render path rather than flushing past it)."""
+    from ctx.ui.app import _INSPECTOR_DEBOUNCE
+
+    await pilot.pause(_INSPECTOR_DEBOUNCE + 0.05)
+
+
 async def open_editor_on_range(pilot, *, downs: int = 3) -> None:
     """Enter Edit, anchor a range at the top of the view and extend it ``downs``
     rows down to the tip, then open the compression draft editor on it (form B).
