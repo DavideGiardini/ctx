@@ -13,8 +13,9 @@ live in ADRs and plan docs, never here. The long-term vision is parked in
 
 A stranger installs ctx0 and, on day one, prefers it to a web chat app:
 
-- [ ] **chats** — streaming turns that cannot be broken by a second submit,
-      a cancel, a provider error, or `/new`/`/resume` mid-stream *(Phase 1)*
+- [x] **chats** — streaming turns that cannot be broken by a second submit,
+      a cancel, a provider error, or `/new`/`/resume` mid-stream *(Phase 1 —
+      done 2026-07-21, `end_turn` single-owner lifecycle)*
 - [ ] **sees the whole conversation** — the dual-pane high-ground view renders
       predictably, with one owner for geometry *(Phase 2)*
 - [ ] **compacts** — condense any span of turns into an editable node that is
