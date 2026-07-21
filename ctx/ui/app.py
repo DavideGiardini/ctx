@@ -1030,11 +1030,12 @@ class ChatApp(App):
         self._cancel_stream_worker()
         nodes = self.core.resume_conversation(result)
         self._reset_transient_ui()
-        message_list = self.query_one(MessageList)
-        for child in list(message_list.children):
-            await child.remove()
-        for node in nodes:
-            await message_list.add_node(node)
+        # Rebuild in a single reconcile pass (not a per-node add_node loop): each
+        # add_node rebuilds every separator and scrolls to the end, so mounting a
+        # whole conversation one node at a time reflowed the pane N times and read
+        # as a settling animation. reconcile mounts the rows once, places the
+        # separators once, and scrolls once.
+        await self._rebuild_message_list()
         self.query_one(AppHeader).set_title(self.core.conversation_title)
         self._update_model_label()
         self._refresh_token_ui()
