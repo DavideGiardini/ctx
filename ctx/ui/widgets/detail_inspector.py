@@ -83,6 +83,9 @@ class DetailInspector(Container):
     DetailInspector #detail-prompt { border-bottom: solid $surface; }
     DetailInspector #detail-content { border-bottom: solid $surface; }
     DetailInspector #detail-content-rows { height: auto; }
+    /* The inspector owns its own row spacing now that MessageRow carries none
+       (ctx0 rendering redesign): one blank line between the folded originals. */
+    DetailInspector #detail-content-rows MessageRow { margin-bottom: 1; }
     DetailInspector _Split:focus {
         background: $surface-lighten-1;
     }

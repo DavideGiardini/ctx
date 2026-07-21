@@ -68,15 +68,33 @@ def _apply_pre_variant(variant: str | None) -> None:
         config._DEFAULTS["colors"]["compression"] = color
 
 
+def _separator_neighbours(app):
+    """Yield ``(separator, row_above, row_below)`` for each Separator in the list,
+    in document order (row_above/row_below may be ``None`` at the edges)."""
+    from ctx.ui.widgets.message_list import MessageList, MessageWidget, Separator
+
+    children = list(app.query_one(MessageList).children)
+    for i, child in enumerate(children):
+        if isinstance(child, Separator):
+            above = children[i - 1] if i > 0 else None
+            below = children[i + 1] if i + 1 < len(children) else None
+            yield (
+                child,
+                above if isinstance(above, MessageWidget) else None,
+                below if isinstance(below, MessageWidget) else None,
+            )
+
+
 async def _apply_post_variant(app, pilot, variant: str | None) -> None:
     """DOM-level injections applied after the named state is reached."""
     if variant in ("k40-nogap", "k40-gap"):
-        from ctx.ui.widgets.message_list import MessageWidget
-
-        want_gap = variant == "k40-gap"
-        for widget in app.query(MessageWidget):
-            if widget._role == "compression":
-                widget.set_new_pass(want_gap)
+        # The blank line before a K is a Separator the list places (task 40).
+        # `k40-gap` is the real (fixed) render; `k40-nogap` removes the separator
+        # sitting immediately above the K so it hugs the assistant reply above it.
+        if variant == "k40-nogap":
+            for sep, _above, below in list(_separator_neighbours(app)):
+                if below is not None and below._role == "compression":
+                    await sep.remove()
         await pilot.pause()
     if variant in ("range-blue", "range-grey"):
         # Force the task-41 broken look (solid blue, thin bar, gaps unbridged) vs
@@ -91,26 +109,22 @@ async def _apply_post_variant(app, pilot, variant: str | None) -> None:
             for widget in app.query(MessageWidget):
                 if widget.has_class("range-selected"):
                     widget.styles.background = Color.parse("#1e3a8a")
-                    widget.remove_class("range-continues-above")
-                    widget.remove_class("range-continues-below")
                     if widget._role in _TALL_ROLES:
                         widget._row_body().styles.border_left = ("tall", widget._border_color)
+            # Break the contiguity: strip the grey bridge off every separator.
+            for sep, _above, _below in _separator_neighbours(app):
+                sep.set_bridged(False)
         await pilot.pause()
 
     if variant in ("bar-outer", "bar-inner"):
-        # task-49: the colored bar must live on the inner body, so a selection's
-        # grey bridge padding (on the outer row) has no bar bleeding through the
-        # gap. `bar-outer` reproduces the pre-fix bleed (bar back on the outer
-        # row, drawn down through the bridge padding); `bar-inner` leaves the real
-        # (fixed) rendering untouched.
-        from ctx.ui.widgets.message_list import MessageWidget
-        from ctx.ui.widgets.message_row import _TALL_ROLES
-
+        # task-49: the grey gap bridging two selected rows must show NO colored
+        # left bar. `bar-outer` reproduces the pre-fix bleed by drawing a colored
+        # bar down through the bridged separator; `bar-inner` leaves the real
+        # (fixed) rendering — a bar-free grey gap — untouched.
         if variant == "bar-outer":
-            for widget in app.query(MessageWidget):
-                if widget.has_class("range-selected") and widget._role in _TALL_ROLES:
-                    widget._row_body().styles.border_left = ("hidden", widget._border_color)
-                    widget.styles.border_left = ("thick", widget._border_color)
+            for sep, above, _below in _separator_neighbours(app):
+                if sep.has_class("bridged") and above is not None:
+                    sep.styles.border_left = ("thick", above._border_color)
         await pilot.pause()
 
 

@@ -30,14 +30,7 @@ from ctx.ui.widgets.history_screen import HistoryScreen
 from ctx.ui.widgets.include_screen import IncludeScreen
 from ctx.ui.widgets.input_bar import InputBar
 from ctx.ui.widgets.message_list import MessageList, MessageWidget
-
-# Config key per node role for truncation lookups ("user" maps to "human").
-_TRUNCATION_KEY = {
-    "user": "human",
-    "assistant": "assistant",
-    "context": "context",
-    "system": "system",
-}
+from ctx.ui.widgets.message_row import truncation_key
 
 
 class ChatApp(App):
@@ -912,7 +905,7 @@ class ChatApp(App):
 
     @staticmethod
     def _is_truncated(node: Node, truncation: dict) -> bool:
-        limit = truncation.get(_TRUNCATION_KEY.get(node.role, "system"))
+        limit = truncation.get(truncation_key(node.role))
         if limit == "auto" or not isinstance(limit, int):
             return False
         return node.content.count("\n") + 1 > limit

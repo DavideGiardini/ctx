@@ -10,7 +10,21 @@ class the qa-tester harness can query.
 
 from pilot_helpers import turn, two_turns
 
-from ctx.ui.widgets.message_list import MessageWidget
+from ctx.ui.widgets.message_list import MessageList, MessageWidget, Separator
+
+
+def _separator_before(message_list, node_id):
+    """The Separator mounted immediately above the row for *node_id*, or None."""
+    children = list(message_list.children)
+    for i, child in enumerate(children):
+        below = children[i + 1] if i + 1 < len(children) else None
+        if (
+            isinstance(child, Separator)
+            and isinstance(below, MessageWidget)
+            and below.node.id == node_id
+        ):
+            return child
+    return None
 
 
 async def test_v_then_down_down_selects_three_contiguous_ids(app_factory):
@@ -42,9 +56,10 @@ async def test_v_then_down_down_selects_three_contiguous_ids(app_factory):
 
 async def test_range_selection_uses_hover_style_and_bridges_gaps(app_factory):
     """Task 41: a selected run wears the grey hover background (not solid blue)
-    with a bold (``thick``) role-colored left bar, and bridges the inter-row gaps
-    so it reads as one contiguous block — the interior rows carry the
-    ``range-continues-*`` classes, the run's edges do not."""
+    with a bold (``thick``) role-colored left bar, and the separators *inside* the
+    run are bridged (grey) so it reads as one contiguous block — while the
+    separator at the run's outer edge stays unbridged, detaching it from the next
+    turn. Spacing is owned by the list's Separator widgets, not by row margins."""
     app = app_factory()
     async with app.run_test() as pilot:
         await two_turns(app)
@@ -56,7 +71,7 @@ async def test_range_selection_uses_hover_style_and_bridges_gaps(app_factory):
         await pilot.press("home")
         await pilot.press("v", "down", "down")  # select rows 0,1,2
 
-        message_list = app.query_one("#messages")
+        message_list = app.query_one(MessageList)
         top = message_list.query_one(f"#msg-{view_ids[0]}", MessageWidget)
         mid = message_list.query_one(f"#msg-{view_ids[1]}", MessageWidget)
         bottom = message_list.query_one(f"#msg-{view_ids[2]}", MessageWidget)
@@ -67,19 +82,15 @@ async def test_range_selection_uses_hover_style_and_bridges_gaps(app_factory):
         for widget in (top, mid, bottom):
             assert widget._row_body().styles.border_left[0] == "thick"
 
-        # Gap bridging: interior boundaries carry the continues-* classes; the
-        # run's outer edges do not, so it detaches from the surrounding turns.
-        assert top.has_class("range-continues-below")
-        assert not top.has_class("range-continues-above")
-        assert mid.has_class("range-continues-above")
-        assert mid.has_class("range-continues-below")
-        assert bottom.has_class("range-continues-above")
-        assert not bottom.has_class("range-continues-below")
+        # Gap bridging: the separators between selected rows (before mid and before
+        # bottom) are bridged grey; the separator before the outside row is not, so
+        # the run detaches from the next turn.
+        assert _separator_before(message_list, view_ids[1]).has_class("bridged")
+        assert _separator_before(message_list, view_ids[2]).has_class("bridged")
+        assert not _separator_before(message_list, view_ids[3]).has_class("bridged")
 
         # The row outside the range carries no selection styling at all.
         assert not outside.has_class("range-selected")
-        assert not outside.has_class("range-continues-above")
-        assert not outside.has_class("range-continues-below")
         assert outside._row_body().styles.border_left[0] == "tall"
 
 

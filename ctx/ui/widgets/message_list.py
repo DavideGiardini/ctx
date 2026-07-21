@@ -1,6 +1,7 @@
 from textual.actions import SkipAction
 from textual.binding import Binding
 from textual.containers import VerticalScroll
+from textual.widgets import Static
 
 from ctx.models.nodes import Node
 from ctx.ui.widgets.message_row import _TALL_ROLES, MessageRow
@@ -20,16 +21,21 @@ _SIDE = {
 
 def _pass_starts(roles: list[str]) -> list[bool]:
     """For an ordered list of node roles, return whether each node begins a new
-    conversation pass (gets a top margin). A pass is a human turn (query + its
-    context imports) or an assistant turn (response + its imports); context nodes
-    take the human side (they come from /include) and system nodes inherit the
-    side of the preceding node. The first node is never a pass start.
+    conversation pass. A pass is a human turn (query + its context imports) or an
+    assistant turn (response + its imports); context nodes take the human side
+    (they come from /include) and system nodes inherit the side of the preceding
+    node. The first node is never a pass start.
+
+    This is the single source of truth for turn boundaries: :class:`MessageList`
+    puts exactly one :class:`Separator` (a blank line) before each row that starts
+    a new pass, and rows within a pass sit flush. So the visible rule is precisely
+    "one blank line between turns, none within a turn."
 
     A compression node ``K`` *always* starts a new pass (unless it is the very
     first node): a summary of a folded run is its own block and must detach from
     the preceding turn, even when that turn is on the same (assistant) side it
     inherits — otherwise a K mounted right after an assistant reply hugs it with
-    no blank margin and the two read as produced together (task 40).
+    no blank line and the two read as produced together (task 40).
     """
     starts: list[bool] = []
     prev_side: str | None = None
@@ -44,10 +50,27 @@ def _pass_starts(roles: list[str]) -> list[bool]:
     return starts
 
 
+class Separator(Static):
+    """The single owner of the blank line between conversation passes.
+
+    :class:`MessageList` mounts one before each pass-start row (see
+    :func:`_pass_starts`); within a pass rows sit flush with no separator, and the
+    first row never has one. Because the gap is a real widget with DOM identity —
+    not a row margin — a selection can *recolor* it: a separator bridging two rows
+    that are both inside one range selection turns grey (``bridged``), so the run
+    reads as one continuous block while geometry stays fixed (task 41). Rows
+    therefore own no spacing at all.
+    """
+
+    def set_bridged(self, bridged: bool) -> None:
+        self.set_class(bridged, "bridged")
+
+
 class MessageWidget(MessageRow):
     """A conversation-list row: the shared :class:`MessageRow` plus the list's
-    interaction state (cursor/range selection, pass margins) and a stable
-    ``msg-<node id>`` id the list queries by."""
+    interaction state (cursor / range selection) and a stable ``msg-<node id>`` id
+    the list queries by. It owns no spacing — the blank lines between rows are
+    :class:`Separator` widgets the list places."""
 
     def __init__(self, node: Node, **kwargs) -> None:
         super().__init__(node, id=f"msg-{node.id}", **kwargs)
@@ -60,17 +83,10 @@ class MessageWidget(MessageRow):
         """Toggle membership in a vim-style range selection (Q5). Distinct from
         ``set_selected`` (the single cursor): a range can span many widgets. A
         selected row wears the same bold role-colored left bar as the cursor so
-        the whole run reads as one highlighted block (task 41)."""
+        the whole run reads as one highlighted block (task 41); the grey gaps
+        between rows are bridged by the list's separators, not by this row."""
         self.set_class(selected, "range-selected")
         self._refresh_border()
-
-    def set_range_continues(self, *, above: bool, below: bool) -> None:
-        """Mark this row's adjacency within a contiguous selected run so the CSS
-        can bridge the inter-row gaps (task 41): ``below`` when the next visible
-        row is also selected (turn the separator into grey padding), ``above``
-        when the previous one is (drop the pass-start top margin)."""
-        self.set_class(above, "range-continues-above")
-        self.set_class(below, "range-continues-below")
 
     def _refresh_border(self) -> None:
         """Bold (``thick``) role-colored left bar while this row is the cursor or
@@ -81,9 +97,6 @@ class MessageWidget(MessageRow):
         active = self.has_class("selected") or self.has_class("range-selected")
         style = "thick" if active else "tall"
         self._row_body().styles.border_left = (style, self._border_color)  # type: ignore[assignment]
-
-    def set_new_pass(self, is_new_pass: bool) -> None:
-        self.set_class(is_new_pass, "pass-start")
 
 
 class MessageList(VerticalScroll):
@@ -103,13 +116,19 @@ class MessageList(VerticalScroll):
         Binding("home", "delegate_nav", show=False),
     ]
 
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        # The rows currently in a range selection; kept so separators rebuilt by a
+        # structural change re-derive their bridged (grey) state (set_range owns it).
+        self._selected_ids: set[str] = set()
+
     def action_delegate_nav(self) -> None:
         raise SkipAction()
 
     async def add_node(self, node: Node) -> None:
         widget = MessageWidget(node)
         await self.mount(widget)
-        self._apply_pass_margins()
+        await self._apply_separators()
         self.call_after_refresh(self.scroll_end)
 
     async def reconcile(self, nodes: list[Node]) -> None:
@@ -118,9 +137,9 @@ class MessageList(VerticalScroll):
         for each node that entered, in place — every surviving node keeps its
         original widget instance. Replaces a teardown+remount that blanked and
         repopulated the whole pane on every structural change (commit folds a
-        run into one K, expand unfolds it back, deep-dive nav swaps frames),
-        which read as a top-to-bottom refresh flash. The list becomes a pure
-        projection of the caller's view (task 44).
+        run into one K, expand unfolds it back), which read as a top-to-bottom
+        refresh flash. The list becomes a pure projection of the caller's view
+        (task 44).
 
         Surviving rows are assumed to keep their relative order (the only
         structural changes drop or insert contiguous runs — they never reorder
@@ -144,29 +163,53 @@ class MessageList(VerticalScroll):
             else:
                 await self.mount(widget, after=prev)
             prev = widget
-        self._apply_pass_margins()
+        await self._apply_separators()
         self.call_after_refresh(self.scroll_end)
 
     def set_range(self, selected_ids: set[str]) -> None:
-        """Apply a range selection across the list: mark each row in
-        *selected_ids* and bridge the gaps within every contiguous selected run
-        so the highlight reads as one block (task 41). Pass an empty set to
-        clear. Centralizes the per-row flags so the app never has to know a row's
-        neighbours."""
-        widgets = list(self.query(MessageWidget))
-        flags = [w.node.id in selected_ids for w in widgets]
-        for i, widget in enumerate(widgets):
-            selected = flags[i]
-            widget.set_range_selected(selected)
-            above = selected and i > 0 and flags[i - 1]
-            below = selected and i + 1 < len(flags) and flags[i + 1]
-            widget.set_range_continues(above=above, below=below)
+        """Apply a range selection across the list: mark each row and recolor the
+        separators *inside* the run so the highlight reads as one contiguous block
+        (task 41). A separator bridging two selected rows turns grey; state only
+        recolors — geometry is untouched. Pass an empty set to clear. Centralizes
+        the per-row flags so the app never has to know a row's neighbours."""
+        self._selected_ids = set(selected_ids)
+        for widget in self.query(MessageWidget):
+            widget.set_range_selected(widget.node.id in self._selected_ids)
+        self._refresh_bridges()
 
-    def _apply_pass_margins(self) -> None:
+    async def _apply_separators(self) -> None:
+        """Rebuild the turn-boundary separators from the current rows: exactly one
+        blank-line :class:`Separator` before each pass-start row (:func:`_pass_starts`),
+        none within a pass, none before the first row. The list is the single owner
+        of inter-turn spacing — rows carry no margins. Rebuilt wholesale on every
+        structural change: separators are stateless blanks (cheap to drop and
+        re-mount), while the message rows keep their instances via ``reconcile``."""
+        for sep in list(self.query(Separator)):
+            await sep.remove()
         widgets = list(self.query(MessageWidget))
         starts = _pass_starts([w._role for w in widgets])
         for widget, is_start in zip(widgets, starts, strict=True):
-            widget.set_new_pass(is_start)
+            if is_start:
+                await self.mount(Separator(), before=widget)
+        self._refresh_bridges()
+
+    def _refresh_bridges(self) -> None:
+        """Recolor each separator: grey (``bridged``) when the rows immediately
+        above and below it are *both* in the current range selection, so a run
+        spanning a turn boundary reads as one continuous grey block."""
+        children = list(self.children)
+        for i, child in enumerate(children):
+            if not isinstance(child, Separator):
+                continue
+            above = children[i - 1] if i > 0 else None
+            below = children[i + 1] if i + 1 < len(children) else None
+            bridged = (
+                isinstance(above, MessageWidget)
+                and isinstance(below, MessageWidget)
+                and above.node.id in self._selected_ids
+                and below.node.id in self._selected_ids
+            )
+            child.set_bridged(bridged)
 
     def update_content(self, node_id: str, content: str) -> None:
         try:

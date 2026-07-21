@@ -4,14 +4,15 @@
 two-line conversation row — a role-colored left bar, a right-docked meta slot
 (kind glyph + weight %), and the node's (truncated) content. It is the single
 surface behind every place the app shows a node as a compact row: the
-conversation list (``MessageWidget`` subclasses it), the diff panes, and the
-inspector splits.
+conversation list (``MessageWidget`` subclasses it) and the inspector splits.
 
-The row owns no interaction state (cursor/selection/pass margins live on the
-list's ``MessageWidget``). It also sets **no id** unless the caller supplies
-one, so the same node can appear in more than one place (e.g. both diff panes)
-without an id collision. Styling comes from ``widgets/message_list.css`` via the
-``MessageRow`` type selector (which also matches its subclasses).
+The row owns **no spacing and no interaction state** — cursor/selection live on
+the list's ``MessageWidget``, and the blank lines *between* rows are owned by the
+list's ``Separator`` widget, never by row margins. It also sets **no id** unless
+the caller supplies one, so the same node can appear in more than one place (e.g.
+the conversation list and the inspector) without an id collision. Styling comes
+from ``widgets/message_list.css`` via the ``MessageRow`` type selector (which also
+matches its subclasses).
 """
 
 from __future__ import annotations
@@ -33,6 +34,16 @@ _TRUNCATION_KEY = {
     # assistant reply (there is no separate "compression" truncation config).
     "compression": "assistant",
 }
+
+
+def truncation_key(role: str) -> str:
+    """The ``ui.truncation_lines`` config key for a node *role* — the single
+    source of truth shared by the row's own truncation and ``describe_state``'s
+    ``_is_truncated``. They must agree, or the snapshot lies about what the screen
+    shows: a compression ``K`` truncates like an assistant reply, so a caller that
+    forgets the ``compression`` mapping (as ``describe_state`` once did) reports a
+    different cap for K nodes than the row actually renders."""
+    return _TRUNCATION_KEY.get(role, "system")
 
 # Roles rendered as first-class turns: a "tall" left border (thick when the
 # cursor selects them). Others (system) get a plain "solid" border.
@@ -71,8 +82,8 @@ class MessageRow(Vertical):
         self.node = node
         self._role = node.role
         self._content = display_content(node)
-        # Rows in the diff *drill* view show a region's blocks in full (task 21);
-        # the list and diff *overview* rows truncate per the role config.
+        # Callers wanting full, untruncated content pass truncate=False; the
+        # conversation list and inspector rows truncate per the role config.
         self._truncate = truncate
         extra = kwargs.pop("classes", "")
         super().__init__(classes=f"{node.role} {extra}".strip(), **kwargs)
@@ -99,7 +110,7 @@ class MessageRow(Vertical):
             self.styles.max_height = None
             return
         truncation = get_config()["ui"]["truncation_lines"]
-        limit = truncation.get(_TRUNCATION_KEY.get(self._role, "system"))
+        limit = truncation.get(truncation_key(self._role))
         if isinstance(limit, int):
             self.styles.max_height = limit
         else:  # "auto" (or anything non-int) disables truncation

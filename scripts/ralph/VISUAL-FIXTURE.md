@@ -43,15 +43,15 @@ If they all match, the visual gate is calibrated. Any mismatch = a broken gate.
 
 | bug | state | what the eye must catch |
 |---|---|---|
-| `task-40-blank-line-before-K` | `k-after-assistant` | a blank margin row separating a K from the assistant turn directly above it (pixel-level vertical spacing — `qa-tester` **cannot** see this) |
-| `task-41-range-selection-contiguous-hover-style` | `range-selection` | a multi-node range reads as one block: grey hover-style background + bold role-colored left bar on every selected row, **contiguous across the inter-row gaps** — not solid blue rows with default-colored gaps |
-| `task-49-selection-bar-no-bleed-in-gap` | `range-selection` | within a multi-node range, the grey gap bridging two selected rows shows **no** colored left bar — each row's bar stops at its own content, none bleeds down through the gap (pixel-level; queryable proxy is only "bar is on the inner body") |
-| `task-50-diff-regions-equal-height-aligned` | `drift-diff-unequal` | in the two-pane context diff, a changed region whose sides differ in row count (a 2-row verbatim run ⟷ a single K summary) is blank-padded on the shorter side so the following unchanged row sits at the **same y** on both panes — the panes stay row-aligned (pixel-level vertical alignment; queryable proxy is only "both panes hold equal slot counts") |
+| `task-40-blank-line-before-K` | `k-after-assistant` | a blank line (a `Separator` widget the list places) separating a K from the assistant turn directly above it (pixel-level vertical spacing — `qa-tester` **cannot** see this) |
+| `task-41-range-selection-contiguous-hover-style` | `range-selection` | a multi-node range reads as one block: grey hover-style background + bold role-colored left bar on every selected row, **contiguous across the inter-row gaps** (the separators between selected rows go grey) — not solid blue rows with default-colored gaps |
+| `task-49-selection-bar-no-bleed-in-gap` | `range-selection` | within a multi-node range, the grey separator bridging two selected rows shows **no** colored left bar — each row's bar stops at its own content, none bleeds down through the gap (pixel-level; queryable proxy is only "the separator carries no border") |
 | `task-39-K-bar-colour` (calibration only) | `committed-K` | the K's left bar is context-green, not violet (this one is *also* a one-line `ctx_snapshot` `colors:` assertion — kept only to calibrate the gate's colour discrimination, not as evidence the visual capability is needed) |
 
 The task-40 and task-41 pairs are the load-bearing cases: genuinely pixel-level bugs
 no queryable proxy captures. task-40 — the `__FAIL` render shows the K flush against
-the assistant above it; the `__PASS` render inserts the blank margin row. task-41 —
+the assistant above it; the `__PASS` render keeps the blank-line separator before the
+K. task-41 —
 the `range-blue` (FAIL) render shows solid-blue selected rows with dark gaps between
 them; the `range-grey` (PASS) render shows the grey hover-style block with role-colored
 bars bridged across the gaps.

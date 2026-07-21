@@ -1,9 +1,10 @@
 /* Shared compact-row styling — targets MessageRow so it also applies to the
-   MessageWidget subclass (list rows) and to rows mounted in the diff/inspector
-   panes (tasks 37/38). */
+   MessageWidget subclass (list rows) and to rows mounted in the inspector splits
+   (task 38). The row owns NO spacing: inter-turn blank lines are Separator
+   widgets the MessageList places, and each container (list / inspector) owns its
+   own geometry (ctx0 rendering redesign). */
 MessageRow {
     height: auto;
-    margin: 0 0 1 0;
     overflow: hidden hidden;
 }
 /* The inner wrapper carries the role-colored left bar (set in Python) plus the
@@ -54,31 +55,29 @@ MessageRow .kind {
     color: $text-muted;
 }
 
-/* List-only interaction state (cursor / range selection / pass margins). */
-MessageWidget.pass-start {
-    margin-top: 1;
+/* One blank line between turns: a Separator sits before each pass-start row
+   (MessageList._apply_separators). It spans the full width so that, when bridged,
+   its grey fills the gap edge-to-edge; it carries no colored bar, so a bridged
+   gap shows pure grey with no bar bleeding through it (task 49). */
+Separator {
+    height: 1;
+    width: 1fr;
 }
+/* Grey while bridging two rows inside one range selection, matching the rows'
+   own selection background so the run reads as one continuous block (task 41). */
+Separator.bridged {
+    background: $surface-lighten-1;
+}
+
+/* List-only interaction state (cursor / range selection). A selected row wears
+   the grey hover background; the bold role-colored left bar is set in Python. A
+   multi-node run reads as one highlighted block — rows flush within a pass, grey
+   Separators bridging the turn boundaries — not a separate solid-blue mode. */
 MessageWidget.selected {
     background: $surface-lighten-1;
 }
-/* Range selection wears the same grey hover background as the cursor (the bold
-   role-colored left bar is set in Python) — a multi-node run reads as one
-   highlighted block, not a separate solid-blue mode (task 41). */
 MessageWidget.range-selected {
     background: $surface-lighten-1;
-}
-/* Bridge the inter-row gap inside a selected run so the highlight is one
-   continuous grey block: the upper row absorbs its separator as grey padding
-   and the lower row drops its (pass-start) top margin. The bridge padding is on
-   the *outer* row, outside the inner body's colored bar, so the gap is pure grey
-   with no bar bleeding through it (task 49). Must follow .pass-start so the
-   zeroed top margin wins at equal specificity (task 41). */
-MessageWidget.range-continues-below {
-    margin-bottom: 0;
-    padding-bottom: 1;
-}
-MessageWidget.range-continues-above {
-    margin-top: 0;
 }
 MessageList {
     scrollbar-size: 1 1;

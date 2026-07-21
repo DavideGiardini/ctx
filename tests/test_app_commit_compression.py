@@ -16,7 +16,7 @@ from textual.widgets import TextArea
 
 from ctx.ui.widgets.compression_editor import CompressionEditor
 from ctx.ui.widgets.detail_inspector import DetailInspector
-from ctx.ui.widgets.message_list import MessageWidget
+from ctx.ui.widgets.message_list import MessageList, MessageWidget, Separator
 
 
 async def test_ctrl_s_commits_folds_range_to_single_k(app_factory):
@@ -117,8 +117,11 @@ async def test_committed_k_after_assistant_carries_pass_start_margin(app_factory
 
         k_widgets = [w for w in app.query(MessageWidget) if w._role == "compression"]
         assert len(k_widgets) == 1
-        # The K begins its own pass, so it gets the top-margin separator (task 40).
-        assert k_widgets[0].has_class("pass-start")
+        # The K begins its own pass, so the list places a blank-line Separator
+        # immediately above it (task 40) — it never hugs the assistant reply above.
+        children = list(app.query_one(MessageList).children)
+        k_index = children.index(k_widgets[0])
+        assert k_index > 0 and isinstance(children[k_index - 1], Separator)
 
 
 async def test_committed_k_round_trips_across_app_instances(app_factory):

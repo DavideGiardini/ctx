@@ -1,7 +1,7 @@
 """Acceptance floor for the shared compact-row renderer (task 36).
 
-``MessageRow`` is the single surface behind every compact node row (the list,
-the diff panes, the inspector splits). These tests exercise it directly — once
+``MessageRow`` is the single surface behind every compact node row (the list and
+the inspector splits). These tests exercise it directly — once
 per role — asserting the two invariants tasks 37/38 depend on: the left-bar
 color comes from the palette for that role, and the row is the standard
 two-line layout (a weight meta slot above the content). A regression that
@@ -16,7 +16,7 @@ from textual.widgets import Markdown, Static
 
 from ctx.core.config import get_config
 from ctx.models.nodes import Node
-from ctx.ui.widgets.message_row import MessageRow
+from ctx.ui.widgets.message_row import MessageRow, truncation_key
 from tools.agent.snapshot import render
 
 _ROLES = ["user", "assistant", "context", "system", "compression"]
@@ -40,6 +40,24 @@ class _Host(App):
 
     def compose(self) -> ComposeResult:
         yield MessageRow(self._node)
+
+
+@pytest.mark.parametrize(
+    "role,expected",
+    [
+        ("user", "human"),
+        ("assistant", "assistant"),
+        ("context", "context"),
+        ("system", "system"),
+        ("compression", "assistant"),  # a K truncates like an assistant reply
+        ("mystery", "system"),  # unknown roles fall back to the system cap
+    ],
+)
+def test_truncation_key_is_the_single_source_of_truth(role, expected):
+    # describe_state and the row renderer both resolve a role's truncation cap
+    # through this one function; if they diverged (as app.py once did, missing the
+    # compression entry) the snapshot would report a different cap than the screen.
+    assert truncation_key(role) == expected
 
 
 @pytest.mark.parametrize("role", _ROLES)
