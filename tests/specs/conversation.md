@@ -712,3 +712,97 @@ slot; a K accidentally on-line (prev_id ≠ None) is a precondition violation, u
   "last loaded node" fallback fires only when the stored tip is absent/dangling.
 - **C79 (proposed) dropped:** unknown-id resume returning `[]` with current state intact is already
   covered by C26/C27; not re-derived here.
+
+## Turn lifecycle — `end_turn` single door (ctx0 Phase 1)
+
+### Superseded by the turn-lifecycle contract (ctx0 Phase 1)
+C39–C42 specified `stream()` as the owner of end-of-turn persistence (full/partial
+content saved by the generator's success/cancel/error paths, exactly once). That
+ownership moved to `end_turn` (C102–C104, C107 below); the C39–C42 tests were
+deleted with this supersession note rather than rewritten, because the new items
+pin the same durable observables through the new single door. C1/C2 of
+`conversation_streaming_flag.md` (flag cleared by the generator on build failure)
+are superseded the same way: the flag is no longer the generator's to clear.
+
+
+Code-blind contract for the single-owner turn lifecycle: `submit` refuses while a
+turn is in flight; `end_turn(node, *, cancelled/error)` is the only place a turn's
+ending is recorded (flag lowered, durable mark stamped, then persisted); `stream`
+is pure token production (no flag writes, no persists). Tests live in
+`tests/test_turn_lifecycle.py`.
+
+**C100. `submit` raises the in-flight flag; only `end_turn` lowers it on the happy
+path.** With no turn in flight, `submit(text)` returns `(user_node, assistant_node)`
+and `streaming` is True — and stays True until `end_turn` (see C106).
+
+**C101. Second `submit` mid-turn is refused, not queued — side-effect free.** With a
+turn in flight, `submit(...)` raises `ValueError`; `streaming` stays True, no new
+nodes are appended (a storage reload shows exactly the pre-refusal nodes), and the
+live turn can still be ended normally via `end_turn`.
+
+**C102. Clean finish: `end_turn(node)` lowers the flag and persists the full streamed
+content, unmarked.** After fully draining a scripted stream, `end_turn(assistant_node)`
+→ `streaming` False; the reloaded assistant node carries the full concatenated content
+and neither `"interrupted"` nor `"error"` in `meta`.
+
+**C103. Cancel ending: `interrupted` mark and partial content are durable together.**
+After a partial stream (blocking provider, some tokens in), `end_turn(node,
+cancelled=True)` → `streaming` False; the RELOADED node has `meta["interrupted"] is
+True` and the partial content. Asserting on the reloaded copy pins mark-then-persist
+ordering. (Zero-token cancels mark identically; dropping the empty node from the view
+is a UI decision, out of core scope.)
+
+**C104. Error ending: the error message is durable on the node.** After a failed
+stream, `end_turn(node, error="boom")` → `streaming` False; the reloaded node has
+`meta["error"] == "boom"`.
+
+**C105. `cancelled` + `error` together raise `ValueError` with no effect at all.**
+On a live turn, `end_turn(node, cancelled=True, error="boom")` raises `ValueError`;
+`streaming` is still True (validation precedes any effect, mirroring the compression
+guards) and the reloaded node carries neither mark.
+
+**C106. `stream` never touches the flag: a full drain leaves the turn in flight.**
+Draining `stream()` to exhaustion without calling `end_turn` leaves `streaming` True.
+(The invariant that retires the cancelled-before-first-tick stuck-flag bug.)
+
+**C107. `stream` never persists: drained content is invisible in storage until
+`end_turn`.** Same drained-but-unended turn: the reload contains the user node with
+its text (persisted at `submit`) and does NOT contain the assistant node at all —
+`submit` persists with the tip at the user node, so a crash mid-stream resumes
+cleanly on the user turn.
+
+**C108. `end_turn` is safe when the flag is already down.** Calling `end_turn(node)`
+again after a clean ending: no exception, `streaming` stays False. (Whether a late
+second ending could re-stamp is deliberately unconstrained: `end_turn` has a single
+caller by design and tracking turn identity would be mechanism nothing needs.)
+
+**C109. Conversation switch mid-turn resets the flag.** With a turn in flight,
+`new_conversation()` — or `resume_conversation(<other id>)` — leaves `streaming`
+False immediately, before any `end_turn` arrives.
+
+**C110. Stale ending after `new_conversation`: no stamp anywhere, no persist
+anywhere.** Turn in flight on conversation A → `new_conversation()` creates B →
+late `end_turn(old_node, cancelled=True)`: no exception; `streaming` stays False;
+B's stored state is unchanged; no stored node of A carries `"interrupted"`.
+
+**C111. Stale ending after `resume_conversation`: same no-op, error variant.** Turn
+in flight on A → resume previously-persisted B → late `end_turn(old_node,
+error="provider timed out")`: no exception; B's stored state unchanged; no stored
+node of A (nor B) carries `"error"`.
+
+**C112. A cancel/error ending fully releases the single-turn slot.** After
+`end_turn(node, cancelled=True)` (or `error=...`), a new `submit` on the same
+conversation succeeds, appending the new user node after the marked assistant node.
+
+### Adjudication notes (turn lifecycle)
+- **Validation-before-effect (C105):** resolved to "a rejected call changes nothing,
+  including the flag" — consistent with `_validate_compress_range`-style guards.
+- **Assistant node not persisted at `submit` (C107):** settled design (task 33):
+  `submit` persists with the tip at the user node; the assistant node first reaches
+  storage via `end_turn`. The blind author's alternative reading was corrected.
+- **Old-conversation observable in C110/C111** rephrased to "no stored node carries
+  the mark" — on the resume path A's assistant node may legitimately be absent from
+  storage (per C107), so the check must not presuppose its existence.
+- **Retroactive re-stamp protection rejected (C108):** single-caller discipline (the
+  UI's one convergence point) is the guard; turn-identity tracking would be
+  speculative mechanism.

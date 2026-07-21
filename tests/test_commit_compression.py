@@ -30,9 +30,11 @@ async def _build_line(core):
     u1, a1 = core.submit("Explain how a hash map handles collisions.")
     async for _ in core.stream(a1):
         pass
+    core.end_turn(a1)
     u2, a2 = core.submit("Now compare that with an open-addressing scheme.")
     async for _ in core.stream(a2):
         pass
+    core.end_turn(a2)
     return u1, a1, u2, a2
 
 
@@ -242,6 +244,7 @@ async def test_events_rejected_in_submit_to_first_tick_window(
     # Draining the turn closes the window: the same commit now succeeds.
     async for _ in core.stream(a3):
         pass
+    core.end_turn(a3)
     assert core.streaming is False
     core.commit_compression(u2.id, a2.id, "Now allowed.")
     assert sum(1 for n in core.current_view() if n.node_type == "compression") == 2

@@ -1,3 +1,8 @@
+> **SUPERSEDED (ctx0 Phase 1).** `stream()` no longer touches the streaming
+> flag; every ending is recorded by `end_turn` (see `conversation.md` §Turn
+> lifecycle, C106). The C1/C2 test file was deleted; the guard behavior that
+> C2 exercised (compression allowed once the turn ends) is covered by C112.
+
 # Contract: `ConversationCore.stream()` clears the streaming flag on any exit
 
 Scope: one behavioral invariant guarding a ~10-line try/finally reshuffle in

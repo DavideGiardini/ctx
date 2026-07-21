@@ -1317,37 +1317,53 @@ class ChatApp(App):
     # --- input + commands -----------------------------------------------
 
     async def on_input_bar_submitted(self, event: InputBar.Submitted) -> None:
+        # InputBar no longer clears itself on submit: acceptance clears, refusal
+        # keeps the typed text (review §Turn lifecycle). Every early return below
+        # must decide which it is — _accept_input() clears the bar.
         text = event.text.strip()
         logger.info("on_input_bar_submitted | text=%r | len=%d", text, len(text))
         with contextlib.suppress(Exception):
             self.query_one("#command-suggestions", Static).display = False
         if not text:
+            self._accept_input()
             return
 
         logger.info("input submitted | text=%r", text)
 
         if text.startswith("/model"):
             logger.info("matched /model")
+            self._accept_input()
             await self._handle_model_command(text)
             return
 
         if text == "/new":
             logger.info("matched /new")
+            self._accept_input()
             await self._handle_new_command()
             return
 
         if text == "/resume":
             logger.info("matched /resume")
+            self._accept_input()
             self._handle_resume_command()
             return
 
         if text == "/include":
             logger.info("matched /include")
+            self._accept_input()
             self._handle_include_command()
             return
 
         logger.info("no command matched, sending to model")
 
+        if self.core.streaming:
+            # Refuse, don't queue — and don't clear: the typed text survives for
+            # a resubmit once the turn ends. The core's submit() guard is the
+            # backstop; this check is the courtesy path that keeps the input.
+            await self._hint("A response is still streaming — Esc cancels it. Your text is kept.")
+            return
+
+        self._accept_input()
         user_node, assistant_node = self.core.submit(text)
         await self._mount_node(user_node)
         await self._mount_node(assistant_node)
@@ -1357,6 +1373,12 @@ class ChatApp(App):
             self._lock_inspector_to_last()
         self._streaming_node = assistant_node
         self._stream_worker = self._stream_response(assistant_node)
+
+    def _accept_input(self) -> None:
+        """Clear the input bar — the acceptance side of submit (the bar itself
+        never clears; a refused submit keeps the typed text)."""
+        with contextlib.suppress(Exception):
+            self.query_one(InputBar).value = ""
 
     def _update_model_label(self) -> None:
         with contextlib.suppress(Exception):
@@ -1385,6 +1407,7 @@ class ChatApp(App):
             self._lock_inspector_to_last()
 
     async def _handle_new_command(self) -> None:
+        self._cancel_stream_worker()
         old_id = self.core.conversation_id
         node = self.core.new_conversation()
         logger.info("new conversation | old_id=%s", old_id)
@@ -1408,6 +1431,7 @@ class ChatApp(App):
         result = await self.push_screen_wait(HistoryScreen(self._repo))
         if result is None:
             return
+        self._cancel_stream_worker()
         nodes = self.core.resume_conversation(result)
         self._reset_transient_ui()
         message_list = self.query_one(MessageList)
@@ -1441,29 +1465,23 @@ class ChatApp(App):
 
     # --- streaming ------------------------------------------------------
 
-    @work(name="stream_response")
+    # AIDEV-NOTE: exit_on_error=False — a provider/build failure must surface as
+    # the worker's ERROR state (mapped to end_turn(error=…) at the convergence
+    # point), not crash the app. The worker body handles no endings itself.
+    @work(name="stream_response", exit_on_error=False)
     async def _stream_response(self, assistant_node: Node) -> None:
         message_list = self.query_one(MessageList)
         inspector = self.query_one(DetailInspector)
         usage_gen_before = self.core.usage_generation
-        try:
-            async for _token in self.core.stream(assistant_node):
-                message_list.update_content(assistant_node.id, assistant_node.content)
-                self._stream_to_inspector(inspector, assistant_node)
-            logger.info("response finalized | length=%d", len(assistant_node.content))
-            if self.core.usage_generation != usage_gen_before:
-                # This turn produced a fresh provider anchor: the gauge is now
-                # exact for the current node set. Remember it so a later change
-                # (a /include before the next turn) re-marks the gauge stale.
-                self._gauge_anchor = self._node_signature()
-        except asyncio.CancelledError:
-            assistant_node.meta["interrupted"] = True
-            message_list.update_content(assistant_node.id, assistant_node.content or "▌")
-            raise
-        except Exception as exc:
-            assistant_node.meta["error"] = str(exc)
-            message_list.update_content(assistant_node.id, f"**Error:** {exc}")
-            logger.error("stream error | error=%s", exc)
+        async for _token in self.core.stream(assistant_node):
+            message_list.update_content(assistant_node.id, assistant_node.content)
+            self._stream_to_inspector(inspector, assistant_node)
+        logger.info("response finalized | length=%d", len(assistant_node.content))
+        if self.core.usage_generation != usage_gen_before:
+            # This turn produced a fresh provider anchor: the gauge is now
+            # exact for the current node set. Remember it so a later change
+            # (a /include before the next turn) re-marks the gauge stale.
+            self._gauge_anchor = self._node_signature()
 
     def _stream_to_inspector(self, inspector: DetailInspector, node: Node) -> None:
         """Render the live stream into the left pane only when it is locked to
@@ -1473,34 +1491,63 @@ class ChatApp(App):
             inspector.append_stream(node.content)
 
     def action_cancel_stream(self) -> None:
+        # Ctrl+C escalation ladder: a live stream, then a live draft, then the
+        # app. Cancelling work must always win over quitting (review §cluster).
         if self._stream_worker and not self._stream_worker.is_finished:
             self._stream_worker.cancel()
+        elif self._draft_worker and not self._draft_worker.is_finished:
+            self._draft_worker.cancel()
         else:
             self.exit()
 
+    def _cancel_stream_worker(self) -> None:
+        """Cancel a live turn worker before abandoning its conversation.
+
+        /new and /resume call this so the worker stops burning tokens; its
+        terminal CANCELLED still reaches on_worker_state_changed, where the
+        core's stale-turn guard makes the late end_turn a no-op."""
+        if self._stream_worker and not self._stream_worker.is_finished:
+            self._stream_worker.cancel()
+
     def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
-        if event.worker.name == "stream_response" and event.state in (
+        """The single convergence point where a turn ends (review §Turn
+        lifecycle): Textual fires this on ALL terminal transitions — SUCCESS,
+        ERROR, and CANCELLED *including a cancel before the worker's first
+        tick*, which a generator ``finally`` can never observe. Each terminal
+        state maps to one ``core.end_turn`` outcome; the durable mark and the
+        persist happen there, in the core."""
+        if event.worker.name != "stream_response" or event.state not in (
             WorkerState.SUCCESS,
             WorkerState.CANCELLED,
             WorkerState.ERROR,
         ):
-            self._stream_worker = None
-            node = self._streaming_node
-            self._streaming_node = None
-            if (
-                event.state is WorkerState.CANCELLED
-                and node is not None
-                and node.content == ""
-            ):
-                # A zero-token cancel leaves an empty assistant node at the tip
-                # rendered as a phantom ▌ row — drop it (task 48). A partial
-                # stream (any tokens) is left exactly as-is.
-                self._drop_interrupted_node(node)
-            # The assistant node now carries its full text — its weight (and the
-            # context-basis share of every other node) only just became real.
-            self._refresh_token_ui()
+            return
+        self._stream_worker = None
+        node = self._streaming_node
+        self._streaming_node = None
+        if node is None:
+            return
+        if event.state is WorkerState.CANCELLED:
+            self.core.end_turn(node, cancelled=True)
+        elif event.state is WorkerState.ERROR:
+            self.core.end_turn(node, error=str(event.worker.error))
+            logger.error("stream error | error=%s", event.worker.error)
+        else:
+            self.core.end_turn(node)
+        # Re-render the row from the node's now-durable state (error/interrupted
+        # marks come from meta, never one-shot widget text).
+        self.query_one(MessageList).refresh_ending(node.id)
+        if event.state is WorkerState.CANCELLED and node.content == "":
+            # A zero-token cancel leaves an empty assistant node at the tip
+            # rendered as a phantom ▌ row — drop it (task 48). A partial
+            # stream (any tokens) is left exactly as-is. A view decision,
+            # deliberately outside end_turn.
+            self._drop_interrupted_node(node)
+        # The assistant node now carries its full text — its weight (and the
+        # context-basis share of every other node) only just became real.
+        self._refresh_token_ui()
 
-    @work(name="drop_interrupted")
+    @work(name="drop_interrupted", exit_on_error=False)
     async def _drop_interrupted_node(self, node: Node) -> None:
         """Retire a zero-token interrupted assistant node from the live view.
 
@@ -1509,6 +1556,11 @@ class ChatApp(App):
         abandoned tail, never a hard delete — then reconciles the message list so
         the phantom ``▌`` row disappears and the tip is back at the user turn."""
         if node.prev_id is None:
+            return
+        if all(n.id != node.id for n in self.core.nodes):
+            # Stale turn: /new or /resume already replaced the line this node
+            # lived on — there is nothing on screen to retire, and rewinding
+            # would target the wrong conversation.
             return
         self.core.rewind(node.prev_id)
         await self._rebuild_message_list()

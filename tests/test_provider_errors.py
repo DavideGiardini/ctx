@@ -183,8 +183,11 @@ async def test_provider_error_propagates_and_partial_is_persisted(repo, workspac
     # SAME object propagates, unchanged (identity, not just type).
     assert ei.value is sentinel
 
-    # Partial assistant content was persisted: exactly the tokens before failure.
-    # repo.load() returns a list[Node] directly (see ctx/core/storage.py).
+    # Persistence moved to the end_turn door (spec: conversation.md "Turn
+    # lifecycle", C104/C107 — supersedes the old "stream persists" reading of
+    # PE6): the error ending records the partial content durably, with the mark.
+    core.end_turn(assistant_node, error=str(ei.value))
     loaded = repo.load(core.conversation_id)
-    assistant_contents = [n.content for n in loaded if n.role == "assistant"]
-    assert "".join(tokens) in assistant_contents
+    assistants = [n for n in loaded if n.role == "assistant"]
+    assert [n.content for n in assistants] == ["".join(tokens)]
+    assert assistants[0].meta["error"] == "backend died mid-stream"

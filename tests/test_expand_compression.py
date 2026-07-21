@@ -27,9 +27,11 @@ async def _build_line(core):
     u1, a1 = core.submit("What is the capital of France?")
     async for _ in core.stream(a1):
         pass
+    core.end_turn(a1)
     u2, a2 = core.submit("And what is its population?")
     async for _ in core.stream(a2):
         pass
+    core.end_turn(a2)
     return u1, a1, u2, a2
 
 
