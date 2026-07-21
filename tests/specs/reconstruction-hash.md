@@ -1,12 +1,10 @@
 # Behavioral contract — `hash_context`
 
-Module: `ctx/core/reconstruction.py`
+Module: `ctx/core/context.py`
 Symbol under test: `hash_context(messages: list[dict[str, Any]]) -> str`
 
 Scope: this document pins down only `hash_context`, the canonical tripwire
-hasher for a rendered `build_context` message list. It does NOT cover
-`context_at_generation`, `now_prefix`, or `has_drift` (contracted elsewhere in
-`tests/specs/reconstruction.md`).
+hasher for a rendered `build_context` message list.
 
 Domain: `messages` is a litellm-style list of dicts, each typically
 `{"role": "user"|"assistant"|"system", "content": "<text>"}`. The digest is the

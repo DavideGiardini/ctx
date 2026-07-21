@@ -108,3 +108,57 @@ still fully present — `has_drift`, `diff_regions`, `context_at_generation`, `n
 `app.py` no longer imports it (Task 2 removed the last UI use). The `has_drift`/`diff_regions`
 tests in `test_reconstruction.py` still pass (the core oracle is intact) — Task 3 deletes
 that file. `Static` is still imported and used in `message_row.py` (kind glyph + weight).
+
+## 2026-07-21 — Task 3: delete the as-of oracles; relocate `hash_context`
+
+**What:** Completed the ctx0 subtraction pass. Deleted `ctx/core/reconstruction.py`
+entirely (`context_at_generation`, `now_prefix`, `has_drift`, `diff_regions`,
+`reconstruction_warning`, `DiffRegion`, `_fold`, `_strict_ancestors`). Moved the one
+keeper, `hash_context`, into `ctx/core/context.py` (added `hashlib`/`json`/`Any`
+imports there) and updated its docstring to state the stamp is now *write-only* under
+ADR-0017. Re-pointed the two surviving importers: `ctx/core/conversation.py` (the
+`ctx_hash` stamping path — added `hash_context` to its existing `ctx.core.context`
+import block) and `tests/test_reconstruction_hash.py` (`from ctx.core.context import
+hash_context`). Reworded the now-stale comments in `conversation.py` that referenced a
+live "reconstruction path / oracle / drift+diff" (the `streaming` docstring, the
+`all_nodes` docstring, the `submit` AIDEV-NOTE, the `select_range` guard docstring, and
+the `_stream_and_end` stamp AIDEV-NOTE) so the acceptance `rg` sweep is genuinely clean
+and no comment implies a deleted surface still exists — the H2 invariant is unchanged,
+only its rationale prose. Updated `tests/specs/reconstruction-hash.md` (Module line →
+`ctx/core/context.py`; dropped the cross-ref to the deleted `reconstruction.md`).
+Dropped `reconstruction` from the CLAUDE.md core-layer parenthetical.
+
+Deleted tests `tests/test_reconstruction.py` (+ spec `tests/specs/reconstruction.md`)
+and `tests/test_ctx_hash_oracle.py` (both drove the now-deleted oracle).
+
+**Deviation (recorded per PROMPT.md rule):** the PRD enumeration did NOT mention
+`scripts/ralph/probes/test_adversarial_core.py`, a throwaway S3 probe that imports and
+calls the deleted `context_at_generation` at 6 sites. It is dead the moment the oracle
+is gone, so I deleted it — consistent with Task 2's deletion of the throwaway
+`bench_drift.py` probe when it removed the drift surface. Not in `testpaths` so it never
+ran under the gate; mypy scanned it but (cache) did not flag the dangling import — deleted
+regardless because it can no longer function.
+
+**Tests:** Added ONE focused regression test, `tests/test_ctx_hash_stamp.py`
+(`test_committed_turn_carries_ctx_hash`): drives a real turn (submit→drain→end_turn) and
+asserts the committed assistant node carries a valid 64-char sha256-hex `ctx_hash`. The
+deleted `test_ctx_hash_oracle.py` was the ONLY coverage that a *driven* turn stamps a
+hash; deleting it (correct — it tested the oracle) left the acceptance keeper "a committed
+turn still carries `meta["ctx_hash"]`" unguarded, and a Part-B regression dropping the
+write-only stamp would otherwise pass silently. Black-box (presence + hex shape), not
+implementation-coupled; a dropped stamp → `meta.get("ctx_hash")` is None → fails. `hash_context`'s
+own behavior stays covered by the re-pointed `test_reconstruction_hash.py` (9 tests).
+
+**Verification:** `bash scripts/check.sh` green (ruff + mypy + 622 pytest passed).
+Acceptance sweep: `rg 'reconstruction' ctx/ tools/` returns only the concept-word inside
+`hash_context`'s docstring ("verify a reconstruction against it") — the *module* is gone
+with zero importers (`rg 'from ctx.core.reconstruction|import reconstruction'` over the
+whole repo hits only the archived sprint3 PROGRESS log). `from ctx.core.context import
+hash_context` imports and runs. Pure-core task — no qa-tester (green gate + hash tests +
+the new stamp guard are the verification, per the PRD).
+
+**Part A is complete** — all three subtraction tasks shipped. The app keeps middle
+compaction, the 3-split inspector, and still stamps `created_seq`/`ctx_hash` on every
+turn (now write-only), and exposes none of the drift / diff / deep-dive reading surfaces.
+`ConversationCore.current_view` is now the sole fold implementation. Part B (the render
+redesign) is out of scope for this loop — done in-conversation.

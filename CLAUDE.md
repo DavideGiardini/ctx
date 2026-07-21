@@ -34,7 +34,7 @@ work into Ralph-loop iterations or implement it directly in-conversation.
 ## Architecture map
 Layered — the layering is an invariant, not a suggestion:
 - `ctx/core/` — framework-free domain logic (conversation state, provider seam,
-  storage, context building, token accounting, reconstruction). **Zero `textual`
+  storage, context building, token accounting). **Zero `textual`
   imports.** New domain logic goes here.
 - `ctx/ui/` — a thin Textual adapter over core (the dual-pane shell).
 - `ctx/models/` — shared types (`Node`: one chat turn or context reference).

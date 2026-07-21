@@ -8,7 +8,7 @@ asserted as a literal, per the interface's stated sha256-hex guarantee.
 
 import string
 
-from ctx.core.reconstruction import hash_context
+from ctx.core.context import hash_context
 
 _HEXDIGITS = set(string.hexdigits.lower())
 

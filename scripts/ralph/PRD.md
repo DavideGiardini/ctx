@@ -43,29 +43,11 @@ data, delete the reading surface"). Full spec:
 ## Completed
 - [x] 1 — Delete the full-screen drill surfaces (DiffView + deep-dive)  *(body in PRD-done.md)*
 - [x] 2 — Delete the drift reading surface  *(body in PRD-done.md)*
+- [x] 3 — Delete the as-of oracles; relocate `hash_context`  *(body in PRD-done.md)*
 
 ## Tasks
 
-- [ ] **Delete the as-of oracles; relocate `hash_context`** — In
-      `ctx/core/reconstruction.py` delete `context_at_generation`, `now_prefix`,
-      `has_drift`, `diff_regions`, `reconstruction_warning`, `DiffRegion`, and the
-      now-orphaned helpers `_fold` and `_strict_ancestors`. Ref: ADR-0017 §2 (delete
-      oracles) + §4 ("duplication resolved by deletion" — `current_view` becomes the
-      sole fold). **Keep `hash_context`:** move it into `ctx/core/context.py` (it
-      hashes a `build_context` output; add the `hashlib`/`json`/`Any` imports there)
-      and delete `ctx/core/reconstruction.py` entirely. Re-point the two surviving
-      importers — `ctx/core/conversation.py` (the `ctx_hash` stamping path) and
-      `tests/test_reconstruction_hash.py`. Delete tests `tests/test_reconstruction.py`
-      (+ `tests/specs/reconstruction.md`) and `tests/test_ctx_hash_oracle.py`. Keep
-      `tests/test_reconstruction_hash.py` with its import re-pointed to
-      `ctx.core.context` (update the path reference in `tests/specs/reconstruction-hash.md`
-      too). Update the CLAUDE.md architecture map to drop `reconstruction.py`.
-      _Acceptance:_ `bash scripts/check.sh` green;
-      `rg 'reconstruction' ctx/ tools/ tests/` shows the module gone (no importers);
-      `from ctx.core.context import hash_context` works and its tests pass; a
-      committed assistant turn still carries `meta["ctx_hash"]` (stamping path
-      intact). Pure-core task — no qa-tester needed (green gate + hash tests are the
-      verification).
+*(all tasks complete — Part A subtraction pass done)*
 
 ## Out of scope
 - **Part B — the rendering redesign** (separator widget, retiring the four spacing

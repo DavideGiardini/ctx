@@ -8,9 +8,9 @@ from ctx.core.context import (
     OPEN_COMPRESS_MARKER,
     build_compression_transcript,
     build_context,
+    hash_context,
 )
 from ctx.core.provider import Provider, Usage
-from ctx.core.reconstruction import hash_context
 from ctx.core.storage import StoragePort
 from ctx.core.workspace import Workspace
 from ctx.models.nodes import Node
@@ -93,7 +93,7 @@ class ConversationCore:
         by new/resume. The compression commands read it to enforce the H2
         invariant: no commit/expand/draft may mutate the graph mid-turn, so no
         event can land in the ``submit()``→first-tick window and fold into what
-        the model actually saw while reconstruction says it didn't (A#3 §2).
+        the model actually saw after its ``ctx_hash`` was stamped (A#3 §2).
         """
         return self._streaming
 
@@ -268,9 +268,9 @@ class ConversationCore:
     def all_nodes(self) -> list[Node]:
         """Read-only view of the whole graph (line + abandoned tails + K/E events).
 
-        The public accessor the UI hands ``reconstruction`` (drift/diff): those
-        oracles resolve as-of and now-view folds over the *entire* graph, not the
-        active line ``nodes`` projects (ADR-0016 A#2/A#3, task 19).
+        The whole-graph accessor: it includes off-line ``K``/``E`` events and
+        abandoned rewind tails that the active line ``nodes`` projects away
+        (ADR-0016 A#2/A#3, H6).
         """
         return self._all_nodes()
 
@@ -352,7 +352,7 @@ class ConversationCore:
         # AIDEV-NOTE: the turn is in flight from here — its created_seq is stamped
         # but its context/ctx_hash isn't built until stream()'s first tick. Flag it
         # now so no compression event can land in that window (else it folds into
-        # what was actually sent while seq-based reconstruction says it didn't —
+        # what was actually sent after its ctx_hash was stamped —
         # ADR-0016 A#3 §2, task 28). end_turn() lowers it; new/resume reset it
         # for the tests-only "submit never followed by stream()" path.
         self._streaming = True
@@ -520,10 +520,9 @@ class ConversationCore:
           guard — nested compression is out of scope).
 
         The old 3a tip guard (slice must end at the active leaf) was deleted in
-        task 22: a middle range is now foldable, and the per-turn reconstruction
-        path (drift marker + diff view) carries the honesty the guard provided
-        (ADR-0016 Q5 — 3b *replaces* the guard with reconstruction, not merely
-        drops it).
+        task 22: a middle range is now foldable, and the per-turn ``ctx_hash``
+        stamp records what each turn actually saw (ADR-0016 Q5 — 3b *replaces*
+        the guard with the recorded stamp, not merely drops it).
 
         Returns the slice as a ``list[Node]`` in view (root-first) order.
         """
@@ -735,7 +734,8 @@ class ConversationCore:
         context_nodes = [n for n in self.nodes if n is not assistant_node]
         messages = build_context(context_nodes, self._workspace.read_file)
         # AIDEV-NOTE: stamp the per-turn ctx_hash once, at the real generation
-        # moment — immutable after (ADR-0016 A#3 §4 tripwire, reconstruction oracle).
+        # moment — immutable after (ADR-0016 A#3 §4 tripwire). Write-only under
+        # ctx0 (ADR-0017): the reading surfaces that compared it were subtracted.
         assistant_node.meta["ctx_hash"] = hash_context(messages)
         local_sum = tokens.count_messages(messages, self.model)
 
