@@ -7,29 +7,16 @@ exact format (glyphs, `range=[…]`), presence/substring of meaningful VALUES pl
 the omit/placeholder rule where intent only says a line "surfaces"/"summarizes".
 Lines are always located by a stable value/marker they carry, never by absolute
 line number. All new top-level lines sit AFTER the fixed first line and BEFORE
-the `nodes=` header; the drift glyph is on per-node lines (after the header).
+the `nodes=` header.
 
 ---
 
-## N1 — per-node `drift` glyph (byte-exact `Δ`, placement fixed = last)
+## N1 — removed (ctx0 subtraction, ADR-0017)
 
-**CS1. Truthy `drift` appends `Δ` as the last non-space content on the node line**
-- Given: a state with one node carrying `drift: True`.
-- Expect: that node's line, right-stripped, ENDS WITH the exact character `Δ`
-  (U+0394); the leading markers and `[<index>] <role>` structure are unaffected.
-
-**CS2. Falsy `drift` renders no glyph**
-- Given: a state with one node carrying `drift: False`.
-- Expect: no `Δ` appears anywhere in the output.
-
-**CS3. Absent `drift` key renders no glyph**
-- Given: a state with one node that has no `drift` key at all.
-- Expect: no `Δ` appears anywhere in the output.
-
-**CS4. With both a weight suffix and drift, `Δ` comes AFTER `w=…%`**
-- Given: a node carrying a `weight_pct` (so a `w=<n>%` suffix is emitted) AND `drift: True`.
-- Expect: on that node's line the `w=` substring occurs BEFORE the `Δ` character
-  (`line.index("w=") < line.index("Δ")`), and the line ends with `Δ`.
+The per-node `drift` glyph (CS1–CS4) rendered the context-drift `Δ` marker that
+ctx0 deletes. That surface — and the `render()` code, the `describe_state()`
+`drift` key, and the tests that drove it — were removed in the subtraction pass.
+Nothing renders a `Δ` anymore.
 
 ---
 
@@ -108,6 +95,6 @@ removed in the subtraction pass. Nothing renders them anymore.
 ## Purity / tolerance
 
 **CS26. render tolerates every new key being absent (no crash)**
-- Given: a valid state with nodes and NONE of `drift`, `context_gauge`,
+- Given: a valid state with nodes and NONE of `context_gauge`,
   `range_selection` present.
-- Expect: `render` returns a `str` without raising; no `Δ` and no `range=` appear.
+- Expect: `render` returns a `str` without raising; no `range=` appears.

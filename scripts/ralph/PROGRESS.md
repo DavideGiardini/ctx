@@ -57,3 +57,54 @@ stayed `[Screen]` throughout. (No visual check needed — this is a removal, not
 `AppFooter`'s `g d Drift` hint / `_selected_drifted` are all STILL PRESENT — Task 1
 deliberately left the drift surface intact. The `.drift` CSS rule is at
 `ctx/ui/widgets/message_list.css:49`. `describe_state` still returns `drift`.
+
+## 2026-07-21 — Task 2: delete the drift reading surface
+
+**What:** Removed the context-drift `Δ` marker and everything feeding it, per the PRD
+enumeration. `ctx/ui/widgets/message_row.py`: deleted `set_drift` + the `.drift` Static
+from `compose`, updated the module docstring (`drift glyph +` → `kind glyph +`) and the
+`_KIND_GLYPH` comment. `ctx/ui/widgets/message_list.css`: deleted the `.drift` rule and
+reworded the `.meta-slot` comment (weight is now the only right-docked cell besides the
+kind glyph). `ctx/core/config.py`: removed the `ui.show_context_drift` default and its
+coercion guard. `ctx/ui/app.py`: removed the `reconstruction` import (drift was its only
+UI use — Task 3 deletes the module), `_drift_cache` init, the three methods
+`_turn_has_drift`/`_drift_signature`/`_node_drift`, the `drifted` computation in
+`_sync_footer` (now `set_selection(node_type)`), the drift zip/`set_drift` in
+`_refresh_token_ui`, and the `drift` field in `describe_state`. `ctx/ui/widgets/app_footer.py`:
+removed `_selected_drifted`, the `drifted` arg on `set_selection`, and the `g d Drift`
+edit hint (`_edit_hint` now only advertises `x Expand` for a K). Deleted
+`scripts/ralph/probes/bench_drift.py`. Removed the N1 drift render from
+`tools/agent/snapshot.py`.
+
+**Tests:** No *new* tests — behavior-preserving deletion (removing a surface), so the
+floor is the green gate + `rg` clean + qa-tester, matching Task 1. Deleted whole files
+`test_app_drift.py`, `test_app_drift_cache.py`, `test_message_list_meta_layout.py`.
+Pruned the N1 drift cases (CS1–CS4) + the `Δ`-absence assertion in CS26 from
+`test_snapshot_sprint3.py` (and its spec `tests/specs/snapshot-sprint3.md`); removed the
+C25/C25b `show_context_drift` cases + the C3 default assertion from `test_config.py`
+(and the spec `tests/specs/config.md`); removed the single `.drift`-cell assertion +
+docstring mention from `test_message_row.py`.
+
+**Decision:** Reworded one *unrelated* use of the word "drifted" in the `_gauge_state`
+docstring (gauge staleness, not the drift surface) to "changed" so the acceptance `rg`
+sweep is genuinely clean and a future grep isn't misled.
+
+**Verification:** `bash scripts/check.sh` green (ruff + mypy + 661 pytest passed).
+Acceptance sweep `rg 'set_drift|_turn_has_drift|_node_drift|_drift_cache|show_context_drift|drifted'`
+over `ctx/` returns nothing; `describe_state` has no `drift` field. qa-tester
+(verify-feature, single launch) built turns, compressed a middle range into a K,
+generated a turn *while the K was live*, then expanded it (a genuine historically-drifted
+turn) — PASS on all five: no `Δ` on any row in any state, weight `w=N%` suffixes still
+render, no `drift` key, footer never shows "Drift" (shows `x Expand` on a K, expected),
+no crashes / stack stayed `[Screen]`. (No visual check needed — this is a removal, not a
+render.)
+
+**Gotcha for the next iteration (Task 3, oracles):** `ctx/core/reconstruction.py` is
+still fully present — `has_drift`, `diff_regions`, `context_at_generation`, `now_prefix`,
+`reconstruction_warning`, `DiffRegion`, `_fold`, `_strict_ancestors`, and the keeper
+`hash_context`. After Task 2 the ONLY remaining importers of `reconstruction` are
+`ctx/core/conversation.py` (the `ctx_hash` stamping path → `hash_context`) and the tests
+`tests/test_reconstruction.py`, `tests/test_reconstruction_hash.py`, `tests/test_ctx_hash_oracle.py`.
+`app.py` no longer imports it (Task 2 removed the last UI use). The `has_drift`/`diff_regions`
+tests in `test_reconstruction.py` still pass (the core oracle is intact) — Task 3 deletes
+that file. `Static` is still imported and used in `message_row.py` (kind glyph + weight).

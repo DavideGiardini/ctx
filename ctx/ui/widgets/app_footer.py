@@ -8,8 +8,8 @@ from textual.widgets import Static
 
 # The Edit-mode hint is contextual (task 43c): the always-valid keys frame a
 # middle slot that surfaces only the action valid for the current selection —
-# ``x Expand`` on a compression K, ``g d Drift`` on a drifted assistant turn,
-# nothing otherwise. ``_HINTS["edit"]`` is the no-selection base (head + tail).
+# ``x Expand`` on a compression K, nothing otherwise. ``_HINTS["edit"]`` is the
+# no-selection base (head + tail).
 _EDIT_HEAD = "↑↓ Nav  v Select  c Compress"
 _EDIT_TAIL = "i/Esc Insert  Tab Pane  1/2/3 Splits  ^C Cancel"
 
@@ -40,7 +40,6 @@ class AppFooter(Static):
         self._editor = False
         self._model = ""
         self._selected_type: str | None = None
-        self._selected_drifted = False
 
     def on_mount(self) -> None:
         self._refresh()
@@ -62,22 +61,15 @@ class AppFooter(Static):
         self._model = model
         self._refresh()
 
-    def set_selection(self, node_type: str | None, drifted: bool) -> None:
+    def set_selection(self, node_type: str | None) -> None:
         """Record the current selection so the Edit-mode hint can advertise only
         its valid selection-dependent action (task 43c). ``node_type`` is the
-        selected node's type (``None`` when nothing is selected); ``drifted`` is
-        whether it is a drifted assistant turn."""
+        selected node's type (``None`` when nothing is selected)."""
         self._selected_type = node_type
-        self._selected_drifted = drifted
         self._refresh()
 
     def _edit_hint(self) -> str:
-        if self._selected_type == "compression":
-            middle = "  x Expand"
-        elif self._selected_drifted:
-            middle = "  g d Drift"
-        else:
-            middle = ""
+        middle = "  x Expand" if self._selected_type == "compression" else ""
         return f"{_EDIT_HEAD}{middle}  {_EDIT_TAIL}"
 
     def current_hint(self) -> str:

@@ -9,7 +9,7 @@ from textual.containers import Container, Horizontal, Vertical
 from textual.widgets import Input, Static, TextArea
 from textual.worker import Worker, WorkerState
 
-from ctx.core import reconstruction, tokens
+from ctx.core import tokens
 from ctx.core.config import get_config
 from ctx.core.context import build_context
 from ctx.core.conversation import ConversationCore
@@ -105,13 +105,6 @@ class ChatApp(App):
         # the conversation still matches it; any later change makes it stale
         # (``~``). ``None`` until the first anchored turn.
         self._gauge_anchor: tuple | None = None
-        # Memo for the per-refresh drift pass (task 32). ``_node_drift`` re-folds
-        # the whole graph per assistant node (O(n²)) and runs on every
-        # ``_refresh_token_ui`` *and* every ``describe_state()``; cache the
-        # parallel result keyed on a cheap signature that changes exactly when
-        # the drift inputs do (``_drift_signature``). ``None`` until first
-        # computed. Auto-invalidating — no manual reset needed.
-        self._drift_cache: tuple[tuple, list[bool]] | None = None
         # Most-recent transient UI hint (task 42). Surfaced as a toast via
         # ``notify`` and exposed on ``describe_state`` so headless QA can observe
         # it; unlike a durable breadcrumb it is NOT a graph node. ``None`` = none
@@ -699,8 +692,7 @@ class ChatApp(App):
         footer.set_detail(self.query_one(DetailInspector).pane_mode)
         node = self._get_selected_node()
         node_type = node.node_type if node else None
-        drifted = node is not None and self._turn_has_drift(node, self.core.all_nodes())
-        footer.set_selection(node_type, drifted)
+        footer.set_selection(node_type)
 
     def _get_selected_node(self) -> Node | None:
         if self._selected_node_id is None:
@@ -748,66 +740,6 @@ class ChatApp(App):
             tokens.model_window(self.core.model),
         )
 
-    def _turn_has_drift(self, node: Node, all_nodes: list[Node]) -> bool:
-        """Whether the UI should surface ``node`` as a drifted assistant turn.
-
-        The single drift predicate behind the passive ``Δ`` marker
-        (``_node_drift``): ``ui.show_context_drift`` gates the drift UI. ``False``
-        for every non-assistant role, for an undrifted turn, and for every node
-        when the flag is off. ``all_nodes`` is passed in so a per-node caller
-        fetches the graph once.
-        """
-        if not get_config()["ui"]["show_context_drift"]:
-            return False
-        return node.role == "assistant" and reconstruction.has_drift(
-            all_nodes, node.id
-        )
-
-    def _drift_signature(self) -> tuple:
-        """A cheap fingerprint of everything ``_node_drift`` depends on.
-
-        Drift is structural, not content-based, so it changes only when a node
-        (incl. an off-line ``K``/``E``) enters the graph, the visible line moves
-        (a rewind), the conversation is swapped (``/new``/``/resume``), or the
-        ``ui.show_context_drift`` flag flips. The graph is append-only, so any
-        structural change bumps ``len(all_nodes)``/``max created_seq``; a rewind
-        shortens ``self.core.nodes``; a conversation swap changes its id. None of
-        these components re-folds the graph, so building the signature is cheap.
-        """
-        all_nodes = self.core.all_nodes()
-        return (
-            self.core.conversation_id,
-            len(all_nodes),
-            max((n.created_seq for n in all_nodes), default=0),
-            len(self.core.nodes),
-            get_config()["ui"]["show_context_drift"],
-        )
-
-    def _node_drift(self) -> list[bool]:
-        """Per-node context-drift flags parallel to ``self.core.nodes``.
-
-        ``True`` for an **assistant** turn whose generation context has since
-        drifted from the now-view (``reconstruction.has_drift`` over the whole
-        graph); ``False`` for every other role and for all nodes when
-        ``ui.show_context_drift`` is off. Both ``describe_state`` and
-        ``_refresh_token_ui`` read this so the snapshot and the rendered marker
-        cannot disagree (ADR-0016 concern "b", task 19).
-
-        Memoized on ``_drift_signature`` (task 32): the O(n²) per-node fold runs
-        only when a drift input actually changes, so back-to-back refreshes /
-        snapshots on an unchanged graph reuse the cached result.
-        """
-        signature = self._drift_signature()
-        if self._drift_cache is not None and self._drift_cache[0] == signature:
-            return self._drift_cache[1]
-        if not get_config()["ui"]["show_context_drift"]:
-            result = [False] * len(self.core.nodes)
-        else:
-            all_nodes = self.core.all_nodes()
-            result = [self._turn_has_drift(n, all_nodes) for n in self.core.nodes]
-        self._drift_cache = (signature, result)
-        return result
-
     def _node_signature(self) -> tuple:
         """A cheap fingerprint of the current node set's content.
 
@@ -824,7 +756,7 @@ class ChatApp(App):
         ``pct`` is used ÷ model window (``None`` → ``--%`` when the window is
         unknown), with the local estimate scaled by any provider calibration.
         ``approximate`` is ``True`` when there is no calibration yet *or* the
-        node set has drifted from the last anchored turn — either way the
+        node set has changed since the last anchored turn — either way the
         absolute figure is only an estimate and the UI marks it ``~``.
         """
         messages = build_context(self.core.nodes, self.core.read_file)
@@ -845,15 +777,12 @@ class ChatApp(App):
         node's per-node weight ``--%`` onto its message widget and the
         used-÷-window gauge (with its ``~`` marker) onto the header."""
         message_list = self.query_one(MessageList)
-        for node, pct, drifted in zip(
-            self.core.nodes, self._node_weights(), self._node_drift(), strict=True
-        ):
+        for node, pct in zip(self.core.nodes, self._node_weights(), strict=True):
             try:
                 widget = message_list.query_one(f"#msg-{node.id}", MessageWidget)
             except Exception:
                 continue
             widget.set_weight_pct(pct)
-            widget.set_drift(drifted)
         gauge_pct, approximate = self._gauge_state()
         self.query_one(AppHeader).set_context_pct(gauge_pct, approximate)
 
@@ -872,7 +801,6 @@ class ChatApp(App):
         nodes = self._visible_nodes()
         truncation = get_config()["ui"]["truncation_lines"]
         weights = self._node_weights()
-        drift = self._node_drift()
         gauge_pct, gauge_approximate = self._gauge_state()
         selected_index: int | None = None
         selected_role: str | None = None
@@ -889,7 +817,6 @@ class ChatApp(App):
                 "content": node.content,
                 "selected": is_selected,
                 "weight_pct": weights[i],
-                "drift": drift[i],
                 "truncated": self._is_truncated(node, truncation),
             }
             source_path = node.meta.get("source_path")

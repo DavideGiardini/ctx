@@ -1,9 +1,9 @@
-"""Tests for the new render() fields (Sprint 3): N1–N3.
+"""Tests for the new render() fields (Sprint 3): N2–N3.
 
-Contract: tests/specs/snapshot-sprint3.md. The N4 (deep-dive breadcrumb) and N5
-(diff-view) sections were removed with the drill surfaces (ctx0 subtraction,
-ADR-0017). Existing C1–C53 behavior lives in tests/test_snapshot.py and is NOT
-re-tested here.
+Contract: tests/specs/snapshot-sprint3.md. The N1 (per-node drift glyph), N4
+(deep-dive breadcrumb) and N5 (diff-view) sections were removed with the drift
+and drill surfaces (ctx0 subtraction, ADR-0017). Existing C1–C53 behavior lives
+in tests/test_snapshot.py and is NOT re-tested here.
 
 Lines are located by stable value tokens they carry, never by absolute index.
 All states are built from plain dict literals via the local helpers below.
@@ -61,41 +61,6 @@ def node_line(out, idx):
         if marker in ln:
             return ln
     return None
-
-
-# ---------------------------------------------------------------------------
-# N1 — per-node drift glyph
-# ---------------------------------------------------------------------------
-
-# CS1
-def test_drift_truthy_appends_delta_last():
-    out = render(state(nodes=[node(drift=True)]))
-    ln = node_line(out, 0)
-    assert ln is not None
-    assert ln.rstrip().endswith("Δ")  # Δ is the last non-space content
-
-
-# CS2
-def test_drift_false_no_glyph():
-    out = render(state(nodes=[node(drift=False)]))
-    assert "Δ" not in out
-
-
-# CS3
-def test_drift_absent_no_glyph():
-    out = render(state(nodes=[node()]))  # no drift key at all
-    assert "Δ" not in out
-
-
-# CS4
-def test_drift_after_weight_suffix():
-    # Weight produces the `w=<n>%` suffix; drift's Δ must come after it.
-    out = render(state(nodes=[node(weight_pct=50, drift=True)]))
-    ln = node_line(out, 0)
-    assert ln is not None
-    assert "w=" in ln, "expected a weight suffix on the node line"
-    assert ln.index("w=") < ln.index("Δ")
-    assert ln.rstrip().endswith("Δ")
 
 
 # ---------------------------------------------------------------------------
@@ -197,7 +162,6 @@ def test_range_and_selected_coexist():
 
 # CS26
 def test_render_tolerates_all_new_keys_absent():
-    out = render(state(nodes=[node()]))  # none of the five new keys present
+    out = render(state(nodes=[node()]))  # none of the new keys present
     assert isinstance(out, str)
-    assert "Δ" not in out
     assert "range=" not in out

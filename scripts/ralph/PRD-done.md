@@ -39,3 +39,28 @@ The live worklist and the one-line "Completed" ledger stay in `PRD.md`.
       assistant turn, pressing `g d` and `ctrl+o` does nothing and never opens a
       full-screen view (screen stack unchanged, no crash), and `describe_state()` has
       no `deep_dive`/`diff_view` keys.
+
+- [x] **Delete the drift reading surface** — Remove the context-drift `Δ` marker and
+      everything feeding it. Ref: ADR-0017 §2. In `ctx/ui/widgets/message_row.py`
+      delete `set_drift` and the `.drift` Static from `compose`; drop the "alongside
+      the drift Δ" note on `_KIND_GLYPH`. In `ctx/ui/widgets/message_list.css` delete
+      the `.drift` rule and simplify `.meta-slot` (only the kind glyph + weight
+      remain — those must look unchanged). In `ctx/core/config.py` delete the
+      `ui.show_context_drift` default and its coercion guard. In `ctx/ui/app.py`
+      delete `_drift_cache`, `_drift_signature`, `_node_drift`, `_turn_has_drift`,
+      their use in `_refresh_token_ui` (keep the weight-setting), the `drift` field
+      in `describe_state`, and the `drifted` computation feeding `_sync_footer`. In
+      `ctx/ui/widgets/app_footer.py` remove `_selected_drifted`, the `drifted` arg on
+      `set_selection`, and the "g d Drift" edit hint. Delete
+      `scripts/ralph/probes/bench_drift.py`. Remove the N1 drift section from
+      `tools/agent/snapshot.py`. Delete tests `tests/test_app_drift.py`,
+      `tests/test_app_drift_cache.py`, `tests/test_message_list_meta_layout.py`;
+      remove the N1 drift tests in `tests/test_snapshot_sprint3.py`; remove the C25
+      `show_context_drift` cases in `tests/test_config.py`; remove the single
+      `.drift`-cell assertion (and its docstring mention) in
+      `tests/test_message_row.py` (keep the rest). _Acceptance:_
+      `bash scripts/check.sh` green;
+      `rg 'set_drift|_turn_has_drift|_node_drift|_drift_cache|show_context_drift|drifted'`
+      over `ctx/` returns nothing; `describe_state()` has no `drift` field; qa-tester
+      confirms that after an expand that historically drifted a turn, no `Δ` marker
+      appears in any row and weights still render.

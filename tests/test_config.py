@@ -93,9 +93,6 @@ def test_c3_baseline_shape(config_file):
     assert isinstance(defaults["compression"]["default_prompt"], str)
     assert defaults["compression"]["default_prompt"]
 
-    # C25 — ui.show_context_drift defaults on (bool).
-    assert defaults["ui"]["show_context_drift"] is True
-
     # The default model is a non-empty string (ADR 0006 #3 — sourced from config).
     assert isinstance(defaults["model"], str)
     assert defaults["model"]
@@ -368,34 +365,3 @@ def test_c24b_wrong_typed_compression_falls_back(config_file):
     assert result["compression"] == defaults["compression"]
 
 
-# C25
-def test_c25_valid_show_context_drift_false_preserved(config_file):
-    # Intent: a legitimate opt-out (False) survives the ui merge unchanged.
-    config_file.write_json({"ui": {"show_context_drift": False}})
-
-    result = get_config()
-
-    assert result["ui"]["show_context_drift"] is False
-
-
-# C25b
-@pytest.mark.parametrize(
-    "illegal_value",
-    [
-        "yes",  # wrong type (str)
-        1,  # int masquerading as bool
-        0,  # falsy int is still not a bool
-        None,  # null
-        ["x"],  # list
-    ],
-)
-def test_c25b_invalid_show_context_drift_coerced_to_true(config_file, illegal_value):
-    # Intent: any non-bool value is coerced back to the default (True) WITHOUT
-    # raising; sibling ui defaults stay intact.
-    baseline_truncation = _baseline(config_file)["ui"]["truncation_lines"]
-    config_file.write_json({"ui": {"show_context_drift": illegal_value}})
-
-    result = get_config()
-
-    assert result["ui"]["show_context_drift"] is True
-    assert result["ui"]["truncation_lines"] == baseline_truncation

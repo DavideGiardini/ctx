@@ -60,13 +60,6 @@ _DEFAULTS: dict = {
         # "window" expresses it as a share of the model's input window. Any
         # other value is coerced back to "context" in get_config().
         "weight_basis": "context",
-        # Whether the UI surfaces AI turns whose generation context has since
-        # drifted from the current one (ADR-0016 concern "b"): gates *all* drift
-        # UI, both the passive `Δ` marker and the active `g d` diff drill (task
-        # 24) — off means no marker and `g d` is a no-op on a drifted turn (a K
-        # still deep-dives). A non-bool user value is coerced back to this
-        # default in get_config().
-        "show_context_drift": True,
     },
 }
 
@@ -122,10 +115,5 @@ def get_config() -> dict:
     # the default. The merge above may have carried a user value verbatim.
     if merged["ui"].get("weight_basis") not in _WEIGHT_BASES:
         merged["ui"]["weight_basis"] = _DEFAULTS["ui"]["weight_basis"]
-
-    # Coerce a non-bool show_context_drift (wrong type, incl. int masquerading as
-    # bool) back to the default. A legitimate False (opt-out) survives.
-    if not isinstance(merged["ui"].get("show_context_drift"), bool):
-        merged["ui"]["show_context_drift"] = _DEFAULTS["ui"]["show_context_drift"]
 
     return merged

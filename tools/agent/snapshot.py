@@ -112,8 +112,6 @@ def render(state: dict) -> str:
         weight = node.get("weight_pct")
         if weight is not None:
             suffix += f"  w={weight}%"
-        if node.get("drift"):
-            suffix += "  Δ"
         lines.append(f"{marker}{trunc}[{node['index']}] {role} {content}{suffix}")
 
     return "\n".join(lines)

@@ -4,7 +4,7 @@
 the diff panes, the inspector splits). These tests exercise it directly — once
 per role — asserting the two invariants tasks 37/38 depend on: the left-bar
 color comes from the palette for that role, and the row is the standard
-two-line layout (a drift+weight meta slot above the content). A regression that
+two-line layout (a weight meta slot above the content). A regression that
 mis-mapped the bar color or dropped a slot would slip past the list-only tests.
 """
 
@@ -56,8 +56,7 @@ async def test_two_line_layout(role):
     app = _Host(_make_node(role))
     async with app.run_test(size=(80, 24)):
         row = app.query_one(MessageRow)
-        # Meta slot: a drift cell and a weight cell.
-        assert row.query_one(".drift", Static) is not None
+        # Meta slot: a weight cell.
         assert row.query_one(".weight", Static) is not None
         # Content: plain Static for system/context, Markdown for turn roles.
         content = row.query_one(".content")

@@ -2,7 +2,7 @@
 
 ``MessageRow`` renders a single :class:`~ctx.models.nodes.Node` as the standard
 two-line conversation row — a role-colored left bar, a right-docked meta slot
-(drift glyph + weight %), and the node's (truncated) content. It is the single
+(kind glyph + weight %), and the node's (truncated) content. It is the single
 surface behind every place the app shows a node as a compact row: the
 conversation list (``MessageWidget`` subclasses it), the diff panes, and the
 inspector splits.
@@ -41,8 +41,7 @@ _TALL_ROLES = ("user", "assistant", "context", "compression")
 # A per-role kind glyph shown in the meta slot. A compression summary shares the
 # context-import green bar (task 39), so it carries a distinct glyph (Σ = the
 # "sum"/summary of a folded run) to stay visually distinguishable from an
-# imported file. Kept in the Greek block alongside the drift Δ so it renders in
-# the same fonts.
+# imported file.
 _KIND_GLYPH = {"compression": "Σ"}
 
 
@@ -114,21 +113,12 @@ class MessageRow(Vertical):
             return
         self.query_one(".weight", Static).update("--%" if pct is None else f"{pct}%")
 
-    def set_drift(self, drifted: bool) -> None:
-        """Toggle a subtle drift marker beside the weight slot (ADR-0016 concern
-        "b", Q12/A#1, task 19): the AI turn's generation context has diverged from
-        the current one. Deliberately quiet — many turns legitimately drift, so it
-        is a single muted glyph, not an alarm."""
-        self.set_class(drifted, "drifted")
-        self.query_one(".drift", Static).update("Δ" if drifted else "")
-
     def compose(self):
         with Vertical(classes="row-body"):
             with Horizontal(classes="meta-slot"):
                 glyph = _KIND_GLYPH.get(self._role)
                 if glyph:
                     yield Static(glyph, classes="kind")
-                yield Static("", classes="drift")
                 yield Static("--%" if self.node.goes_to_model() else "", classes="weight")
             if self._role in ("system", "context"):
                 yield Static(self._content or "", classes="content")
