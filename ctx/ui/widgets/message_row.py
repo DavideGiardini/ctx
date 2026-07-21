@@ -114,11 +114,6 @@ class MessageRow(Vertical):
             return
         self.query_one(".weight", Static).update("--%" if pct is None else f"{pct}%")
 
-    def set_weight_not_in_context(self) -> None:
-        """Deep-dive rendering (Q9): a folded original is *not* part of the live
-        context, so its weight slot reads "not in context" rather than a %."""
-        self.query_one(".weight", Static).update("not in context")
-
     def set_drift(self, drifted: bool) -> None:
         """Toggle a subtle drift marker beside the weight slot (ADR-0016 concern
         "b", Q12/A#1, task 19): the AI turn's generation context has diverged from

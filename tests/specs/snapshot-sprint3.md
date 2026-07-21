@@ -96,57 +96,12 @@ the `nodes=` header; the drift glyph is on per-node lines (after the header).
 
 ---
 
-## N4 — `deep_dive.breadcrumb` line (values surfaced; separator NOT asserted)
+## N4 / N5 — removed (ctx0 subtraction, ADR-0017)
 
-**CS17. Breadcrumb with >1 element surfaces every label in order, before the header**
-- Given: `deep_dive = {"breadcrumb": ["Chat", "K a1b2", "Diff a1b2"]}` plus nodes.
-- Expect: exactly ONE new top-level line (before the header) contains each label
-  string, and their relative order is preserved
-  (`line.index("Chat") < line.index("K a1b2") < line.index("Diff a1b2")`).
-
-**CS18. A lone root breadcrumb (`["Chat"]`) is noise → no line**
-- Given: `deep_dive = {"breadcrumb": ["Chat"]}` plus nodes.
-- Expect: no breadcrumb line is emitted (only the fixed first line precedes the header).
-
-**CS19. Empty breadcrumb → no line**
-- Given: `deep_dive = {"breadcrumb": []}`.
-- Expect: no breadcrumb line is emitted.
-
-**CS20. Absent `breadcrumb` / absent `deep_dive` → no line**
-- Given: `deep_dive = {}` and, separately, a state with no `deep_dive` key.
-- Expect: no breadcrumb line is emitted in either case.
-
----
-
-## N5 — `diff_view` line (values surfaced; wording NOT asserted)
-
-Tests build states WITHOUT a `detail` dict so no unrelated line carries "diff";
-the diff line is located by the region-count / `warn` / `drill` values it carries.
-
-**CS21. `open: True` → exactly one diff line (before header) surfacing the region COUNT**
-- Given: `diff_view = {"open": True, "regions": [r1, r2], "warning": False, "drill": None}`
-  (2 regions) plus nodes, no `detail`.
-- Expect: exactly one new top-level line (before the header) surfaces the integer
-  `2` (len of regions).
-
-**CS22. Empty regions → count `0` surfaced**
-- Given: `diff_view = {"open": True, "regions": [], "warning": False, "drill": None}`.
-- Expect: the diff line surfaces the integer `0`.
-
-**CS23. `open: False` or absent `diff_view` → no diff line**
-- Given: `diff_view = {"open": False, ...}` and, separately, no `diff_view` key.
-- Expect: no diff line is emitted in either case (only the fixed first line precedes
-  the header).
-
-**CS24. `warning` indicator toggles with the flag**
-- Given: `diff_view` open with `warning: True` vs `warning: False` (drill None).
-- Expect: when `warning: True` the diff line contains a case-insensitive `warn`
-  token; when `warning: False` it does NOT.
-
-**CS25. `drill` indicator toggles with a non-None drill dict**
-- Given: `diff_view` open with `drill: {…}` (non-None) vs `drill: None`.
-- Expect: when `drill` is a non-None dict the diff line contains a case-insensitive
-  `drill` token; when `drill` is `None` it does NOT.
+The `deep_dive.breadcrumb` line (CS17–CS20) and the `diff_view` line (CS21–CS25)
+rendered the full-screen drill surfaces that ctx0 deletes. Those surfaces — and
+the `render()` code, `describe_state()` keys, and tests that drove them — were
+removed in the subtraction pass. Nothing renders them anymore.
 
 ---
 
@@ -154,5 +109,5 @@ the diff line is located by the region-count / `warn` / `drill` values it carrie
 
 **CS26. render tolerates every new key being absent (no crash)**
 - Given: a valid state with nodes and NONE of `drift`, `context_gauge`,
-  `range_selection`, `deep_dive`, `diff_view` present.
+  `range_selection` present.
 - Expect: `render` returns a `str` without raising; no `Δ` and no `range=` appear.

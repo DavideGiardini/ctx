@@ -18,7 +18,6 @@ _HINTS = {
     "edit": f"{_EDIT_HEAD}  {_EDIT_TAIL}",
     "browse": "↑↓ Move  Enter Select  1/2/3 Open  Esc Back  Tab Conversation",
     "maximized": "↑↓/PgUp/PgDn Scroll  1/2/3 Switch  Esc Back  Tab Conversation",
-    "deep_dive": "↑↓ Nav  ^o/Esc Back  i Exit  Tab Pane  (read-only)",
     "editor": "Tab Split  ^D Draft  ^S Commit  Esc Cancel",
 }
 
@@ -38,7 +37,6 @@ class AppFooter(Static):
         super().__init__()
         self._mode = "insert"
         self._detail = "none"
-        self._deep_dive = False
         self._editor = False
         self._model = ""
         self._selected_type: str | None = None
@@ -54,10 +52,6 @@ class AppFooter(Static):
 
     def set_detail(self, pane_mode: str) -> None:
         self._detail = pane_mode
-        self._refresh()
-
-    def set_deep_dive(self, active: bool) -> None:
-        self._deep_dive = active
         self._refresh()
 
     def set_editor(self, active: bool) -> None:
@@ -92,8 +86,6 @@ class AppFooter(Static):
             return _HINTS["editor"]
         if self._mode == "edit" and self._detail in ("browse", "maximized"):
             return _HINTS[self._detail]
-        if self._deep_dive:
-            return _HINTS["deep_dive"]
         if self._mode == "edit":
             return self._edit_hint()
         return _HINTS.get(self._mode, _HINTS["insert"])

@@ -2,7 +2,7 @@ import asyncio
 import contextlib
 from pathlib import Path
 
-from textual import events, work
+from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
@@ -26,7 +26,6 @@ from ctx.ui.widgets.detail_inspector import (
     DetailInspector,
     NodeView,
 )
-from ctx.ui.widgets.diff_view import DiffView
 from ctx.ui.widgets.history_screen import HistoryScreen
 from ctx.ui.widgets.include_screen import IncludeScreen
 from ctx.ui.widgets.input_bar import InputBar
@@ -60,7 +59,6 @@ class ChatApp(App):
         # first to drive the draft (the action is inert unless the editor is open).
         Binding("ctrl+d", "draft_compression", "Draft", show=False, priority=True),
         Binding("ctrl+s", "commit_compression", "Commit", show=False),
-        Binding("ctrl+o", "pop_deep_dive", "Back out", show=False),
         Binding("up", "up", "Up", show=False),
         Binding("down", "down", "Down", show=False),
         Binding("enter", "detail_enter", "Select split", show=False),
@@ -114,19 +112,6 @@ class ChatApp(App):
         # the drift inputs do (``_drift_signature``). ``None`` until first
         # computed. Auto-invalidating — no manual reset needed.
         self._drift_cache: tuple[tuple, list[bool]] | None = None
-        # Deep-dive browse stack (Q7/Q8, task 12). Each frame is a folded K's
-        # originals rendered in place of the live conversation. Empty = live
-        # view. Built as a stack so it is nesting-ready (3a depth stays 1).
-        # Ephemeral — never persisted.
-        self._deep_dive_stack: list[dict] = []
-        # One-key chord buffer: ``g`` arms it, the next key completes/cancels
-        # (``g d`` opens a deep-dive or a context diff). ``None`` when disarmed.
-        self._pending_chord: str | None = None
-        # Context-diff view state (task 20), shared "navigation family" with the
-        # deep-dive stack but mutually exclusive with it: a diff is opened by
-        # ``g d`` on a *drifted assistant* turn (a K still deep-dives). ``None``
-        # = no diff open. Ephemeral — never persisted.
-        self._diff_view: dict | None = None
         # Most-recent transient UI hint (task 42). Surfaced as a toast via
         # ``notify`` and exposed on ``describe_state`` so headless QA can observe
         # it; unlike a durable breadcrumb it is NOT a graph node. ``None`` = none
@@ -141,7 +126,6 @@ class ChatApp(App):
             yield CompressionEditor(id="compression-editor")
             with Vertical(id="conversation"):
                 yield MessageList(id="messages")
-                yield DiffView(id="diff-view")
                 # Suggestions + input share one docked container so they stack
                 # in normal flow (docking both directly would overlap them).
                 with Container(id="input-area"):
@@ -232,34 +216,13 @@ class ChatApp(App):
         if self.mode == "edit" and self._range_anchor_id is not None:
             self._clear_range()
             return
-        # While the diff view is open, Esc backs out of it one level (like
-        # Ctrl+o: drill → overview → live) rather than toggling the mode
-        # (task 20/21, same family as deep-dive).
-        if self.mode == "edit" and self._diff_view is not None:
-            await self.action_pop_deep_dive()
-            return
-        # While deep-diving, Esc backs out one level (like Ctrl+o) rather than
-        # toggling the mode, keeping the view and mode consistent (task 12).
-        if self.mode == "edit" and self._deep_dive_stack:
-            await self.action_pop_deep_dive()
-            return
         self._set_mode("edit" if self.mode == "insert" else "insert")
 
     async def action_enter_insert(self) -> None:
         # Vim-style: `i` returns to Insert mode from anywhere in Edit mode
         # (right pane or inside the detail pane). Switching to Insert re-locks
-        # the inspector to the last node, resetting any detail sub-state. `i`
-        # also exits the *whole* deep-dive stack (task 12): the live list is
-        # restored before dropping into Insert (appends go to the active tip;
-        # deep-dive never moved it).
+        # the inspector to the last node, resetting any detail sub-state.
         if self.mode == "edit":
-            if self._diff_view is not None:
-                await self._close_diff()
-            if self._deep_dive_stack:
-                self._deep_dive_stack.clear()
-                await self._rebuild_message_list()
-                self.query_one(AppFooter).set_deep_dive(False)
-                self._refresh_token_ui()
             self._set_mode("insert")
 
     def _set_mode(self, mode: str) -> None:
@@ -351,17 +314,6 @@ class ChatApp(App):
         self._clear_range()
         self._sync_footer()
 
-    def _in_full_screen_inspection(self) -> bool:
-        """True while a full-screen read-only inspection view is up — a deep-dive
-        or the context-diff (task 27).
-
-        Both replace the live message list with a hidden-list frame, so
-        selection- and mutation-driving Edit-mode keys (``v``/``c``/``x``) must
-        be inert: otherwise they'd anchor an invisible range on the hidden list
-        or mutate the graph under the open view (the 13-series illegal-transition
-        family, one layer up)."""
-        return bool(self._deep_dive_stack) or self._diff_view is not None
-
     def action_anchor_range(self) -> None:
         """`v` in Edit mode: anchor a range selection at the current node.
 
@@ -369,8 +321,6 @@ class ChatApp(App):
         extend the contiguous highlight between the anchor and the cursor.
         """
         if self.mode != "edit" or self._focus_in_detail():
-            return
-        if self._in_full_screen_inspection():  # read-only (tasks 12, 27)
             return
         if self._selected_node_id is None:
             return
@@ -402,194 +352,11 @@ class ChatApp(App):
         with contextlib.suppress(Exception):
             self.query_one(MessageList).set_range(set())
 
-    # --- deep-dive (browse a compression's folded originals) ------------
-
     def _visible_nodes(self) -> list[Node]:
-        """The node list currently rendered in the message pane.
-
-        Live conversation (``core.nodes``) normally; while a deep-dive is
-        active, the top frame's folded originals instead. The single seam every
-        view-facing method (rendering, cursor navigation, snapshot) reads so the
-        deep-dive replacement stays consistent across all of them (Q8)."""
-        if self._deep_dive_stack:
-            frame_nodes: list[Node] = self._deep_dive_stack[-1]["nodes"]
-            return frame_nodes
+        """The node list currently rendered in the message pane (the live
+        conversation). Kept as the single seam every view-facing method
+        (rendering, cursor navigation, snapshot) reads."""
         return self.core.nodes
-
-    async def on_key(self, event: events.Key) -> None:
-        """Minimal ``g``-prefixed key-chord buffer (task 12).
-
-        Only active while the message list holds focus in Edit mode: ``g`` arms
-        the chord, a following ``d`` drills into the selected node — a deep-dive
-        on a compression ``K``, or the context-diff view on a *drifted assistant*
-        turn (one navigation family, Q12) — and any other key cancels it (falling
-        through to normal handling). Keys outside that context disarm the chord
-        and are left untouched."""
-        if self.mode != "edit" or self._focus_target() != "messages":
-            self._pending_chord = None
-            return
-        if self._pending_chord == "g":
-            self._pending_chord = None
-            if event.key == "d":
-                event.stop()
-                await self._drill_selected()
-            return
-        if event.key == "g":
-            self._pending_chord = "g"
-            event.stop()
-
-    async def _drill_selected(self) -> None:
-        """``g d`` dispatch: deep-dive a K, else diff a drifted assistant turn.
-
-        A compression node opens its folded originals (task 12); an assistant
-        turn whose generation context has drifted from now opens the context
-        diff (task 20). Any other selection is a no-op."""
-        node = self._get_selected_node()
-        if node is None:
-            return
-        if node.node_type == "compression":
-            await self._enter_deep_dive()
-        elif self._turn_has_drift(node, self.core.all_nodes()):
-            # Diff and deep-dive are mutually exclusive (see _diff_view, task 30):
-            # a folded *frame* assistant turn can drift, but opening its diff here
-            # would nest a diff inside the dive. Inert, like the read-only v/c/x
-            # gates (task 27) — exit the dive (Ctrl+o) to reach the diff.
-            if self._deep_dive_stack:
-                return
-            await self._enter_diff(node)
-
-    async def _enter_deep_dive(self) -> None:
-        """Push a deep-dive frame for the selected K and render its originals.
-
-        No-op unless a compression node with folded children is selected. The
-        breadcrumb gains one entry ("Chat › K…"); the cursor lands on the first
-        child."""
-        node = self._get_selected_node()
-        if node is None or node.node_type != "compression":
-            return
-        children = self.core.folded_children(node.id)
-        if not children:
-            return
-        # A range selection can't survive the view swap: dive widgets render the
-        # folded frame, never the range highlight (`_range_ids` reads core.nodes),
-        # so a lingering anchor would silently swallow the first Esc (13h #1).
-        self._clear_range()
-        self._deep_dive_stack.append(
-            {"k_id": node.id, "label": f"K…{node.id[-4:]}", "nodes": list(children)}
-        )
-        await self._refresh_deep_dive_view(children[0].id)
-
-    async def action_pop_deep_dive(self) -> None:
-        """``Ctrl+o``: pop one deep-dive level (top pop restores the live view).
-
-        Inert when no deep-dive is active. The cursor lands back on the K that
-        was dived into (or the last node if it is gone)."""
-        # The diff view is the same navigation family (Q12): Ctrl+o pops it too,
-        # one level at a time — a drilled region backs out to the overview first
-        # (task 21), then the overview closes to the live view.
-        if self._diff_view is not None:
-            if self._diff_view.get("drill") is not None:
-                self._close_drill()
-                return
-            await self._close_diff()
-            return
-        if not self._deep_dive_stack:
-            return
-        popped = self._deep_dive_stack.pop()
-        visible = self._visible_nodes()
-        target = popped["k_id"] if any(n.id == popped["k_id"] for n in visible) else (
-            visible[-1].id if visible else None
-        )
-        await self._refresh_deep_dive_view(target)
-
-    async def _refresh_deep_dive_view(self, select_id: str | None) -> None:
-        """Rebuild the message list for the current view, restore the footer's
-        deep-dive hint, land the cursor, and refresh the token surfaces."""
-        await self._rebuild_message_list()
-        self.query_one(AppFooter).set_deep_dive(bool(self._deep_dive_stack))
-        self._select_message(select_id)
-        self._refresh_token_ui()
-
-    # --- context diff view (task 20) ------------------------------------
-
-    async def _enter_diff(self, node: Node) -> None:
-        """Open the full-pane context diff for assistant turn ``node``.
-
-        Aligns the turn's generation-time context (left) against the now-view
-        (right) by node id and swaps the message list for the ``DiffView``. The
-        H4 tripwire runs on open: a stored-hash mismatch (or a pre-3b turn with
-        no hash) shows the "reconstruction may be inexact" banner (A#3 §4). The
-        region cursor lands on the first changed region."""
-        all_nodes = self.core.all_nodes()
-        regions = reconstruction.diff_regions(all_nodes, node.id)
-        warning = reconstruction.reconstruction_warning(
-            all_nodes, node.id, self.core.read_file
-        )
-        # A range selection can't survive the view swap (mirrors deep-dive, 13h #1).
-        self._clear_range()
-        self._diff_view = {
-            "node_id": node.id,
-            "label": f"Diff …{node.id[-4:]}",
-            "regions": regions,
-            "warning": warning,
-            "drill": None,
-        }
-        self._toggle_diff_fullscreen(True)
-        diff = self.query_one(DiffView)
-        await diff.show(regions, warning)
-        diff.focus()
-        self.query_one(AppFooter).set_deep_dive(True)
-
-    def _toggle_diff_fullscreen(self, on: bool) -> None:
-        """Hide (``on``) or restore the body panes the full-screen diff replaces:
-        the message list, the left detail inspector, and the docked input area.
-        Hiding the inspector lets ``#conversation`` (and the ``DiffView`` inside
-        it) expand to the full body width, so the two panes read as full-screen
-        (task 37). ``MessageList.display`` still toggles so its cursor/visibility
-        assertions hold."""
-        self.query_one(MessageList).display = not on
-        self.query_one(DetailInspector).display = not on
-        self.query_one("#input-area").display = not on
-
-    async def _close_diff(self) -> None:
-        """Pop the diff view, restoring the live message list and its cursor."""
-        target = self._diff_view["node_id"] if self._diff_view else None
-        self._diff_view = None
-        self.query_one(DiffView).close()
-        self._toggle_diff_fullscreen(False)
-        self.query_one(AppFooter).set_deep_dive(bool(self._deep_dive_stack))
-        self.query_one(MessageList).focus()
-        # Restore against the view actually rendered now (symmetric with
-        # action_pop_deep_dive); with the diff/dive exclusivity gate this equals
-        # core.nodes, but _visible_nodes() stays correct if that ever changes.
-        self._select_message(
-            target if any(n.id == target for n in self._visible_nodes()) else None
-        )
-        self._refresh_token_ui()
-
-    def _move_region_cursor(self, step: int) -> None:
-        """Move the diff view's changed-region cursor by ``step`` (clamped)."""
-        self.query_one(DiffView).move_cursor(step)
-
-    async def _drill_diff_region(self) -> None:
-        """``Enter`` in the diff view: drill into the cursored changed region,
-        rendering its left/right block sequences in full (H6 many-to-many;
-        task 21). No-op with no changed regions or when already drilled."""
-        diff = self._diff_view
-        if diff is None or diff.get("drill") is not None:
-            return
-        changed = [r for r in diff["regions"] if r.changed]
-        if not changed:
-            return
-        region = changed[self.query_one(DiffView).cursor]
-        diff["drill"] = region
-        await self.query_one(DiffView).show_drill(region)
-
-    def _close_drill(self) -> None:
-        """Return from a drilled region to the diff overview (task 21)."""
-        if self._diff_view is not None:
-            self._diff_view["drill"] = None
-        self.query_one(DiffView).close_drill()
 
     # --- compression draft editor ---------------------------------------
 
@@ -613,8 +380,6 @@ class ChatApp(App):
         selection, so a command can never act on it)."""
         if self.mode != "edit" or self._focus_in_detail():
             return
-        if self._in_full_screen_inspection():  # read-only (tasks 12, 27)
-            return
         if not self._compression_range():
             return
         self._open_compression_editor()
@@ -630,15 +395,12 @@ class ChatApp(App):
         view and the selection moves to the first restored child.
 
         Inert unless a node is selected in Edit mode (not while focus is in the
-        detail pane, and not while deep-diving — the deep-dive is read-only, Q8).
-        A non-compression selection is a **silent no-op** (task 43b): ``x`` is
+        detail pane). A non-compression selection is a **silent no-op** (task 43b): ``x`` is
         simply not a valid action there, and the footer already advertises it only
         when a K is selected — a hint would be noise. Refused while a turn is
         streaming (H2), and any core guard (``ValueError``) surfaces as a hint
         rather than propagating uncaught (mirrors ``action_commit_compression``)."""
         if self.mode != "edit" or self._focus_in_detail():
-            return
-        if self._in_full_screen_inspection():  # read-only (tasks 12, 27)
             return
         if self._stream_worker is not None and not self._stream_worker.is_finished:
             await self._hint("Cannot expand while a response is streaming.")
@@ -685,33 +447,21 @@ class ChatApp(App):
         self.query_one(MessageList).focus()
 
     def _reset_transient_ui(self) -> None:
-        """Tear down all transient compression/navigation UI before a
-        conversation switch (13f).
+        """Tear down all transient compression UI before a conversation switch
+        (13f).
 
-        `/new` and `/resume` (and any future switch path) can fire while a
-        deep-dive, an open draft editor, or a running draft worker stands — a
-        mouse click focuses the InputBar without entering Insert or clearing
-        state. Left standing, a dead dive frame keeps feeding `_visible_nodes()`
-        (resurrecting the old conversation's folded children), the editor sits
-        open over dead range ids (→ 13a's ValueError site), and a live draft
-        worker survives the switch. So pop the whole dive stack + reset the
-        footer hint, close the editor without committing (cancels a live worker,
-        13d), and clear the chord/last-draft/selection state."""
-        if self._diff_view is not None:
-            self._diff_view = None
-            self.query_one(DiffView).close()
-            self._toggle_diff_fullscreen(False)
-            self.query_one(AppFooter).set_deep_dive(False)
-        if self._deep_dive_stack:
-            self._deep_dive_stack.clear()
-            self.query_one(AppFooter).set_deep_dive(False)
+        `/new` and `/resume` (and any future switch path) can fire while an open
+        draft editor or a running draft worker stands — a mouse click focuses the
+        InputBar without entering Insert or clearing state. Left standing, the
+        editor sits open over dead range ids (→ 13a's ValueError site) and a live
+        draft worker survives the switch. So close the editor without committing
+        (cancels a live worker, 13d) and clear the last-draft/selection state."""
         if self.query_one(CompressionEditor).is_open:
             self._close_compression_editor()
         elif self._draft_worker is not None and not self._draft_worker.is_finished:
             self._draft_worker.cancel()
         self._draft_worker = None
         self._last_drafted_prompt = ""
-        self._pending_chord = None
         self._last_hint = None
         self._clear_selection()
 
@@ -819,16 +569,7 @@ class ChatApp(App):
         await self.query_one(MessageList).reconcile(self._visible_nodes())
 
     async def _mount_node(self, node: Node) -> None:
-        """Mount a freshly-appended core node into the message list — but only
-        while the live view is showing.
-
-        During a deep-dive the pane renders a K's folded originals (read-only), so
-        a node mounted now would land *inside* that frame, unreachable by the
-        cursor. The core still holds it (append happened at the call site) and
-        exit-dive rebuilds from ``_visible_nodes()``, so the node surfaces the
-        moment the live view returns (13h #2)."""
-        if self._deep_dive_stack:
-            return
+        """Mount a freshly-appended core node into the message list."""
         await self.query_one(MessageList).add_node(node)
 
     async def _hint(self, text: str) -> None:
@@ -849,9 +590,6 @@ class ChatApp(App):
     def action_up(self) -> None:
         if self.mode != "edit":
             return
-        if self._diff_view is not None:
-            self._move_region_cursor(-1)
-            return
         if self._focus_in_detail():
             inspector = self.query_one(DetailInspector)
             if inspector.pane_mode == "browse":
@@ -863,9 +601,6 @@ class ChatApp(App):
 
     def action_down(self) -> None:
         if self.mode != "edit":
-            return
-        if self._diff_view is not None:
-            self._move_region_cursor(1)
             return
         if self._focus_in_detail():
             inspector = self.query_one(DetailInspector)
@@ -914,10 +649,6 @@ class ChatApp(App):
 
     async def action_detail_enter(self) -> None:
         if self.mode != "edit":
-            return
-        # In the diff view, Enter drills into the cursored changed region (task 21).
-        if self._diff_view is not None:
-            await self._drill_diff_region()
             return
         if not self._focus_in_detail():
             return
@@ -1020,14 +751,11 @@ class ChatApp(App):
     def _turn_has_drift(self, node: Node, all_nodes: list[Node]) -> bool:
         """Whether the UI should surface ``node`` as a drifted assistant turn.
 
-        The single drift predicate behind both the passive ``Δ`` marker
-        (``_node_drift``) and the active ``g d`` diff drill (``_drill_selected``),
-        so the two cannot disagree: ``ui.show_context_drift`` gates *all* drift
-        UI, not just the marker — with the flag off there is no marker to signal
-        drift, so the diff drill must not open either (task 24). ``False`` for
-        every non-assistant role, for an undrifted turn, and for every node when
-        the flag is off. ``all_nodes`` is passed in so a per-node caller fetches
-        the graph once.
+        The single drift predicate behind the passive ``Δ`` marker
+        (``_node_drift``): ``ui.show_context_drift`` gates the drift UI. ``False``
+        for every non-assistant role, for an undrifted turn, and for every node
+        when the flag is off. ``all_nodes`` is passed in so a per-node caller
+        fetches the graph once.
         """
         if not get_config()["ui"]["show_context_drift"]:
             return False
@@ -1117,27 +845,15 @@ class ChatApp(App):
         node's per-node weight ``--%`` onto its message widget and the
         used-÷-window gauge (with its ``~`` marker) onto the header."""
         message_list = self.query_one(MessageList)
-        if self._deep_dive_stack:
-            # Folded originals are off the live context (Q9): no % applies.
-            for node in self._visible_nodes():
-                try:
-                    widget = message_list.query_one(f"#msg-{node.id}", MessageWidget)
-                except Exception:
-                    continue
-                widget.set_weight_not_in_context()
-                widget.set_drift(False)
-        else:
-            for node, pct, drifted in zip(
-                self.core.nodes, self._node_weights(), self._node_drift(), strict=True
-            ):
-                try:
-                    widget = message_list.query_one(f"#msg-{node.id}", MessageWidget)
-                except Exception:
-                    continue
-                widget.set_weight_pct(pct)
-                widget.set_drift(drifted)
-        # The header gauge always reflects the live context window, never the
-        # browsed originals — deep-dive does not change what the model will see.
+        for node, pct, drifted in zip(
+            self.core.nodes, self._node_weights(), self._node_drift(), strict=True
+        ):
+            try:
+                widget = message_list.query_one(f"#msg-{node.id}", MessageWidget)
+            except Exception:
+                continue
+            widget.set_weight_pct(pct)
+            widget.set_drift(drifted)
         gauge_pct, approximate = self._gauge_state()
         self.query_one(AppHeader).set_context_pct(gauge_pct, approximate)
 
@@ -1153,12 +869,10 @@ class ChatApp(App):
         Nodes are reported by stable *index* + role (the random ``Node.id``
         uuids are an implementation detail agents should not depend on).
         """
-        in_deep_dive = bool(self._deep_dive_stack)
         nodes = self._visible_nodes()
         truncation = get_config()["ui"]["truncation_lines"]
-        # Deep-dive originals are off-context, so no per-node % applies (Q9).
-        weights = [None] * len(nodes) if in_deep_dive else self._node_weights()
-        drift = [False] * len(nodes) if in_deep_dive else self._node_drift()
+        weights = self._node_weights()
+        drift = self._node_drift()
         gauge_pct, gauge_approximate = self._gauge_state()
         selected_index: int | None = None
         selected_role: str | None = None
@@ -1239,20 +953,6 @@ class ChatApp(App):
                 "locked": self.mode == "insert",
             },
             "context_gauge": {"pct": gauge_pct, "approximate": gauge_approximate},
-            "deep_dive": {
-                "active": in_deep_dive,
-                "breadcrumb": [
-                    "Chat",
-                    *(f["label"] for f in self._deep_dive_stack),
-                    *([self._diff_view["label"]] if self._diff_view else []),
-                    *(
-                        ["Region"]
-                        if self._diff_view and self._diff_view.get("drill") is not None
-                        else []
-                    ),
-                ],
-            },
-            "diff_view": self._diff_view_state(),
             "truncation": truncation,
             "input": input_bar.value,
             "command_menu": command_menu,
@@ -1265,30 +965,6 @@ class ChatApp(App):
         whether it is open plus its current prompt/output text."""
         editor = self.query_one(CompressionEditor)
         return {"open": editor.is_open, "prompt": editor.prompt, "output": editor.output}
-
-    def _diff_view_state(self) -> dict:
-        """Snapshot of the context-diff view for ``describe_state`` (task 20/21):
-        whether it is open, its **changed** regions (each ``{"left": [ids],
-        "right": [ids]}``, aligned by node id), the H4 warning flag, and the
-        drilled region (``{"left": [ids], "right": [ids]}`` or ``None``)."""
-        diff = self._diff_view
-        if diff is None:
-            return {"open": False, "regions": [], "warning": False, "drill": None}
-        drill = diff.get("drill")
-        return {
-            "open": True,
-            "regions": [
-                {"left": [n.id for n in r.left], "right": [n.id for n in r.right]}
-                for r in diff["regions"]
-                if r.changed
-            ],
-            "warning": diff["warning"],
-            "drill": (
-                {"left": [n.id for n in drill.left], "right": [n.id for n in drill.right]}
-                if drill is not None
-                else None
-            ),
-        }
 
     @staticmethod
     def _regions_overlap(a, b) -> bool:

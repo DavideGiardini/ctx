@@ -1,7 +1,9 @@
-"""Tests for the FIVE NEW render() fields (Sprint 3): N1–N5.
+"""Tests for the new render() fields (Sprint 3): N1–N3.
 
-Contract: tests/specs/snapshot-sprint3.md (CS1–CS26). Existing C1–C53 behavior
-lives in tests/test_snapshot.py and is NOT re-tested here.
+Contract: tests/specs/snapshot-sprint3.md. The N4 (deep-dive breadcrumb) and N5
+(diff-view) sections were removed with the drill surfaces (ctx0 subtraction,
+ADR-0017). Existing C1–C53 behavior lives in tests/test_snapshot.py and is NOT
+re-tested here.
 
 Lines are located by stable value tokens they carry, never by absolute index.
 All states are built from plain dict literals via the local helpers below.
@@ -187,105 +189,6 @@ def test_range_and_selected_coexist():
     hdr = header_line(out)
     assert "range=[0]" in hdr
     assert "selected=" in hdr
-
-
-# ---------------------------------------------------------------------------
-# N4 — deep_dive.breadcrumb line
-# ---------------------------------------------------------------------------
-
-# CS17
-def test_breadcrumb_surfaces_labels_in_order():
-    crumb = ["Chat", "K a1b2", "Diff a1b2"]
-    out = render(state(deep_dive={"breadcrumb": crumb}, nodes=[node()]))
-    top = top_lines(out)
-    assert len(top) == 2  # fixed first line + exactly one breadcrumb line
-    line = top[1]
-    for label in crumb:
-        assert label in line
-    assert line.index("Chat") < line.index("K a1b2") < line.index("Diff a1b2")
-
-
-# CS18 + CS19 + CS20
-def test_breadcrumb_noise_cases_no_line():
-    for over in (
-        {"deep_dive": {"breadcrumb": ["Chat"]}},   # lone root
-        {"deep_dive": {"breadcrumb": []}},          # empty
-        {"deep_dive": {}},                          # breadcrumb absent
-        {},                                          # deep_dive absent
-    ):
-        out = render(state(nodes=[node()], **over))
-        assert len(top_lines(out)) == 1, over
-
-
-# ---------------------------------------------------------------------------
-# N5 — diff_view line
-# ---------------------------------------------------------------------------
-
-def _diff_line(out):
-    top = top_lines(out)
-    assert len(top) == 2, f"expected exactly one diff line, got {top}"
-    return top[1]
-
-
-# CS21
-def test_diff_open_surfaces_region_count():
-    regions = [{"left": [1, 2], "right": [3, 4]}, {"left": [5], "right": [6]}]
-    out = render(state(
-        diff_view={"open": True, "regions": regions, "warning": False, "drill": None},
-        nodes=[node()],
-    ))
-    assert "2" in _diff_line(out)
-
-
-# CS22
-def test_diff_empty_regions_count_zero():
-    out = render(state(
-        diff_view={"open": True, "regions": [], "warning": False, "drill": None},
-        nodes=[node()],
-    ))
-    assert "0" in _diff_line(out)
-
-
-# CS23
-def test_diff_closed_and_absent_no_line():
-    closed = render(state(
-        diff_view={"open": False, "regions": [], "warning": False, "drill": None},
-        nodes=[node()],
-    ))
-    absent = render(state(nodes=[node()]))
-    assert len(top_lines(closed)) == 1
-    assert len(top_lines(absent)) == 1
-
-
-# CS24
-def test_diff_warning_indicator_toggles():
-    regions = [{"left": [1], "right": [2]}]
-    warn_on = render(state(
-        diff_view={"open": True, "regions": regions, "warning": True, "drill": None},
-        nodes=[node()],
-    ))
-    warn_off = render(state(
-        diff_view={"open": True, "regions": regions, "warning": False, "drill": None},
-        nodes=[node()],
-    ))
-    assert "warn" in _diff_line(warn_on).lower()
-    assert "warn" not in _diff_line(warn_off).lower()
-
-
-# CS25
-def test_diff_drill_indicator_toggles():
-    regions = [{"left": [1], "right": [2]}]
-    drill_on = render(state(
-        diff_view={"open": True, "regions": regions, "warning": False,
-                   "drill": {"region": 0}},
-        nodes=[node()],
-    ))
-    drill_off = render(state(
-        diff_view={"open": True, "regions": regions, "warning": False, "drill": None},
-        nodes=[node()],
-    ))
-    assert "drill" in _diff_line(drill_on).lower()
-    assert "drill" not in _diff_line(drill_off).lower()
 
 
 # ---------------------------------------------------------------------------
