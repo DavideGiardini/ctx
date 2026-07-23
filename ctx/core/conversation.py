@@ -2,7 +2,7 @@ from collections.abc import AsyncIterator, Callable
 from uuid import uuid4
 
 from ctx.core import tokens
-from ctx.core.config import DEFAULT_COMPRESSION_PROMPT, get_config
+from ctx.core.config import DEFAULT_COMPRESSION_PROMPT, DEFAULT_IMPORT_PROMPT, get_config
 from ctx.core.context import (
     CLOSE_COMPRESS_MARKER,
     OPEN_COMPRESS_MARKER,
@@ -10,6 +10,7 @@ from ctx.core.context import (
     build_context,
     hash_context,
 )
+from ctx.core.log import logger
 from ctx.core.provider import Provider, Usage
 from ctx.core.storage import StoragePort
 from ctx.core.workspace import Workspace
@@ -27,7 +28,7 @@ MAX_TITLE_LENGTH = 50
 # compression path (ADR-0016 A#1) — now lives in ctx.core.config as the single
 # source of the ``compression.default_prompt`` default (task 18); re-exported here
 # so existing importers of ``ConversationCore``'s module keep working.
-__all__ = ["ConversationCore", "DEFAULT_COMPRESSION_PROMPT"]
+__all__ = ["ConversationCore", "DEFAULT_COMPRESSION_PROMPT", "DEFAULT_IMPORT_PROMPT"]
 
 
 def _derive_title(content: str) -> str:
@@ -463,10 +464,25 @@ class ConversationCore:
         return self.nodes
 
     def include_files(self, paths: list[str]) -> list[Node]:
+        """Verbatim import: snapshot each file's content onto a context node.
+
+        The verbatim front door of the condense engine (ctx0 §3): the file body
+        is read **once, now**, and stored content-on-node (supersedes ADR-0009's
+        per-turn live read), so the model always sees the snapshot even if the
+        source file later changes. A file that cannot be read at include time is
+        skipped with a warning rather than aborting the whole include — the
+        failure surfaces here, where it is visible, instead of silently at stream
+        time.
+        """
         self._ensure_conversation("")
         nodes: list[Node] = []
         for path in paths:
-            node = Node.context(path, self.conversation_id)
+            try:
+                content = self.read_file(path)
+            except (OSError, ValueError) as exc:
+                logger.warning("skipped unreadable include | path=%s | error=%s", path, exc)
+                continue
+            node = Node.context(content, path, self.conversation_id)
             self._append_to_line(node)
             nodes.append(node)
         self.persist()
@@ -694,6 +710,71 @@ class ConversationCore:
 
         async for token in self._provider.stream(messages, self.model, _ignore_usage):
             yield token
+
+    async def draft_import(
+        self, source: str, prompt: str | None = None
+    ) -> AsyncIterator[str]:
+        """Stream an AI-drafted extract of a file's content (a meta-operation).
+
+        The prompt front door of the condense engine (ctx0 §3, §4.2): the model
+        is handed the raw file body as the user message and the extraction
+        instruction as the system message, and streams back the extract the user
+        will edit and commit with ``commit_import``. The raw file never enters a
+        real chat request — only this drafting call and the eventual committed
+        extract do.
+
+        - the **system** message is the editable instruction — ``prompt`` when it
+          is non-blank, else the ``import.default_prompt`` config default; a
+          ``None`` or whitespace-only prompt is not a real instruction and falls
+          back to the default;
+        - the **user** message is the raw ``source`` file body.
+
+        Exactly two messages are sent: ``[system, user]``. An empty/whitespace
+        source raises ``ValueError`` **before any provider call** — there is
+        nothing to extract.
+
+        Like ``draft_compression`` this is a meta-operation: a no-op ``on_usage``
+        keeps the header gauge untouched, and it mutates no conversation state and
+        commits nothing — a cancelled or failed draft leaves the graph unchanged.
+        """
+        if not source.strip():
+            raise ValueError("nothing to import: the file is empty")
+        if prompt is not None and prompt.strip() != "":
+            system_prompt = prompt
+        else:
+            system_prompt = DEFAULT_IMPORT_PROMPT
+        messages: list[dict[str, str]] = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": source},
+        ]
+
+        def _ignore_usage(_usage: Usage) -> None:
+            return None
+
+        async for token in self._provider.stream(messages, self.model, _ignore_usage):
+            yield token
+
+    def commit_import(
+        self, source_path: str, source_content: str, extract: str, prompt: str
+    ) -> Node:
+        """Commit a prompt-mode import as a content-on-node context node (no AI).
+
+        Builds a ``Node.context`` whose ``content`` is the edited ``extract`` —
+        the only thing the model sees — carrying the drafting ``prompt`` and the
+        raw ``source_content`` (kept for the inspector's Source pane, never sent).
+        The node is appended to the active line and persisted. Returns it.
+        """
+        self._ensure_conversation("")
+        node = Node.context(
+            extract,
+            source_path,
+            self.conversation_id,
+            prompt=prompt,
+            source_content=source_content,
+        )
+        self._append_to_line(node)
+        self.persist()
+        return node
 
     def _calibrate(self, local_sum: int, usage: Usage) -> None:
         """Adopt a provider ``Usage`` as the gauge calibration anchor, if sane.

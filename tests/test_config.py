@@ -86,12 +86,17 @@ def test_c2_absent_returns_baseline(config_file):
 def test_c3_baseline_shape(config_file):
     # C3
     defaults = _baseline(config_file)
-    assert set(defaults.keys()) == {"colors", "ui", "model", "compression"}
+    assert set(defaults.keys()) == {"colors", "ui", "model", "compression", "import"}
 
     # C24 — the compression section carries a non-empty default_prompt string.
     assert isinstance(defaults["compression"], dict)
     assert isinstance(defaults["compression"]["default_prompt"], str)
     assert defaults["compression"]["default_prompt"]
+
+    # The import section likewise carries a non-empty default_prompt string.
+    assert isinstance(defaults["import"], dict)
+    assert isinstance(defaults["import"]["default_prompt"], str)
+    assert defaults["import"]["default_prompt"]
 
     # The default model is a non-empty string (ADR 0006 #3 — sourced from config).
     assert isinstance(defaults["model"], str)
@@ -363,5 +368,27 @@ def test_c24b_wrong_typed_compression_falls_back(config_file):
     result = get_config()
 
     assert result["compression"] == defaults["compression"]
+
+
+# The import section merges exactly like compression (ctx0 §4.2).
+def test_import_default_prompt_override_preserved(config_file):
+    defaults = _baseline(config_file)
+    config_file.write_json({"import": {"default_prompt": "just signatures"}})
+
+    result = get_config()
+
+    assert result["import"]["default_prompt"] == "just signatures"
+    # Overriding import must not disturb other sections.
+    assert result["compression"] == defaults["compression"]
+    assert result["ui"] == defaults["ui"]
+
+
+def test_wrong_typed_import_falls_back(config_file):
+    defaults = _baseline(config_file)
+    config_file.write_json({"import": "nope"})
+
+    result = get_config()
+
+    assert result["import"] == defaults["import"]
 
 

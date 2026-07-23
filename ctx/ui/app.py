@@ -29,7 +29,7 @@ from ctx.ui.widgets.detail_inspector import (
     NodeView,
 )
 from ctx.ui.widgets.history_screen import HistoryScreen
-from ctx.ui.widgets.include_screen import IncludeScreen
+from ctx.ui.widgets.include_screen import ImportScreen, IncludeScreen
 from ctx.ui.widgets.input_bar import InputBar
 from ctx.ui.widgets.message_list import MessageList, MessageWidget
 from ctx.ui.widgets.message_row import truncation_key
@@ -98,6 +98,11 @@ class ChatApp(App):
         # (Q4); ``Ctrl+S`` records this prompt on the committed K.
         self._draft_worker: Worker | None = None
         self._last_drafted_prompt: str = ""
+        # When the draft editor is open for an ``/import`` (not a compression),
+        # this holds the picked ``(source_path, source_content)`` snapshot; the
+        # shared ``Ctrl+D``/``Ctrl+S`` actions dispatch on it. ``None`` = the
+        # editor, if open, is a compression editor.
+        self._import_source: tuple[str, str] | None = None
         self.mode = "insert"
         self._selected_node_id: str | None = None
         # Detail Inspector render debounce (see ``_schedule_inspector_render``).
@@ -263,6 +268,26 @@ class ChatApp(App):
                 content_nodes=tuple(children),
                 prompt=node.meta.get("prompt", ""),
                 output=node.content,
+            )
+        if node.node_type == "context":
+            # Import 3-split (ctx0 §5): Prompt = the instruction (hidden when
+            # empty — a verbatim include), Source = the raw file, Output = the
+            # edited extract. A verbatim include has no separate extract, so the
+            # file lands in the Source split and Output stays empty (hidden) —
+            # the pane collapses to the single file view.
+            raw_source = node.meta.get("source_content", "")
+            if raw_source:
+                source, output = raw_source, node.content
+            else:
+                source, output = node.content, ""
+            return NodeView(
+                node_id=node.id,
+                role=node.role,
+                node_type=node.node_type,
+                content=source,
+                prompt=node.meta.get("prompt", ""),
+                output=output,
+                source_path=node.meta.get("source_path"),
             )
         return NodeView(
             node_id=node.id,
@@ -473,6 +498,22 @@ class ChatApp(App):
         self.query_one(AppFooter).set_editor(True)
         # Fresh editor → no draft has run yet, so a commit now is manual (Q4).
         self._last_drafted_prompt = ""
+        self._import_source = None
+        editor.query_one("#compress-prompt", TextArea).focus()
+
+    def _open_import_editor(self, source_path: str, source_content: str) -> None:
+        """Open the draft editor for an ``/import`` (ctx0 §4.2).
+
+        Reuses the compression editor widget — same prompt+output splits, same
+        ``Ctrl+D``/``Ctrl+S`` flow — prefilled with the import default prompt and
+        tagged with the picked file snapshot so the shared draft/commit actions
+        dispatch to ``draft_import``/``commit_import`` rather than compression."""
+        editor = self.query_one(CompressionEditor)
+        self.query_one(DetailInspector).display = False
+        editor.open(get_config()["import"]["default_prompt"], output_label="Output")
+        self.query_one(AppFooter).set_editor(True)
+        self._last_drafted_prompt = ""
+        self._import_source = (source_path, source_content)
         editor.query_one("#compress-prompt", TextArea).focus()
 
     def _close_compression_editor(self) -> None:
@@ -488,8 +529,14 @@ class ChatApp(App):
         # session; clearing on close means the next editor's manual commit can't
         # inherit a stale prompt even if a path skips the worker handlers (task 35).
         self._last_drafted_prompt = ""
+        self._import_source = None
         self.query_one(DetailInspector).display = True
-        self.query_one(MessageList).focus()
+        # Return focus by mode: an Insert-mode entry (e.g. /import) goes back to
+        # the input bar; Edit-mode (compression) returns to the node list.
+        if self.mode == "insert":
+            self.query_one(InputBar).focus()
+        else:
+            self.query_one(MessageList).focus()
 
     def _reset_transient_ui(self) -> None:
         """Tear down all transient compression UI before a conversation switch
@@ -507,6 +554,7 @@ class ChatApp(App):
             self._draft_worker.cancel()
         self._draft_worker = None
         self._last_drafted_prompt = ""
+        self._import_source = None
         self._last_hint = None
         self._clear_selection()
 
@@ -521,11 +569,15 @@ class ChatApp(App):
             return
         if self._draft_worker is not None and not self._draft_worker.is_finished:
             return
+        prompt = editor.prompt
+        self._last_drafted_prompt = prompt
+        if self._import_source is not None:
+            _, source_content = self._import_source
+            self._draft_worker = self._draft_import_worker(source_content, prompt)
+            return
         ids = self._compression_range()
         if not ids:
             return
-        prompt = editor.prompt
-        self._last_drafted_prompt = prompt
         self._draft_worker = self._draft_compression_worker(ids[0], ids[-1], prompt)
 
     @work(name="draft_compression")
@@ -549,6 +601,26 @@ class ChatApp(App):
             logger.error("draft error | error=%s", exc)
             # Same as the cancel path: a failed draft must not leave its prompt
             # lingering to corrupt a later manual commit (task 35).
+            self._last_drafted_prompt = ""
+
+    @work(name="draft_import")
+    async def _draft_import_worker(self, source: str, prompt: str) -> None:
+        editor = self.query_one(CompressionEditor)
+        editor.set_output("")  # clear first — re-draft overwrites
+        text = ""
+        try:
+            async for token in self.core.draft_import(source, prompt=prompt):
+                text += token
+                editor.set_output(text)
+        except asyncio.CancelledError:
+            # Mirror the compression worker: drop the recorded prompt so a later
+            # hand-written commit stamps "" (a manual import), not the abandoned
+            # draft's prompt.
+            self._last_drafted_prompt = ""
+            raise
+        except Exception as exc:
+            editor.set_output(f"Draft failed: {exc}")
+            logger.error("import draft error | error=%s", exc)
             self._last_drafted_prompt = ""
 
     async def action_commit_compression(self) -> None:
@@ -575,6 +647,27 @@ class ChatApp(App):
             # first tick). Refuse at the UI layer — mirrors action_expand — rather
             # than relying on the core ValueError catch below (task 28).
             await self._hint("Cannot commit while a response is streaming.")
+            return
+        if self._import_source is not None:
+            if not editor.output.strip():
+                await self._hint("Write an extract before committing (Ctrl+S).")
+                return
+            source_path, source_content = self._import_source
+            # Stamp the prompt that actually drafted the extract ("" if the
+            # extract was hand-written without a draft) — mirrors compression.
+            node = self.core.commit_import(
+                source_path,
+                source_content,
+                extract=editor.output,
+                prompt=self._last_drafted_prompt,
+            )
+            # _close_compression_editor returns focus by mode (Insert → input
+            # bar for /import); lock the inspector to the freshly-appended node.
+            self._close_compression_editor()
+            await self._mount_node(node)
+            self._refresh_token_ui()
+            if self.mode == "insert":
+                self._lock_inspector_to_last()
             return
         if not editor.output.strip():
             await self._hint("Write a summary before committing (Ctrl+S).")
@@ -1014,6 +1107,12 @@ class ChatApp(App):
             self._handle_include_command()
             return
 
+        if text == "/import":
+            logger.info("matched /import")
+            self._accept_input()
+            self._handle_import_command()
+            return
+
         logger.info("no command matched, sending to model")
 
         if self.core.streaming:
@@ -1123,6 +1222,33 @@ class ChatApp(App):
         self._refresh_token_ui()
         if self.mode == "insert":
             self._lock_inspector_to_last()
+
+    @work(name="handle_import")
+    async def _handle_import_command(self) -> None:
+        """`/import`: pick one file, snapshot it, and open the draft editor so the
+        AI can extract from it (ctx0 §4.2). The raw file is read once here and
+        held on ``_import_source``; only the edited extract will reach the model.
+
+        Uses the single-select ``ImportScreen``: import condenses exactly one
+        file, so the picker returns one path (highlight + Enter) — there is no
+        multi-select to reconcile."""
+        files = self._workspace.list_files()
+        if not files:
+            await self._hint("No files in .ctx/context/ to import.")
+            return
+        path = await self.push_screen_wait(ImportScreen(self._workspace))
+        if not path:
+            return
+        try:
+            source = self.core.read_file(path)
+        except (OSError, ValueError) as exc:
+            await self._hint(f"Could not read {path}: {exc}")
+            return
+        if not source.strip():
+            await self._hint(f"{path} is empty — nothing to import.")
+            return
+        self._open_import_editor(path, source)
+        logger.info("import started | path=%s", path)
 
     # --- streaming ------------------------------------------------------
 

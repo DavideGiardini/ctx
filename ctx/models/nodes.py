@@ -132,16 +132,46 @@ class Node:
         )
 
     @classmethod
-    def context(cls, source_path: str, conversation_id: str) -> Node:
-        """Build a context-import reference to a workspace file.
+    def context(
+        cls,
+        content: str,
+        source_path: str,
+        conversation_id: str,
+        prompt: str = "",
+        source_content: str = "",
+    ) -> Node:
+        """Build a context-import node holding its content **on the node**.
 
-        ``meta["source_path"]`` is the path ``build_context`` later loads and
-        wraps in ``<context_import>``.
+        The single factory for both import front doors (ctx0 §3, supersedes
+        ADR-0009's live-read imports). ``content`` is the node's *model-facing
+        form* — the exact text ``build_context`` sends, wrapped in
+        ``<context_import source="…">`` — so it is the snapshot/extract, never a
+        "Included: …" reference label:
+
+          - **verbatim** (``/include``): ``content`` is the raw file snapshot,
+            ``prompt`` is ``""`` and ``source_content`` is ``""`` (the source is
+            the content itself);
+          - **prompt** (``/import``): ``content`` is the edited AI extract,
+            ``prompt`` is the drafting instruction, and ``source_content`` is the
+            raw file the extract was drawn from (kept for the inspector's Source
+            pane; never sent to the model).
+
+        ``meta`` keys (the canonical vocabulary):
+          - ``meta["source_path"]`` — the imported file's path (names the
+            ``<context_import source="…">`` wrapper and the inspector);
+          - ``meta["prompt"]`` — the drafting instruction (``""`` for verbatim);
+            its *presence* also marks a content-on-node node for the legacy read
+            shim (see ``context._context_body``);
+          - ``meta["source_content"]`` — the raw source for prompt-mode; omitted
+            for verbatim (source == content).
         """
+        meta = {"source_path": source_path, "prompt": prompt}
+        if source_content:
+            meta["source_content"] = source_content
         return cls(
             role="context",
-            content=f"Included: {source_path}",
+            content=content,
             node_type="context",
             conversation_id=conversation_id,
-            meta={"source_path": source_path},
+            meta=meta,
         )

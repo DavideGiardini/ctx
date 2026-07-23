@@ -44,12 +44,14 @@ def test_before_and_after_nodes_outside_markers(make_node):
     assert out.index("after the range ends") > out.index(CLOSE)
 
 
-# C3 — a context node contributes the loaded file body, not the "Included:" label
-def test_context_node_uses_loaded_body_not_label(stub_loader):
-    ctx_node = Node.context("src/service.py", "conv-1")
-    load = stub_loader({"src/service.py": "class Service:\n    pass"})
-
-    out = build_compression_transcript([ctx_node], [ctx_node.id], load)
+# C3 — a context node contributes its content-on-node body (the snapshot/extract),
+# rendered as User material; build_compression_transcript never reads the file.
+def test_context_node_uses_content_on_node_body():
+    ctx_node = Node.context(
+        "class Service:\n    pass", source_path="src/service.py", conversation_id="conv-1"
+    )
+    # _null_loader raises if called — a content-on-node import resolves from content.
+    out = build_compression_transcript([ctx_node], [ctx_node.id], _null_loader)
 
     assert "class Service:" in out
     assert "Included:" not in out

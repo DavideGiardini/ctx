@@ -26,7 +26,7 @@ CID = "c1"
 _FACTORY = {
     "user": lambda: Node.user("a question", CID),
     "assistant": lambda: Node.assistant(CID, "a reply"),
-    "context": lambda: Node.context("notes.md", CID),
+    "context": lambda: Node.context("notes body", "notes.md", CID),
 }
 
 

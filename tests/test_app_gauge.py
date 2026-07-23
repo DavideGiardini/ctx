@@ -47,7 +47,11 @@ async def test_gauge_approximate_until_anchored_then_stale_after_include(
         assert app.describe_state()["context_gauge"]["approximate"] is False
 
         # Adding context without a new turn drifts the node set off the anchor →
-        # the absolute figure is an estimate again.
+        # the absolute figure is an estimate again. include_files now snapshots
+        # the file content (ctx0 §3), so the file must exist to produce a node.
+        notes = app._workspace.context_dir / "notes.md"
+        notes.parent.mkdir(parents=True, exist_ok=True)
+        notes.write_text("some notes worth including", encoding="utf-8")
         app.core.include_files(["notes.md"])
         assert app.describe_state()["context_gauge"]["approximate"] is True
 

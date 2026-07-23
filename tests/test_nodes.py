@@ -54,33 +54,44 @@ def test_system_field_combination_and_no_conversation_id():
     assert node.meta == {}
 
 
-# N5 -- context reference: exact field combination
+# N5 -- context node holds its content-on-node (verbatim import): exact fields
 def test_context_field_combination():
     node = Node.context(
+        "the raw file body",
         source_path="docs/architecture/adr-0014.md",
         conversation_id="conv-42",
     )
     assert node.role == "context"
     assert node.node_type == "context"
-    assert node.content == "Included: docs/architecture/adr-0014.md"
+    # content is the model-facing body (the snapshot/extract), never a label.
+    assert node.content == "the raw file body"
     assert node.conversation_id == "conv-42"
-    assert node.meta == {"source_path": "docs/architecture/adr-0014.md"}
+    assert node.meta == {"source_path": "docs/architecture/adr-0014.md", "prompt": ""}
 
 
-# N6 -- context content is the literal "Included: " + source_path, path unmangled
-def test_context_content_is_literal_prefix_of_full_path():
+# N6 -- prompt-mode import stores the instruction and the raw source alongside
+# the extract (which is the content-on-node model-facing body).
+def test_context_prompt_mode_stores_prompt_and_source():
     node = Node.context(
+        "extracted signatures",
         source_path="src/ctx/models/nodes.py",
         conversation_id="c1",
+        prompt="pull out the signatures",
+        source_content="the whole raw file",
     )
-    # Exact prefix; full path preserved (not basenamed/normalized).
-    assert node.content == "Included: src/ctx/models/nodes.py"
+    assert node.content == "extracted signatures"
+    assert node.meta == {
+        "source_path": "src/ctx/models/nodes.py",
+        "prompt": "pull out the signatures",
+        "source_content": "the whole raw file",
+    }
 
 
-# N7 -- context stores the verbatim path under meta["source_path"]
-def test_context_meta_stores_verbatim_source_path():
-    node = Node.context(source_path="a/b/c.txt", conversation_id="c1")
-    assert node.meta == {"source_path": "a/b/c.txt"}
+# N7 -- verbatim import omits source_content (the source IS the content); prompt
+# defaults to "" and the path is stored verbatim.
+def test_context_verbatim_omits_source_content():
+    node = Node.context("body", source_path="a/b/c.txt", conversation_id="c1")
+    assert node.meta == {"source_path": "a/b/c.txt", "prompt": ""}
 
 
 # N8 -- each call gets a fresh unique, non-empty id
@@ -102,11 +113,11 @@ def test_meta_not_aliased_across_calls():
 
 # N10 -- context meta is independent per call
 def test_context_meta_independent_per_call():
-    a = Node.context(source_path="alpha.md", conversation_id="c1")
-    b = Node.context(source_path="beta.md", conversation_id="c1")
+    a = Node.context("a body", source_path="alpha.md", conversation_id="c1")
+    b = Node.context("b body", source_path="beta.md", conversation_id="c1")
     assert a.meta is not b.meta
-    assert a.meta == {"source_path": "alpha.md"}
-    assert b.meta == {"source_path": "beta.md"}
+    assert a.meta == {"source_path": "alpha.md", "prompt": ""}
+    assert b.meta == {"source_path": "beta.md", "prompt": ""}
 
 
 # --------------------------------------------------------------------------
@@ -140,7 +151,7 @@ def test_n13_system_factory_leaves_edges_none():
 # N14
 def test_n14_context_factory_leaves_edges_none():
     node = Node.context(
-        source_path="/home/giardo/projects/ctx/README.md", conversation_id="conv-42"
+        "body", source_path="/home/giardo/projects/ctx/README.md", conversation_id="conv-42"
     )
     assert node.prev_id is None
     assert node.compressed_into is None

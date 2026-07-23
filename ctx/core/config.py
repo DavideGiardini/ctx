@@ -29,10 +29,26 @@ DEFAULT_COMPRESSION_PROMPT = (
     "summary text, no preamble."
 )
 
+# The *system* prompt handed to the model when drafting an ``import`` extract and
+# no per-import prompt is supplied (ctx0 §4.2). Unlike the compression default it
+# is marker-free — the whole user message is the one file to extract from, so the
+# instruction only needs to say what to pull out and to emit the extract alone.
+# Single source of the text: it seeds _DEFAULTS["import"]["default_prompt"].
+DEFAULT_IMPORT_PROMPT = (
+    "You are extracting the parts of a file that are relevant to an ongoing "
+    "conversation. The file is given to you as a single message. Pull out only "
+    "what is useful as context, preserving exact names, signatures, and values; "
+    "drop boilerplate and anything irrelevant. Respond with only the extracted "
+    "text, no preamble."
+)
+
 _DEFAULTS: dict = {
     "model": DEFAULT_MODEL,
     "compression": {
         "default_prompt": DEFAULT_COMPRESSION_PROMPT,
+    },
+    "import": {
+        "default_prompt": DEFAULT_IMPORT_PROMPT,
     },
     "colors": {
         "user": "#3b82f6",
@@ -96,6 +112,14 @@ def get_config() -> dict:
         }
     else:
         merged["compression"] = copy.deepcopy(_DEFAULTS["compression"])
+
+    if isinstance(user_config.get("import"), dict):
+        merged["import"] = {
+            **_DEFAULTS["import"],
+            **user_config["import"],
+        }
+    else:
+        merged["import"] = copy.deepcopy(_DEFAULTS["import"])
 
     if isinstance(user_config.get("ui"), dict):
         merged["ui"] = {**_DEFAULTS["ui"], **user_config["ui"]}

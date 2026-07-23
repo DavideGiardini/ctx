@@ -63,7 +63,7 @@ _SPLITS = {
 _SPLIT_VIEW_TYPES = ("context", "compression")
 
 _SPLIT_LABELS = {
-    "context": {"prompt": "Prompt", "content": "Content", "output": "Output"},
+    "context": {"prompt": "Prompt", "content": "Source", "output": "Output"},
     "compression": {"prompt": "Prompt", "content": "Originals", "output": "Summary"},
 }
 

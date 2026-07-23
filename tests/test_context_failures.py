@@ -68,7 +68,7 @@ def test_oserror_context_load_emits_visible_error_marker(make_node, stub_loader)
     # References the failed path.
     assert "missing.txt" in text
     # Carries an error indication.
-    assert "error" in text.lower()
+    assert "could not read" in text
     # Still marked as an import.
     assert "context_import" in text
 
@@ -109,7 +109,7 @@ def test_valueerror_context_load_emits_visible_error_marker(make_node):
 
     text = _user_text(messages)
     assert "../../etc/passwd" in text
-    assert "error" in text.lower()
+    assert "could not read" in text
     assert "context_import" in text
 
 

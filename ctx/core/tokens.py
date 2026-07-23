@@ -51,9 +51,8 @@ def per_node_tokens(
 
     Each node is rendered *in isolation* via ``build_context([node], read_file)``
     and counted with ``count_messages`` — so a node's own message framing is
-    included and a context node is counted by its *resolved file content* (loaded
-    through ``read_file``), not its "Included: …" label. The result list is
-    parallel to ``nodes``.
+    included and a context node is counted by its *content-on-node* model-facing
+    body (the import snapshot/extract). The result list is parallel to ``nodes``.
 
     A node that does not reach the model (``not node.goes_to_model()`` — notably a
     ``system`` breadcrumb) contributes ``0``, as does a model-bound node that

@@ -457,10 +457,20 @@ def test_resume_unknown_id_leaves_current_state_unchanged(repo, test_provider, w
 # Include files (context nodes)
 # --------------------------------------------------------------------------
 
+def _seed_context_files(workspace, paths, content="file body"):
+    """Write each path under the workspace context dir so include_files (which
+    now snapshots content, ctx0 §3) has real files to read."""
+    for rel in paths:
+        target = workspace.context_dir / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+
+
 def test_include_files_sets_conversation_id(repo, test_provider, workspace):
     # C28
     core = ConversationCore(repo, test_provider(["hi"]), workspace)
     core.setup()
+    _seed_context_files(workspace, ["docs/spec.md"])
     core.include_files(["docs/spec.md"])
     assert isinstance(core.conversation_id, str)
     assert core.conversation_id != ""
@@ -471,6 +481,7 @@ def test_include_files_appends_context_nodes_in_order(repo, test_provider, works
     core = ConversationCore(repo, test_provider(["hi"]), workspace)
     core.setup()
     paths = ["docs/a.md", "src/b.py", "notes/c.txt"]
+    _seed_context_files(workspace, paths)
     before = len(core.nodes)
     core.include_files(paths)
     new_nodes = core.nodes[before:]
@@ -484,6 +495,7 @@ def test_include_files_records_source_path_per_node(repo, test_provider, workspa
     core = ConversationCore(repo, test_provider(["hi"]), workspace)
     core.setup()
     paths = ["docs/a.md", "src/b.py", "notes/c.txt"]
+    _seed_context_files(workspace, paths)
     before = len(core.nodes)
     core.include_files(paths)
     new_nodes = core.nodes[before:]
@@ -496,6 +508,7 @@ def test_include_files_returns_appended_nodes(repo, test_provider, workspace):
     core = ConversationCore(repo, test_provider(["hi"]), workspace)
     core.setup()
     paths = ["docs/a.md", "src/b.py", "notes/c.txt"]
+    _seed_context_files(workspace, paths)
     returned = core.include_files(paths)
     assert len(returned) == len(paths)
     for i, path in enumerate(paths):
@@ -507,6 +520,7 @@ def test_include_files_persists_context_node(repo, test_provider, workspace):
     # C32
     core = ConversationCore(repo, test_provider(["hi"]), workspace)
     core.setup()
+    _seed_context_files(workspace, ["docs/spec.md"])
     core.include_files(["docs/spec.md"])
     loaded = repo.load(core.conversation_id)
     matches = [
@@ -668,6 +682,7 @@ def test_persisted_context_node_round_trips(repo, test_provider, workspace):
     # C46
     core = ConversationCore(repo, test_provider(["hi"]), workspace)
     core.setup()
+    _seed_context_files(workspace, ["docs/spec.md"])
     core.include_files(["docs/spec.md"])
     cid = core.conversation_id
     core.persist()
@@ -769,6 +784,7 @@ def test_c50_resume_rederives_title_flattening_newlines(repo, test_provider, wor
 def test_c51_resume_no_user_message_empty_title(repo, test_provider, workspace):
     first = ConversationCore(repo, test_provider(["answer"]), workspace)
     first.setup()
+    _seed_context_files(workspace, ["a.md", "b.py"])
     first.include_files(["a.md", "b.py"])
     conversation_id = first.conversation_id
     assert conversation_id != ""
@@ -785,6 +801,7 @@ def test_c51_resume_no_user_message_empty_title(repo, test_provider, workspace):
 def test_c52_include_files_leaves_title_empty(repo, test_provider, workspace):
     core = ConversationCore(repo, test_provider(["hi"]), workspace)
     core.setup()
+    _seed_context_files(workspace, ["docs/spec.md"])
     core.include_files(["docs/spec.md"])
     assert core.conversation_title == ""
 
@@ -793,6 +810,7 @@ def test_c52_include_files_leaves_title_empty(repo, test_provider, workspace):
 def test_c53_context_nodes_have_context_role(repo, test_provider, workspace):
     core = ConversationCore(repo, test_provider(["hi"]), workspace)
     core.setup()
+    _seed_context_files(workspace, ["docs/a.md", "src/b.py"])
     returned = core.include_files(["docs/a.md", "src/b.py"])
     assert len(returned) > 0
     for node in returned:

@@ -28,6 +28,7 @@ def test_assistant_node_goes_to_model():
 # G3 — a context node goes to the model (role is "context", recognized via node_type)
 def test_context_node_goes_to_model():
     node = Node.context(
+        content="imported file body",
         source_path="docs/architecture/adr-0014.md",
         conversation_id="conv-001",
     )

@@ -5,6 +5,7 @@ to the adjudicated contract, never to the implementation.
 """
 
 from ctx.core.context import build_context
+from ctx.models.nodes import Node
 
 
 def test_c1_two_turn_conversation_verbatim_order(make_node):
@@ -209,8 +210,10 @@ def test_c13_empty_nodes(make_node):
 
 
 def test_c14_failed_load_surfaces_visible_marker_keeps_following_user(make_node, stub_loader):
-    # C14: a failed context load is now made VISIBLE (not silently dropped) — it
-    # emits an error-marked import referencing the path; the following user survives.
+    # C14: a failed context load is made VISIBLE (not silently dropped) — a
+    # legacy (source_path-only, no "prompt" key) context node whose live read
+    # fails emits a "could not read" sentinel inside the import wrapper; the
+    # following user survives.
     loader = stub_loader({"present.txt": "x"})
     nodes = [
         make_node(
@@ -226,14 +229,15 @@ def test_c14_failed_load_surfaces_visible_marker_keeps_following_user(make_node,
     user_text = "\n".join(d["content"] for d in user_dicts)
     assert "still here" in user_text
     assert "missing.txt" in user_text
-    assert "error" in user_text.lower()
+    assert "could not read" in user_text
     assert "context_import" in user_text
     assert all(d["role"] != "assistant" for d in result)
 
 
 def test_c15_failed_load_surfaces_marker_alongside_user(make_node, stub_loader):
-    # C15: a failed context load no longer vanishes — its error marker merges into
-    # the adjacent user turn (same coalescing rule as a successful import).
+    # C15: a failed legacy context load no longer vanishes — its "could not read"
+    # sentinel merges into the adjacent user turn (same coalescing as a successful
+    # import).
     loader = stub_loader({"present.txt": "x"})
     nodes = [
         make_node(
@@ -250,7 +254,7 @@ def test_c15_failed_load_surfaces_marker_alongside_user(make_node, stub_loader):
     content = user_dicts[0]["content"]
     assert "my question" in content
     assert "missing.txt" in content
-    assert "error" in content.lower()
+    assert "could not read" in content
     assert "context_import" in content
 
 
@@ -333,8 +337,10 @@ def test_c18_purity_no_mutation_and_deterministic(make_node, stub_loader):
     assert after == before
 
 
-def test_c19_empty_file_body_still_imports(make_node, stub_loader):
-    # C19
+def test_c19_empty_file_body_contributes_nothing(make_node, stub_loader):
+    # C19: an empty body contributes no message — a context node whose model-facing
+    # form is empty is dropped, exactly like an empty user/assistant turn. The
+    # following user stands alone (no import wrapper, nothing to coalesce with).
     loader = stub_loader({"empty.txt": ""})
     nodes = [
         make_node(
@@ -349,9 +355,8 @@ def test_c19_empty_file_body_still_imports(make_node, stub_loader):
     user_dicts = [d for d in result if d["role"] == "user"]
     assert len(user_dicts) == 1
     content = user_dicts[0]["content"]
-    assert "go" in content
-    assert "empty.txt" in content
-    assert "context_import" in content
+    assert content == "go"
+    assert "context_import" not in content
 
 
 # C20. A context node whose loader raises ValueError surfaces a visible error
@@ -372,11 +377,11 @@ def test_context_node_loader_valueerror_surfaces_marker(make_node):
 
     result = build_context(nodes, loader)
 
-    # The rejected import is surfaced as a user-role error marker, never raising
-    # and never becoming assistant content.
+    # The rejected legacy import is surfaced as a user-role "could not read"
+    # sentinel, never raising and never becoming assistant content.
     user_text = "\n".join(m["content"] for m in result if m["role"] == "user")
     assert "../escape.txt" in user_text
-    assert "error" in user_text.lower()
+    assert "could not read" in user_text
     assert "context_import" in user_text
     # The surviving user message must still be present.
     assert "still here" in user_text
@@ -430,3 +435,45 @@ def test_context_node_empty_source_path_is_skipped(make_node, stub_loader):
     assert any(
         msg["role"] == "user" and "after" in msg["content"] for msg in result
     )
+
+
+# --------------------------------------------------------------------------
+# Content-on-node imports (ctx0 §3, supersedes ADR-0009). A context node built
+# by Node.context carries a "prompt" key in meta and stores its model-facing
+# body on `content`; build_context wraps that body and NEVER reads the file.
+# --------------------------------------------------------------------------
+
+
+def _boom(_path):
+    raise AssertionError("build_context must not read a content-on-node import")
+
+
+def test_verbatim_import_wraps_stored_body_without_reading_file():
+    node = Node.context("THE FILE BODY", source_path="a.txt", conversation_id="c1")
+    # The loader raises if called — a content-on-node node must resolve from
+    # its own content, never a live disk read.
+    result = build_context([node], _boom)
+    expected = '<context_import source="a.txt">\nTHE FILE BODY\n</context_import>'
+    assert result == [{"role": "user", "content": expected}]
+
+
+def test_prompt_import_sends_the_extract_not_the_raw_source():
+    node = Node.context(
+        "just the signatures",
+        source_path="big.py",
+        conversation_id="c1",
+        prompt="pull out signatures",
+        source_content="the entire raw file body that must never be sent",
+    )
+    result = build_context([node], _boom)
+    content = result[0]["content"]
+    # Only the extract (content) reaches the model, wrapped by source path.
+    assert "just the signatures" in content
+    assert 'source="big.py"' in content
+    # The raw source is kept on the node for inspection but never sent.
+    assert "the entire raw file body" not in content
+
+
+def test_empty_content_on_node_import_is_dropped():
+    node = Node.context("", source_path="empty.txt", conversation_id="c1")
+    assert build_context([node], _boom) == []

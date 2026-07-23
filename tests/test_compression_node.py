@@ -71,7 +71,7 @@ def test_compression_goes_to_model_true():
 def test_goes_to_model_unchanged_for_existing_kinds():
     user = Node.user("What is the plan?", "conv-1")
     assistant = Node.assistant("conv-1", content="Here is the plan.")
-    context = Node.context("/docs/spec.md", "conv-1")
+    context = Node.context("spec body", "/docs/spec.md", "conv-1")
     system = Node.system("You are a helpful assistant.", conversation_id="conv-1")
 
     assert user.goes_to_model() is True

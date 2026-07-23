@@ -19,6 +19,7 @@ class InputBar(Input):
         "/new",
         "/resume",
         "/include",
+        "/import",
     ]
 
     COMMANDS_WITH_ARGS = {"/model"}

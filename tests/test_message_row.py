@@ -26,7 +26,7 @@ def _make_node(role: str) -> Node:
     factory = {
         "user": lambda: Node.user("hello", "c1"),
         "assistant": lambda: Node.assistant("c1", "hi there"),
-        "context": lambda: Node.context("file.txt", "c1"),
+        "context": lambda: Node.context("file body", "file.txt", "c1"),
         "system": lambda: Node.system("a notice", "c1"),
         "compression": lambda: Node.compression("a summary", "c1", ["x"]),
     }[role]

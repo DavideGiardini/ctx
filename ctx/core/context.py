@@ -30,19 +30,82 @@ def hash_context(messages: list[dict[str, Any]]) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def model_facing_form(
+    node: Node, load_file: Callable[[str], str]
+) -> tuple[str, str] | None:
+    """The single rule for a node's ``(role, body)`` as the model sees it.
+
+    Returns ``None`` when the node contributes nothing to the request. This is
+    the one definition of "what does this node look like to the model" — both
+    ``build_context`` (which then wraps the body in ``<context_import>`` /
+    ``<conversation_summary>`` XML) and the compression transcript
+    (``_transcript_block``, which labels it ``Role:``) consume it, so the rule
+    is not hand-synced in two places (Code Quality Review, "Model-facing-form
+    extraction").
+
+      - ``user`` / ``assistant`` turns contribute their ``content`` under their
+        own role; empty content contributes nothing.
+      - a ``context`` node contributes its content-on-node body under the
+        ``user`` role (its snapshot/extract — see ``_context_body``); an empty
+        body contributes nothing.
+      - a committed compression ``K`` contributes its summary (``content``)
+        under the ``user`` role.
+      - any node that does not reach the model (``goes_to_model()`` false —
+        a ``system`` breadcrumb, an ``expand`` event) contributes nothing.
+    """
+    if not node.goes_to_model():
+        return None
+    if node.node_type == "context":
+        body = _context_body(node, load_file)
+        return ("user", body) if body else None
+    if node.node_type == "compression":
+        return ("user", node.content) if node.content else None
+    return (node.role, node.content) if node.content else None
+
+
+def _context_body(node: Node, load_file: Callable[[str], str]) -> str | None:
+    """A context node's model-facing body: its content-on-node snapshot/extract.
+
+    Content-on-node (ctx0 ``import``, supersedes ADR-0009): a context node stores
+    the exact text the model should see — the verbatim file snapshot, or the
+    edited extract — on ``node.content``. ``build_context`` no longer reads the
+    file live.
+
+    AIDEV-NOTE: legacy back-compat shim. Pre-``import`` ``/include`` nodes stored
+    only ``meta["source_path"]`` (no ``"prompt"`` key) with an ``"Included: …"``
+    label as content, and were read live every turn. A content-on-node node
+    always carries a ``"prompt"`` key (set by ``Node.context``), so its absence
+    marks a legacy node — fall back to a live read so old conversations still
+    resolve; a failed read yields a visible ``[could not read …]`` sentinel
+    rather than silently vanishing. Drop this branch once such nodes have aged
+    out of stored conversations.
+    """
+    if "prompt" in node.meta:
+        return node.content or None
+    source_path = node.meta.get("source_path", "")
+    if not source_path:
+        return None
+    try:
+        return load_file(source_path)
+    except (OSError, ValueError) as exc:
+        logger.warning(
+            "failed to read legacy context file | path=%s | error=%s", source_path, exc
+        )
+        return f"[could not read {source_path}: {exc}]"
+
+
 def build_context(
     nodes: list[Node], load_file: Callable[[str], str]
 ) -> list[dict]:
     """Convert a list of Nodes into LLM message dicts.
 
-    Context nodes (node_type == "context") load their file, wrap it in
-    <context_import> XML, and count as user-role content. Compression nodes
-    (node_type == "compression") wrap their summary content in
-    <conversation_summary> XML and likewise count as user-role content, so a
-    summary coalesces with adjacent user material exactly like an import
-    (ADR-0016 A#1, H6). Adjacent user-role content is coalesced into one user
-    message; assistant nodes are appended as their own; other roles (e.g.
-    system) are skipped.
+    Each node's model-facing ``(role, body)`` comes from ``model_facing_form``.
+    A ``context`` node's body (its content-on-node snapshot/extract) is wrapped
+    in ``<context_import source="…">`` XML; a ``compression`` node's summary is
+    wrapped in ``<conversation_summary>`` XML; both count as user-role content so
+    a summary or import coalesces with adjacent user material (ADR-0016 A#1, H6).
+    Adjacent user-role content is coalesced into one user message; assistant
+    nodes are appended as their own; nodes that reach nothing are skipped.
 
     ROLE-ALTERNATION INVARIANT: the returned list never contains two adjacent
     dicts of the same role. Strict role-alternation providers (Anthropic-family
@@ -55,64 +118,30 @@ def build_context(
     Only an assistant message breaks the run, so material after it starts a
     fresh user dict (task 34).
 
-    Failures are made *visible* rather than silent: when a context node's file
-    fails to load (``load_file`` raises ``OSError``/``ValueError``), a marked
-    ``<context_import source="…" error="…">`` block is emitted as user material
-    so the model — and, through it, the user — sees that the import failed,
-    instead of the file silently disappearing. A context node with no usable
-    ``source_path`` has nothing to import and is dropped.
-
-    Empty ``user``/``assistant`` nodes (``content == ""``) are skipped so no
-    empty-content message reaches the provider (several APIs reject those).
-
-    ``load_file`` is injected so this stays pure and testable without I/O.
+    ``load_file`` is injected (for the legacy context read shim, see
+    ``_context_body``) so this stays pure and testable without I/O.
     """
     messages: list[dict] = []
 
     for node in nodes:
-        if not node.goes_to_model():
+        form = model_facing_form(node, load_file)
+        if form is None:
             continue
-
-        node_content, node_role = node.content, node.role
+        role, body = form
 
         if node.node_type == "context":
-            source_path = node.meta.get("source_path")
-            if not source_path:
-                logger.warning("context node missing source_path | node_id=%s", node.id)
-                continue
-            try:
-                content = load_file(source_path)
-            except (OSError, ValueError) as exc:
-                logger.warning(
-                    "failed to read context file | path=%s | error=%s", source_path, exc
-                )
-                node_content = (
-                    f'<context_import source="{source_path}" error="{exc}">'
-                    "</context_import>"
-                )
-            else:
-                node_content = (
-                    f'<context_import source="{source_path}">\n{content}\n</context_import>'
-                )
-            node_role = "user"
-
+            source_path = node.meta.get("source_path", "")
+            body = f'<context_import source="{source_path}">\n{body}\n</context_import>'
         elif node.node_type == "compression":
-            node_content = (
-                f"<conversation_summary>\n{node_content}\n</conversation_summary>"
-            )
-            node_role = "user"
+            body = f"<conversation_summary>\n{body}\n</conversation_summary>"
 
-        if node_role == "user":
-            if not node_content:
-                continue
+        if role == "user":
             if messages and messages[-1]["role"] == "user":
-                messages[-1]["content"] += "\n\n" + node_content
+                messages[-1]["content"] += "\n\n" + body
             else:
-                messages.append({"role": "user", "content": node_content})
-        elif node_role == "assistant":
-            if not node_content:
-                continue
-            messages.append({"role": "assistant", "content": node_content})
+                messages.append({"role": "user", "content": body})
+        elif role == "assistant":
+            messages.append({"role": "assistant", "content": body})
 
     return messages
 
@@ -137,10 +166,9 @@ def build_compression_transcript(
 
       - a ``user`` / ``assistant`` turn contributes its ``content``, labeled
         ``User:`` / ``Assistant:`` by role;
-      - a ``context`` node contributes the loaded file body (``load_file`` on its
-        ``meta["source_path"]``), **not** the "Included: …" label, labeled
-        ``User:`` (its model-facing role) — a context node with no usable
-        ``source_path`` contributes nothing;
+      - a ``context`` node contributes its content-on-node body (the verbatim
+        snapshot or the edited extract — the same body ``build_context`` sends,
+        minus the XML wrapper), labeled ``User:`` (its model-facing role);
       - a committed compression ``K`` contributes its summary (``content``),
         labeled ``User:`` (its model-facing role).
 
@@ -194,28 +222,11 @@ def build_compression_transcript(
 def _transcript_block(node: Node, load_file: Callable[[str], str]) -> str | None:
     """Render one node as a ``"{Role}:\\n{body}"`` block, or None if it emits nothing.
 
-    Mirrors ``build_context``'s per-role/-type inclusion and model-facing forms,
-    but as plain labeled text (no XML wrapper) — see ``build_compression_transcript``.
+    Consumes the shared ``model_facing_form`` rule (the plain body, no XML
+    wrapper) and labels it — see ``build_compression_transcript``.
     """
-    if not node.goes_to_model():
+    form = model_facing_form(node, load_file)
+    if form is None:
         return None
-
-    if node.node_type == "context":
-        source_path = node.meta.get("source_path")
-        if not source_path:
-            return None
-        try:
-            body = load_file(source_path)
-        except (OSError, ValueError) as exc:
-            body = f"[could not read {source_path}: {exc}]"
-        role = "user"
-    elif node.node_type == "compression":
-        body = node.content
-        role = "user"
-    else:
-        body = node.content
-        role = node.role
-
-    if not body:
-        return None
+    role, body = form
     return f"{role.title()}:\n{body}"

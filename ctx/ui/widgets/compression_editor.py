@@ -40,7 +40,7 @@ class CompressionEditor(Container):
     def compose(self) -> ComposeResult:
         yield Static("Prompt", classes="split-label")
         yield TextArea(id="compress-prompt")
-        yield Static("Summary", classes="split-label")
+        yield Static("Summary", id="compress-output-label", classes="split-label")
         yield TextArea(id="compress-output")
 
     # --- interface -------------------------------------------------------
@@ -50,14 +50,17 @@ class CompressionEditor(Container):
         """Whether the editor is currently shown (occupying the left pane)."""
         return self.display
 
-    def open(self, prompt: str) -> None:
+    def open(self, prompt: str, output_label: str = "Summary") -> None:
         """Show the editor: prefill the prompt split, clear the output split.
 
         No auto-stream (Q4) — opening only seeds the default prompt and an empty
-        summary; drafting is an explicit later action.
+        output; drafting is an explicit later action. ``output_label`` names the
+        bottom split for the current use: ``"Summary"`` for a compression draft,
+        ``"Output"`` for an import extract (the editor is shared by both flows).
         """
         self.query_one("#compress-prompt", TextArea).text = prompt
         self.query_one("#compress-output", TextArea).text = ""
+        self.query_one("#compress-output-label", Static).update(output_label)
         self.display = True
 
     def close(self) -> None:
