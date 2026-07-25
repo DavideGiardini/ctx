@@ -125,6 +125,23 @@ class ChatApp(App):
         self._last_hint: str | None = None
         logger.info("app initialized | default_model=%s", self.core.model)
 
+    def get_css_variables(self) -> dict[str, str]:
+        """Expose the config chrome palette to the CSS as ``$ctx-*`` variables.
+
+        The single seam between ``config.py``'s ``colors`` and the stylesheet:
+        every UI color the CSS draws (selection highlight, pane seams, muted
+        header text) is read from config here rather than hardcoded across the
+        ``.css``/``DEFAULT_CSS`` files, so retheming is a one-place edit — and the
+        same hook that lets a future ``config.json`` recolor the whole UI. Merged
+        over the theme's own variables so ``$primary``/``$text-muted`` still work.
+        """
+        variables = super().get_css_variables()
+        colors = get_config()["colors"]
+        variables["ctx-selection"] = colors["selection"]
+        variables["ctx-seam"] = colors["seam"]
+        variables["ctx-muted"] = colors["muted"]
+        return variables
+
     def compose(self) -> ComposeResult:
         yield AppHeader(id="app-header")
         with Horizontal(id="body"):
@@ -136,16 +153,24 @@ class ChatApp(App):
                 # in normal flow (docking both directly would overlap them).
                 with Container(id="input-area"):
                     yield Static("", id="command-suggestions")
-                    yield InputBar()
+                    # Terminal-native prompt line: a "> " marker beside a
+                    # borderless input, not a bordered GUI text box.
+                    with Horizontal(id="input-line"):
+                        yield Static(">", id="prompt-marker")
+                        yield InputBar()
         yield AppFooter()
 
     def on_mount(self) -> None:
+        # Terminal-native look: resolve all theme colors to the terminal's own
+        # 16 ANSI colors and the screen background to ansi_default, so the app
+        # inherits the user's terminal theme and window transparency. Note that
+        # under this theme $surface/$panel/$boost resolve to *transparent* —
+        # seams and highlights need explicit ansi_* colors.
+        self.theme = "ansi-dark"
         self.core.setup()
         self.query_one(InputBar).focus()
-        self.query_one(AppHeader).set_title(self.core.conversation_title)
-        footer = self.query_one(AppFooter)
-        footer.set_mode("insert")
-        footer.set_model(self.core.model)
+        self.query_one(AppHeader).set_model(self.core.model)
+        self.query_one(AppFooter).set_mode("insert")
         self._lock_inspector_to_last()
 
     # --- command suggestions overlay ------------------------------------
@@ -1126,7 +1151,6 @@ class ChatApp(App):
         user_node, assistant_node = self.core.submit(text)
         await self._mount_node(user_node)
         await self._mount_node(assistant_node)
-        self.query_one(AppHeader).set_title(self.core.conversation_title)
         self._refresh_token_ui()
         if self.mode == "insert":
             self._lock_inspector_to_last()
@@ -1141,7 +1165,7 @@ class ChatApp(App):
 
     def _update_model_label(self) -> None:
         with contextlib.suppress(Exception):
-            self.query_one(AppFooter).set_model(self.core.model)
+            self.query_one(AppHeader).set_model(self.core.model)
 
     async def _handle_model_command(self, text: str) -> None:
         parts = text.split(maxsplit=1)
@@ -1175,7 +1199,6 @@ class ChatApp(App):
         for child in list(message_list.children):
             await child.remove()
         await message_list.add_node(node)
-        self.query_one(AppHeader).set_title(self.core.conversation_title)
         self._update_model_label()
         self._refresh_token_ui()
         if self.mode == "insert":
@@ -1199,7 +1222,6 @@ class ChatApp(App):
         # as a settling animation. reconcile mounts the rows once, places the
         # separators once, and scrolls once.
         await self._rebuild_message_list()
-        self.query_one(AppHeader).set_title(self.core.conversation_title)
         self._update_model_label()
         self._refresh_token_ui()
         if self.mode == "insert":

@@ -6,10 +6,13 @@ Screen {
 #body {
     height: 1fr;
 }
+/* Pane seams use the config seam color ($ctx-seam; see config.py + ChatApp.
+   get_css_variables): under the ansi-dark theme $surface resolves to
+   transparent, which would erase the divider. */
 #detail {
     width: 1fr;
     height: 1fr;
-    border-right: solid $surface;
+    border-right: solid $ctx-seam;
 }
 #conversation {
     width: 1fr;
@@ -29,12 +32,27 @@ Screen {
 }
 #command-suggestions {
     color: $text-muted;
-    background: $surface;
     padding: 0 1;
     border-top: solid $primary;
     height: auto;
     display: none;
 }
+/* Terminal-native prompt line: no border, no reserved box — one row with a
+   "> " marker, transparent against the terminal background. */
+#input-line {
+    height: 1;
+}
+#prompt-marker {
+    width: 2;
+    color: $text-muted;
+}
 InputBar {
-    height: 3;
+    height: 1;
+    border: none;
+    padding: 0;
+    background: transparent;
+}
+InputBar:focus {
+    border: none;
+    background: transparent;
 }

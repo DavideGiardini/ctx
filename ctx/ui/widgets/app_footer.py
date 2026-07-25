@@ -27,7 +27,6 @@ class AppFooter(Static):
     AppFooter {
         dock: bottom;
         height: 1;
-        background: $panel;
         color: $text-muted;
         padding: 0 1;
     }
@@ -38,7 +37,6 @@ class AppFooter(Static):
         self._mode = "insert"
         self._detail = "none"
         self._editor = False
-        self._model = ""
         self._selected_type: str | None = None
 
     def on_mount(self) -> None:
@@ -55,10 +53,6 @@ class AppFooter(Static):
 
     def set_editor(self, active: bool) -> None:
         self._editor = active
-        self._refresh()
-
-    def set_model(self, model: str) -> None:
-        self._model = model
         self._refresh()
 
     def set_selection(self, node_type: str | None) -> None:
@@ -83,6 +77,4 @@ class AppFooter(Static):
         return _HINTS.get(self._mode, _HINTS["insert"])
 
     def _refresh(self) -> None:
-        hint = self.current_hint()
-        line = f"{hint}    [dim]{self._model}[/dim]" if self._model else hint
-        self.update(line)
+        self.update(self.current_hint())

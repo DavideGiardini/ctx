@@ -1,4 +1,4 @@
-"""Top docked header: conversation title (left), CTX logo (center), context
+"""Top docked header: active model (left), CTX logo (center), context
 gauge (right).
 
 The context gauge shows the share of the model's input window the conversation
@@ -10,44 +10,77 @@ estimate rather than an exact count.
 """
 
 from textual.app import ComposeResult
-from textual.containers import Horizontal
+from textual.containers import Container
 from textual.widgets import Static
 
 _BAR_WIDTH = 10
 
 
-class AppHeader(Horizontal):
+class AppHeader(Container):
     DEFAULT_CSS = """
     AppHeader {
         dock: top;
         height: 1;
-        background: $panel;
+        layers: logo labels;
     }
-    AppHeader #hdr-title {
-        width: 1fr;
-        content-align: left middle;
-        padding: 0 1;
-    }
+    /* CTX spans the full header width and centers, so its middle glyph lands on
+       the body's horizontal center — the same column as the pane divider. It
+       lives on its own layer so the model/gauge box widths can never shift it
+       (the earlier flex layout only aligned by rounding luck). Model/gauge text
+       use the config muted color ($ctx-muted): $text-muted (ansi_default 50%)
+       renders full-strength because the dim attribute only kicks in below 50%. */
     AppHeader #hdr-logo {
-        width: auto;
+        layer: logo;
+        width: 100%;
+        height: 1;
         content-align: center middle;
         text-style: bold;
     }
+    AppHeader #hdr-model {
+        layer: labels;
+        dock: left;
+        width: auto;
+        color: $ctx-muted;
+        padding: 0 1;
+    }
     AppHeader #hdr-context {
+        layer: labels;
+        dock: right;
         width: auto;
         content-align: right middle;
-        color: $text-muted;
+        color: $ctx-muted;
         padding: 0 1;
     }
     """
 
     def compose(self) -> ComposeResult:
-        yield Static("", id="hdr-title")
         yield Static("CTX", id="hdr-logo")
+        yield Static("", id="hdr-model")
         yield Static(self._gauge(None), id="hdr-context")
 
-    def set_title(self, title: str) -> None:
-        self.query_one("#hdr-title", Static).update(title or "untitled")
+    def on_resize(self) -> None:
+        self._align_logo()
+
+    def _align_logo(self) -> None:
+        """Sit the CTX logo's middle glyph exactly on the pane divider.
+
+        The body is two 1fr panes with a 1-cell ``border-right`` on the left one
+        (app.css), so the divider column is always ``width // 2 - 1``. A plain
+        ``content-align: center`` puts the 3-char logo's middle glyph at
+        ``(width - 3) // 2 + 1`` — which matches the divider on even widths but
+        lands one cell right of it on odd widths. Nudge the logo by that exact
+        delta (0 or -1) so it aligns at every terminal width, not just even ones.
+        """
+        w = self.size.width
+        if w <= 0:
+            return
+        divider = w // 2 - 1
+        centered_glyph = (w - 3) // 2 + 1
+        logo = self.query_one("#hdr-logo", Static)
+        logo.styles.offset = (divider - centered_glyph, 0)
+
+    def set_model(self, model: str) -> None:
+        self.query_one("#hdr-model", Static).update(model or "")
 
     def set_context_pct(self, pct: int | None, approximate: bool = False) -> None:
         self.query_one("#hdr-context", Static).update(self._gauge(pct, approximate))

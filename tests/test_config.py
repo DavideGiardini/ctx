@@ -108,6 +108,10 @@ def test_c3_baseline_shape(config_file):
         "system",
         "context",
         "compression",
+        # UI chrome colors, surfaced to the CSS as $ctx-* variables.
+        "selection",
+        "seam",
+        "muted",
     }
     for value in defaults["colors"].values():
         assert isinstance(value, str)

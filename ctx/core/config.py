@@ -50,6 +50,21 @@ _DEFAULTS: dict = {
     "import": {
         "default_prompt": DEFAULT_IMPORT_PROMPT,
     },
+    # The single UI palette — the one place every color the app draws lives, so
+    # retheming means editing here (and, in future, config.json) rather than
+    # hunting hex values across the CSS. Two groups:
+    #
+    #   * Role bars (user/assistant/system/context/compression) — the left-edge
+    #     bar per node role, applied in message_row.py via Color.parse. They keep
+    #     their original fixed hex accents: they render as truecolor regardless of
+    #     the ansi-dark theme, and a bar is a foreground glyph (not a background
+    #     fill), so a fixed color here doesn't break terminal transparency. ANSI
+    #     names (e.g. "ansi_blue") also work for palette-tracking bars.
+    #   * Chrome (selection/seam/muted) — surfaced to the CSS as the variables
+    #     $ctx-selection / $ctx-seam / $ctx-muted (ChatApp.get_css_variables), so
+    #     the stylesheet reads them by name. "selection" is the hovered/selected
+    #     row + split highlight; "seam" the pane/split dividers; "muted" the
+    #     header model + gauge text.
     "colors": {
         "user": "#3b82f6",
         "assistant": "#f97316",
@@ -59,6 +74,9 @@ _DEFAULTS: dict = {
         # human-side, model-facing injections); the row's kind glyph (≡) is what
         # keeps a summary distinguishable from an imported file (task 39).
         "compression": "#22c55e",
+        "selection": "#3a3a3a",
+        "seam": "ansi_bright_black",
+        "muted": "ansi_bright_black",
     },
     "ui": {
         # Max lines a node occupies in the right-pane conversation graph before

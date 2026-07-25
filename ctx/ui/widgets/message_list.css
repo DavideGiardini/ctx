@@ -66,18 +66,22 @@ Separator {
 /* Grey while bridging two rows inside one range selection, matching the rows'
    own selection background so the run reads as one continuous block (task 41). */
 Separator.bridged {
-    background: $surface-lighten-1;
+    background: $ctx-selection;
 }
 
 /* List-only interaction state (cursor / range selection). A selected row wears
-   the grey hover background; the bold role-colored left bar is set in Python. A
-   multi-node run reads as one highlighted block — rows flush within a pass, grey
-   Separators bridging the turn boundaries — not a separate solid-blue mode. */
+   the selection background; the bold role-colored left bar is set in Python. A
+   multi-node run reads as one highlighted block — rows flush within a pass,
+   separators bridging the turn boundaries — not a separate solid-blue mode.
+   $ctx-selection (config.py, via ChatApp.get_css_variables) is a fixed dark grey,
+   not ansi_bright_black: the ANSI grey read too light and the palette has no
+   shade between black and bright-black. A highlight is an opaque cell either
+   way, so a fixed grey here doesn't affect the transparency the rest of the UI keeps. */
 MessageWidget.selected {
-    background: $surface-lighten-1;
+    background: $ctx-selection;
 }
 MessageWidget.range-selected {
-    background: $surface-lighten-1;
+    background: $ctx-selection;
 }
 MessageList {
     scrollbar-size: 1 1;

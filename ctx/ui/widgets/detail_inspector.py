@@ -79,18 +79,22 @@ class DetailInspector(Container):
         color: $text-muted;
         text-style: italic;
     }
-    /* A visible divider between the three context splits (task 38). */
-    DetailInspector #detail-prompt { border-bottom: solid $surface; }
-    DetailInspector #detail-content { border-bottom: solid $surface; }
+    /* A visible divider between the three context splits (task 38). Config seam
+       color ($ctx-seam): $surface is transparent under the ansi-dark theme. */
+    DetailInspector #detail-prompt { border-bottom: solid $ctx-seam; }
+    DetailInspector #detail-content { border-bottom: solid $ctx-seam; }
     DetailInspector #detail-content-rows { height: auto; }
     /* The inspector owns its own row spacing now that MessageRow carries none
        (ctx0 rendering redesign): one blank line between the folded originals. */
     DetailInspector #detail-content-rows MessageRow { margin-bottom: 1; }
+    /* Highlight/focus share the config selection color ($ctx-selection) with the
+       message list: alpha tints ($primary 20%) don't blend under the ansi theme,
+       and the ANSI grey read too light. */
     DetailInspector _Split:focus {
-        background: $surface-lighten-1;
+        background: $ctx-selection;
     }
     DetailInspector _Split.highlighted {
-        background: $primary 20%;
+        background: $ctx-selection;
     }
     DetailInspector #detail-empty {
         color: $text-disabled;
