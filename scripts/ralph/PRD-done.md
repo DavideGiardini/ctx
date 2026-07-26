@@ -142,3 +142,21 @@ stays here for anyone auditing what a commit was supposed to do.
       no search key available no tools are offered at all and the turn is an
       ordinary chat turn; and cancelling mid-loop leaves the already-appended nodes
       in the graph with `end_turn` still the only thing that marks the ending.
+
+- [x] **7 — The window-wall guard and its breadcrumb** — Before a fetched page is
+      handed back to the model, estimate the resulting request with
+      `tokens.count_messages` against `tokens.model_window(self.model)`. If it
+      would overflow, the tool returns "this page is too large for the remaining
+      context window" instead of the page (the same shape as a failed tool, D8)
+      **and** a durable system breadcrumb is recorded via `add_system_message` so
+      the user can see why the answer came up short (D11). Pages are otherwise
+      uncapped — do **not** truncate (D10). Honest limitation to preserve, not
+      fix: `model_window()` returns `None` for models litellm has no metadata for,
+      including the current default Gemma; when the window is unknown the guard is
+      skipped and the turn falls back to the provider's own error via
+      `end_turn(error=…)`. Ref: plan §4.6, D10, D11. Depends on task 6.
+      _Acceptance:_ `check.sh` green. Tests show that with a known small window a
+      fetch that would overflow returns the refusal string, appends the durable
+      system breadcrumb, and lets the turn continue to an answer; that the page is
+      never truncated on the success path; and that with `model_window()` returning
+      `None` the guard is skipped and the fetch proceeds.

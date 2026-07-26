@@ -370,3 +370,87 @@ tasks 1–7 and PROMPT.md step 7.
 - **`dispatch_tool_call` can return a `system` node** (every failure path does),
   so task 9's `on_node` handler must not assume every node it mounts is a search
   or context node.
+
+## 2026-07-26 — task 7: the window-wall guard and its breadcrumb
+
+**What shipped.** `ctx/core/conversation.py` (plus one line in the `TestProvider`
+double, see below) and its contract/tests. Three additions: a
+`_tool_result_message(call_id, content)` module helper next to the existing
+`_tool_call_message`, so the `role="tool"` message is built **once** and the very
+message that gets sent is the one the wall measures; `_window_wall_message(url)`,
+the single explanation both audiences get; and `ConversationCore._overflows_window
+(messages)` — `tokens.count_messages` against `tokens.model_window(self.model)`,
+returning `False` when the window is unknown.
+
+**Three decisions worth not re-deriving.**
+
+1. **The refused page becomes no node at all.** The loop drops the context node
+   dispatch built and appends `add_system_message(...)` in its place, so a walled
+   fetch looks exactly like a failed tool call (D8): a system breadcrumb plus an
+   explanation to the model. This is *not* a mutation of the append-only graph —
+   `dispatch_tool_call` only *builds* the node, it never appends, so the page node
+   never entered the graph. The alternative (append the page anyway, for
+   inspectability) was rejected because a context node reaches the model on every
+   later turn, so keeping it would blow the window on every subsequent request —
+   precisely what the guard exists to prevent.
+
+2. **I deliberately broke the PRD's "the tool loop never persists" constraint,
+   because task 7's own text overrides it.** The constraints section of the PRD says
+   the loop must "never persist"; task 7 says the breadcrumb is *durable* and is
+   recorded "via `add_system_message`", which persists. Durability is the whole
+   point — the user must still see why an answer was thin after a resume — and the
+   specific instruction beats the general one. The invariant that actually matters
+   is untouched: `end_turn` remains the sole owner of how a turn *ends*; a
+   breadcrumb is a node, not an ending. `stream()`'s docstring now says this
+   explicitly instead of claiming "never persists".
+
+3. **The guard is keyed on `node.node_type == "context"`, not on
+   `call.name == "fetch"`.** Only a fetched *page* can wall the window — a search's
+   snippets are bounded by `max_results` and a failed call is one short line — and
+   dispatch renders a successful fetch as the context node (ADR-0018 §4). Keying on
+   the node also means a *failed* fetch (a system node) can never reach the guard,
+   and `node.meta["source_path"]` is guaranteed present for the message.
+
+**Tests.** Code-blind `test-spec-author`, budget "3 tests, ~25 lines of product
+code". It returned `tests/specs/conversation-window-wall.md` (C1–C6) and
+`tests/test_conversation_window_wall.py` — exactly 3 tests, one per acceptance
+clause, all kept. Red was clean: 3 failed on `NotImplementedError`, zero
+collection errors. `tests/specs/conversation-tool-loop.md` got a cross-reference.
+
+Two edits to the authored test file, both infra rather than contract, no assertion
+weakened:
+
+- Aliased the imports (`TestProvider as ScriptedProvider`, `TestSearch as
+  CannedSearch`) to silence `PytestCollectionWarning` — the same convention
+  `test_conversation_tool_loop.py` already uses. **Any new test module importing
+  these doubles must alias them.**
+- **Added `messages_seen` to `TestProvider` and one assertion using it.** The blind
+  author flagged (its ambiguity A1) that it could not reach the acceptance clause
+  "the fetch *returns the refusal string*" at all, because the double records only
+  its `tools` argument, so nothing observable proved what the model was told.
+  `TestProvider` now records each call's `messages`, and the refusal test asserts
+  the final request's `role="tool"` message carries the phrase and the URL and that
+  the page text appears in no message. This *strengthens* the suite toward the
+  acceptance floor; it is not a fix-to-pass.
+
+**Verification.** `bash scripts/check.sh` green — 715 passed (712 → +3). No
+`qa-tester` and no rendering: pure core with no UI surface, per the PRD's note on
+tasks 1–7 and PROMPT.md step 7.
+
+**Gotchas for tasks 8–11.**
+
+- **In production the wall never fires today.** `model_window()` returns `None` for
+  the default Gemma slug (verified: `model_window('openrouter/google/gemma-4-26b-a4b-it')
+  is None`), so the guard is skipped and an oversized fetch still fails with the
+  provider's own error. That is task 7's documented accepted gap (plan §4.6), not a
+  bug to chase — and it means **task 11's qa-tester brief cannot exercise the wall**
+  unless it also pins the window. The tests pin it by monkeypatching
+  `ctx.core.tokens.model_window`; the guard reads it through the module attribute at
+  call time, so that patch point works.
+- **Task 9's `on_node` can receive a `system` node for a *successful* fetch**, not
+  only for a failed tool call: a walled fetch hands the breadcrumb to `on_node`
+  where the page node would otherwise have gone. The task-6 note ("don't assume
+  every node is a search or context node") now has a second source.
+- **A walled call still spends one unit of the D7 budget** (`calls_made += 1`),
+  which is correct — a call was made — but means a model repeatedly fetching huge
+  pages exhausts its budget on refusals.

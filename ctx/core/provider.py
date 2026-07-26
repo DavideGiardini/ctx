@@ -203,7 +203,10 @@ class TestProvider:
 
     ``tools_seen`` records the ``tools`` argument of every ``stream`` call in
     order, so a caller's tool-offering decisions (offered / withheld on the final
-    round) are observable without reaching into the provider.
+    round) are observable without reaching into the provider. ``messages_seen``
+    does the same for the ``messages`` argument, which is how a test can assert
+    what the model was actually told — notably that a tool result carried an
+    explanation rather than the content it stood in for.
     """
 
     def __init__(
@@ -216,6 +219,7 @@ class TestProvider:
         self._usage = usage
         self._next_round = 0
         self.tools_seen: list[list[dict] | None] = []
+        self.messages_seen: list[list[dict]] = []
 
     async def stream(
         self,
@@ -226,6 +230,7 @@ class TestProvider:
         on_tool_calls: Callable[[list[ToolCall]], None] | None = None,
     ) -> AsyncIterator[str]:
         self.tools_seen.append(tools)
+        self.messages_seen.append(list(messages))
         scripted = self._rounds[min(self._next_round, len(self._rounds) - 1)]
         self._next_round += 1
         for token in scripted.tokens:

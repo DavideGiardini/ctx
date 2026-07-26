@@ -8,6 +8,10 @@ could break; each maps to one clause of the acceptance criterion (C8 is the one
 addition, because "a failing tool call must not blow up the turn" is called out
 as load-bearing in the intent and is the only error path the loop owns).
 
+The loop's one *other* guard — the window wall, which refuses a fetched page that
+would not fit the model's input window — has its own contract in
+`tests/specs/conversation-window-wall.md`.
+
 Domain terms used throughout:
 
 - **round** — one provider request. A turn is one or more rounds.

@@ -62,6 +62,32 @@ def _tool_call_message(text: str, calls: list[ToolCall]) -> dict:
     }
 
 
+def _tool_result_message(call_id: str, content: str) -> dict:
+    """The ``role="tool"`` message answering one tool call, in the native shape.
+
+    Built before the round-trip grows, so the very message that will be sent is
+    also the one the window wall measures — there is no second rendering that
+    could disagree with it.
+    """
+    return {"role": "tool", "tool_call_id": call_id, "content": content}
+
+
+def _window_wall_message(url: str) -> str:
+    """The single explanation a page refused by the window wall carries (D11).
+
+    One text serves both audiences, the way ``_tool_failure`` single-sources a
+    failed call's explanation: it goes back to the model as the tool result, so
+    the model knows the page is unavailable and answers from what it has, and it
+    is recorded as the user's durable breadcrumb for why the answer came up thin.
+    """
+    message = (
+        f"{url} is too large for the remaining context window, "
+        "so the page was not read."
+    )
+    logger.warning("window wall | %s", message)
+    return message
+
+
 def _derive_title(content: str) -> str:
     """Derive a conversation title from a message's content.
 
@@ -829,6 +855,21 @@ class ConversationCore:
         self._calibration = ratio
         self._usage_generation += 1
 
+    def _overflows_window(self, messages: list[dict]) -> bool:
+        """Whether sending ``messages`` would overrun the model's input window.
+
+        The local estimate (``tokens.count_messages``) against
+        ``tokens.model_window(self.model)``. litellm has no window metadata for
+        some models — including the current default — and reports ``None`` there;
+        the answer is then ``False``, because with no window to measure against
+        the guard cannot honestly fire. Such a turn falls back to the provider's
+        own error via ``end_turn(error=…)`` instead (plan §4.6, an accepted gap).
+        """
+        window = tokens.model_window(self.model)
+        if window is None:
+            return False
+        return tokens.count_messages(messages, self.model) > window
+
     async def stream(
         self,
         assistant_node: Node,
@@ -867,6 +908,14 @@ class ConversationCore:
         ordinary text by ``model_facing_form``, never natively — which is what
         keeps a search as compactable as an import (ADR-0018 §3).
 
+        **The window wall.** A fetched page is never truncated (D10), so the one
+        way it can hard-fail a turn is by not fitting the model's input window.
+        Before the page is handed back, the request it would produce is measured
+        (``_overflows_window``); over the line, the model is told the page is too
+        large instead of being given it — the same shape as a failed call, so the
+        turn still answers from what it has — the page becomes no node, and the
+        user gets a durable system breadcrumb explaining the thin answer (D11).
+
         **Empty rounds leave no bubble.** ``submit()`` creates round 1's assistant
         node up front, but rounds 2+ create theirs lazily on their first token, so
         a round that is nothing but a tool call adds no node. (A turn that *opens*
@@ -883,15 +932,17 @@ class ConversationCore:
         would skew the ratio. ``ctx_hash`` is likewise stamped once, on the first
         round's context.
 
-        This generator never touches the ``streaming`` flag and never persists:
-        every ending — clean finish, cancel, error (including a pre-stream
-        context-build failure, e.g. an unreadable ``/include``d file) — is
-        recorded by the caller through ``end_turn``, the single owner of how a
-        turn ends. A generator ``finally`` cannot own the flag: a worker
+        This generator never touches the ``streaming`` flag, and it never records
+        the turn's *ending*: every ending — clean finish, cancel, error (including
+        a pre-stream context-build failure, e.g. an unreadable ``/include``d file)
+        — is recorded by the caller through ``end_turn``, the single owner of how
+        a turn ends. A generator ``finally`` cannot own the flag: a worker
         cancelled before its first tick never runs it, which is exactly the
         stuck-flag bug ``end_turn`` retires. Cancelling mid-loop therefore leaves
         every node already appended in the graph and drops only the round in
-        flight (D12).
+        flight (D12). The window wall's breadcrumb is the one thing here that
+        persists on its own, because D11 asks for it to survive a resume; it is a
+        node, not an ending, so ``end_turn``'s ownership is untouched.
         """
         context_nodes = [n for n in self.nodes if n is not assistant_node]
         base_messages = build_context(context_nodes, self._workspace.read_file)
@@ -948,12 +999,25 @@ class ConversationCore:
                 node, result = await dispatch_tool_call(
                     call, self._search, self.conversation_id
                 )
-                self._append_to_line(node)
+                pending = _tool_result_message(call.id, result)
+                # AIDEV-NOTE: the window wall (D11) — only a *fetched page* can hit
+                # it (a search's snippets are bounded by max_results, a failed call
+                # is one short line), and dispatch renders a fetched page as the
+                # context node (ADR-0018 §4). The page node is dropped rather than
+                # appended: it never entered the graph, so nothing is mutated, and
+                # keeping it would overrun the window on every later turn too —
+                # exactly what the guard exists to prevent.
+                if node.node_type == "context" and self._overflows_window(
+                    base_messages + round_trip + [pending]
+                ):
+                    message = _window_wall_message(node.meta["source_path"])
+                    node = self.add_system_message(message)
+                    pending = _tool_result_message(call.id, message)
+                else:
+                    self._append_to_line(node)
                 if on_node is not None:
                     await on_node(node)
-                round_trip.append(
-                    {"role": "tool", "tool_call_id": call.id, "content": result}
-                )
+                round_trip.append(pending)
                 calls_made += 1
             logger.info("tool round done | calls=%d | budget=%d", calls_made, budget)
             target = None

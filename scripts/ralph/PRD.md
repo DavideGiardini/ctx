@@ -52,24 +52,6 @@ search backend is swappable by editing one config line.
 
 ## Tasks
 
-- [ ] **7 — The window-wall guard and its breadcrumb** — Before a fetched page is
-      handed back to the model, estimate the resulting request with
-      `tokens.count_messages` against `tokens.model_window(self.model)`. If it
-      would overflow, the tool returns "this page is too large for the remaining
-      context window" instead of the page (the same shape as a failed tool, D8)
-      **and** a durable system breadcrumb is recorded via `add_system_message` so
-      the user can see why the answer came up short (D11). Pages are otherwise
-      uncapped — do **not** truncate (D10). Honest limitation to preserve, not
-      fix: `model_window()` returns `None` for models litellm has no metadata for,
-      including the current default Gemma; when the window is unknown the guard is
-      skipped and the turn falls back to the provider's own error via
-      `end_turn(error=…)`. Ref: plan §4.6, D10, D11. Depends on task 6.
-      _Acceptance:_ `check.sh` green. Tests show that with a known small window a
-      fetch that would overflow returns the refusal string, appends the durable
-      system breadcrumb, and lets the turn continue to an answer; that the page is
-      never truncated on the success path; and that with `model_window()` returning
-      `None` the guard is skipped and the fetch proceeds.
-
 - [ ] **8 — Harness and test doubles for a driveable tool turn** — Extend
       `tools/agent/harness.py` so `HarnessApp` wires a `TestSearch` alongside its
       `TestProvider`, and give `ChatApp.__init__` a `search=` injection parameter
@@ -175,6 +157,7 @@ Full bodies live in `scripts/ralph/PRD-done.md`; task numbers are preserved so
 - [x] 4 — Provider seam grows function calling
 - [x] 5 — Tool dispatch: a `ToolCall` becomes a node
 - [x] 6 — The tool loop in `ConversationCore.stream()`
+- [x] 7 — The window-wall guard and its breadcrumb
 
 <!-- As tasks complete, the loop PRUNES them (PROMPT.md step 8): the finished
 task's full body is cut from here and moved to `PRD-done.md`, leaving a one-line
