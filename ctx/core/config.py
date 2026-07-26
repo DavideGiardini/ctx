@@ -50,6 +50,15 @@ _DEFAULTS: dict = {
     "import": {
         "default_prompt": DEFAULT_IMPORT_PROMPT,
     },
+    # Web search: which of litellm's bundled backends to query, how many hits
+    # to ask for, and how many tool calls one turn may make before the model
+    # has to answer from what it has (ADR-0018 §5, plan D7). Swapping backend
+    # is this one line plus that backend's key in the environment.
+    "search": {
+        "provider": "tavily",
+        "max_results": 5,
+        "max_tool_calls": 12,
+    },
     # The single UI palette — the one place every color the app draws lives, so
     # retheming means editing here (and, in future, config.json) rather than
     # hunting hex values across the CSS. Two groups:
@@ -141,6 +150,14 @@ def get_config() -> dict:
         }
     else:
         merged["import"] = copy.deepcopy(_DEFAULTS["import"])
+
+    if isinstance(user_config.get("search"), dict):
+        merged["search"] = {
+            **_DEFAULTS["search"],
+            **user_config["search"],
+        }
+    else:
+        merged["search"] = copy.deepcopy(_DEFAULTS["search"])
 
     if isinstance(user_config.get("ui"), dict):
         merged["ui"] = {**_DEFAULTS["ui"], **user_config["ui"]}

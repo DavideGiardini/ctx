@@ -86,7 +86,14 @@ def test_c2_absent_returns_baseline(config_file):
 def test_c3_baseline_shape(config_file):
     # C3
     defaults = _baseline(config_file)
-    assert set(defaults.keys()) == {"colors", "ui", "model", "compression", "import"}
+    assert set(defaults.keys()) == {
+        "colors",
+        "ui",
+        "model",
+        "compression",
+        "import",
+        "search",
+    }
 
     # C24 — the compression section carries a non-empty default_prompt string.
     assert isinstance(defaults["compression"], dict)

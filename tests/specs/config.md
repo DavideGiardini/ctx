@@ -39,7 +39,10 @@ exactly `{human, assistant, context, system}` (values are ints); a top-level `"m
 — the user-overridable default model, ADR 0006 #3); and a top-level `"compression"`
 dict with a non-empty `"default_prompt"` string (the preserve-info fallback,
 ADR-0016 A#1, task 18). *(adjudicated A3: the defaults' top level is exactly
-`{colors, ui, model, compression}` — no other top-level keys.)*
+`{colors, ui, model, compression}` — no other top-level keys.)* Amended by ctx0
+Phase 4 task 1: the top level also carries `"import"` and a `"search"` dict
+(`provider`/`max_results`/`max_tool_calls`) — the search-section contract itself
+lives in `tests/specs/search.md` C8.
 
 **C4. Never crashes on a missing file.** File absent → returns a dict, raises nothing.
 
