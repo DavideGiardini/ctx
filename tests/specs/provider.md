@@ -5,8 +5,8 @@ code-blind from intent (see `.claude/skills/write-tests`), then human-adjudicate
 Tests in `tests/test_provider.py` cite these item ids. **When behavior changes, update
 this contract first**, then the tests.
 
-`Provider` is the streaming-LLM seam: `stream(messages, model, on_usage=None) ->
-AsyncIterator[str]` yields the assistant's reply token-by-token, and
+`Provider` is the streaming-LLM seam: `stream(messages, model, on_usage=None, tools=None,
+on_tool_calls=None) -> AsyncIterator[str]` yields the assistant's reply token-by-token, and
 `check_connectivity(model) -> (ok, msg)` probes whether a model is reachable without ever
 raising. The optional `on_usage: Callable[[Usage], None]` is an **out-of-band** seam: when
 the provider reports exact token counts for the completion it invokes `on_usage` exactly
@@ -15,7 +15,8 @@ plain `str` (ADR 0015). A provider with no usage to report never calls it, so pa
 `on_usage` is always safe and never required. Two implementations exist:
 
 - **`TestProvider`** — a deterministic double that streams a fixed token list and reports
-  constant health. Covered by C1–C4 (the `TestProvider` section below).
+  constant health. Covered by C1–C4 (the `TestProvider` section below). Its scripted
+  multi-round form (`rounds=[ScriptedRound(...)]`) belongs to the tool-calling surface.
 - **`LiteLLMProvider`** — the production adapter over `litellm.acompletion`. It is the
   thin translation layer between ctx and litellm; its job is to forward the request to
   litellm asking for a stream, surface the upstream's content deltas as plain strings, and
@@ -88,6 +89,13 @@ reported, not propagated, so a model that cannot be reached degrades gracefully.
 Given an upstream probe that raises an exception carrying a recognizable message → 
 `check_connectivity(model)` returns `(False, msg)` where `ok is False` and `msg` is a string
 reflecting the failure (contains the upstream error's text). The exception does not escape.
+
+### Tool-calling seam — `tools` / `on_tool_calls` (ADR 0018)
+
+The `tools`/`on_tool_calls` half of the seam has its own contract in
+`tests/specs/provider-tools.md` (T1–T6, tests in `tests/test_provider_tools.py`): the
+`ToolCall` domain type, litellm fragment reassembly, and `TestProvider`'s scripted rounds.
+The items below stay as written — with `tools` omitted, every one of them still holds.
 
 ### Usage seam — `on_usage` callback (Task 4 / ADR 0015)
 

@@ -166,3 +166,62 @@ PRD's note on tasks 1–7 and PROMPT.md step 7. Note that adding `"search"` to
 `goes_to_model()` also puts search nodes into `build_compression_transcript`
 (labeled `User:`), which is the intended ADR-0018 §3 foldability, not a side
 effect to undo.
+
+## 2026-07-26 — task 4: provider seam grows function calling
+
+**What shipped.** `ctx/core/provider.py` only. A frozen `ToolCall(id, name,
+arguments)` is the domain type (arguments stays the raw JSON string — parsing is
+task 5's problem, D8), and `stream()` grew `tools=None, on_tool_calls=None` on the
+Protocol and both implementations. The yielded element type is still plain `str`
+(ADR-0018 §1); nothing in `ConversationCore` or the UI was touched.
+
+`LiteLLMProvider` now forwards `tools` to `acompletion` and accumulates
+`chunk.choices[0].delta.tool_calls` fragments into a private `dict[int, dict]`
+keyed by `fragment.index` — `id`/`name` assigned from whichever fragment carries
+them, `arguments` concatenated in arrival order — then fires `on_tool_calls` once
+with the calls sorted by index. Two decisions worth not re-deriving:
+- `tools=tools` is passed **unconditionally**, including `None`. litellm drops
+  `None` optional params, and the contract only requires that no *empty list* be
+  sent (an empty tool list is a different request from no tool list).
+- The `on_tool_calls` fire sits **outside** the `try/except` that maps backend
+  failures to `ProviderError`, so a callback raising isn't misreported as a
+  provider error, and a stream torn down early (cancel → `GeneratorExit`)
+  dispatches nothing.
+
+**`TestProvider` gained scripted rounds** via a frozen `ScriptedRound(tokens,
+tool_calls)`: consecutive `stream()` calls replay consecutive rounds and **the
+last round repeats** once the script runs out. That repeat rule is deliberate —
+it is what lets task 8's `SEARCHLOOP` script (a model that asks for a search
+every round, forever) be expressed with no extra flag, while a script ending in a
+text round simply settles. It also records `tools_seen` (the `tools` argument of
+every call, `None` included) so task 6 can assert "tools offered on the early
+rounds, withheld on the final one" without reaching inside the double. The legacy
+`TestProvider(tokens, usage)` form is unchanged and is just a one-round script.
+
+**Tests.** Code-blind `test-spec-author` with a budget of "4–6 tests, ~60 lines of
+product code". It returned `tests/specs/provider-tools.md` (T1–T6) and
+`tests/test_provider_tools.py`; all 6 kept — the deletion test pruned nothing,
+since T1/T2/T3/T4 are the four clauses of the acceptance floor, T5 is the
+adapter-side half of "never fires when the response ends in text" (T2 only covers
+the double), and T6 is the round-replay behavior task 6 depends on. Red was clean:
+5 failed on `NotImplementedError`, 1 (T5) passed trivially as a
+future-regression guard, zero collection errors. `tests/specs/provider.md` got a
+cross-reference to the new contract and its seam signature updated.
+
+Two edits to the authored file, both test infra rather than contract: ruff's
+import sorting/formatting, and importing the double as `TestProvider as
+CannedProvider` — importing it under its own name makes pytest emit a
+`PytestCollectionWarning` per test (16 per run). That aliasing is the house
+convention already used by `test_provider.py` and `TestSearch` in
+`test_search.py`; a future iteration adding doubles to `conftest.py` (task 8)
+should do the same rather than inventing `__test__ = False`.
+
+**Verification.** `bash scripts/check.sh` green — 695 passed (689 → +6), no
+warnings. No `qa-tester` and no rendering: pure core with no UI surface, per the
+PRD's note on tasks 1–7 and PROMPT.md step 7.
+
+**Gotcha for task 6.** The spec author flagged, and I left unpinned, that
+fragment reassembly is not tested against *out-of-order* index arrival (index 1
+opening before index 0) because no real backend emits that; the implementation
+sorts by index anyway, so a future contract item can tighten it for free if it
+ever matters.

@@ -52,27 +52,6 @@ search backend is swappable by editing one config line.
 
 ## Tasks
 
-- [ ] **4 — Provider seam grows function calling** — In `ctx/core/provider.py`
-      add a frozen `ToolCall(id, name, arguments)` dataclass (`arguments` is the
-      raw JSON string exactly as the model emitted it) and widen the seam to
-      `stream(messages, model, on_usage=None, tools=None, on_tool_calls=None)`.
-      **`stream` keeps yielding plain `str`** — do NOT widen the element type to a
-      union; ADR-0018 §1 records why, and every existing caller must be unaffected
-      when `tools` is omitted. `LiteLLMProvider` passes `tools` through to
-      `acompletion`, accumulates `chunk.choices[0].delta.tool_calls` deltas
-      internally (they arrive index-keyed with `arguments` concatenated across
-      chunks), and fires `on_tool_calls([...])` **exactly once** when the response
-      ends in tool calls — never when it doesn't. No litellm type crosses the seam.
-      `TestProvider` gains scripted per-round behavior so a turn can be driven with
-      text and/or tool calls and no network. Ref: ADR-0018 §1, plan §4.2.
-      _Acceptance:_ `check.sh` green, including mypy on the widened signature.
-      Tests show a scripted `TestProvider` fires `on_tool_calls` once with the
-      right `ToolCall`s; a plain text turn never fires it; existing
-      `stream(messages, model)` callers behave identically. For `LiteLLMProvider`,
-      a test over a stubbed chunk sequence shows argument fragments split across
-      chunks are reassembled into one `ToolCall` per index, and that the
-      empty-`choices` usage chunk still doesn't crash the loop.
-
 - [ ] **5 — Tool dispatch: a `ToolCall` becomes a node** — In
       `ctx/core/search.py` add the tool-protocol surface: `TOOL_SCHEMAS`, the
       OpenAI-format definitions for `search(query)` and `fetch(url)` with
@@ -248,6 +227,7 @@ Full bodies live in `scripts/ralph/PRD-done.md`; task numbers are preserved so
 - [x] 1 — Search backend seam + litellm `search` adapter
 - [x] 2 — `fetch(url)` on the search backend
 - [x] 3 — `Node.search` and its model-facing form
+- [x] 4 — Provider seam grows function calling
 
 <!-- As tasks complete, the loop PRUNES them (PROMPT.md step 8): the finished
 task's full body is cut from here and moved to `PRD-done.md`, leaving a one-line
