@@ -44,3 +44,25 @@ stays here for anyone auditing what a commit was supposed to do.
       no extractable content raises `SearchError` rather than returning `""`, and
       that a successful fetch returns the extracted body. Use a stubbed HTTP
       transport — no test may touch the network.
+
+- [x] **3 — `Node.search` and its model-facing form** — In
+      `ctx/models/nodes.py` add a `Node.search(query, results, conversation_id)`
+      classmethod: `role` and `node_type` both `"search"`, `content` = the
+      rendered results block the model receives, `meta["query"]` = the query and
+      `meta["hits"]` = the structured hit list. Add `"search"` to
+      `goes_to_model()`. Also add an `origin: str = "user"` parameter to the
+      existing `Node.context` factory, stamping `meta["origin"]` only when it is
+      `"model"` — a page the model fetched is a context node, and task 10 needs to
+      tell it apart from a `/include`d file. In `ctx/core/context.py` add the
+      `search` branch to `model_facing_form` (a search node contributes its
+      content under the `user` role; empty content contributes nothing) and wrap
+      its body in `<search_results query="…">\n…\n</search_results>` in
+      `build_context`, alongside the existing `<context_import>` /
+      `<conversation_summary>` wrappers. Ref: ADR-0018 §4, plan §4.4.
+      _Acceptance:_ `check.sh` green. Contract tests show the factory's shape and
+      meta vocabulary; `goes_to_model()` true for a search node; the
+      `<search_results>` wrapper appears with the query in its attribute; a search
+      node adjacent to user content **merges into the same user message** so the
+      role-alternation invariant in `build_context` still holds; an empty search
+      node contributes nothing; and `Node.context(origin="model")` stamps
+      `meta["origin"]` while the default does not.

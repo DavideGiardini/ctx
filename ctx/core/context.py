@@ -50,6 +50,11 @@ def model_facing_form(
         body contributes nothing.
       - a committed compression ``K`` contributes its summary (``content``)
         under the ``user`` role.
+      - a ``search`` node contributes its rendered results block (``content``)
+        under the ``user`` role; an empty block contributes nothing. Search
+        history is replayed as user text rather than as a native tool
+        round-trip, which is what keeps it as foldable as an import
+        (ADR-0018 §3).
       - any node that does not reach the model (``goes_to_model()`` false —
         a ``system`` breadcrumb, an ``expand`` event) contributes nothing.
     """
@@ -58,7 +63,7 @@ def model_facing_form(
     if node.node_type == "context":
         body = _context_body(node, load_file)
         return ("user", body) if body else None
-    if node.node_type == "compression":
+    if node.node_type in {"compression", "search"}:
         return ("user", node.content) if node.content else None
     return (node.role, node.content) if node.content else None
 
@@ -102,8 +107,10 @@ def build_context(
     Each node's model-facing ``(role, body)`` comes from ``model_facing_form``.
     A ``context`` node's body (its content-on-node snapshot/extract) is wrapped
     in ``<context_import source="…">`` XML; a ``compression`` node's summary is
-    wrapped in ``<conversation_summary>`` XML; both count as user-role content so
-    a summary or import coalesces with adjacent user material (ADR-0016 A#1, H6).
+    wrapped in ``<conversation_summary>`` XML; a ``search`` node's results block
+    is wrapped in ``<search_results query="…">`` XML, the query taken from
+    ``meta["query"]``. All three count as user-role content so a summary, import
+    or search coalesces with adjacent user material (ADR-0016 A#1, H6).
     Adjacent user-role content is coalesced into one user message; assistant
     nodes are appended as their own; nodes that reach nothing are skipped.
 
@@ -134,6 +141,9 @@ def build_context(
             body = f'<context_import source="{source_path}">\n{body}\n</context_import>'
         elif node.node_type == "compression":
             body = f"<conversation_summary>\n{body}\n</conversation_summary>"
+        elif node.node_type == "search":
+            query = node.meta.get("query", "")
+            body = f'<search_results query="{query}">\n{body}\n</search_results>'
 
         if role == "user":
             if messages and messages[-1]["role"] == "user":

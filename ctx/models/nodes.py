@@ -4,6 +4,26 @@ from dataclasses import dataclass, field
 from uuid import uuid4
 
 
+def _render_search_results(results: list[dict]) -> str:
+    """Render a ranked hit list as the results block the model reads.
+
+    One block per hit — ``rank. title`` / source line / snippet — in the order
+    given, blocks separated by a blank line. The source line carries the date
+    only when the backend reported one (they differ on whether they do), so a
+    date-less hit never renders a placeholder. No hits renders to ``""``, which
+    is what makes an empty search contribute nothing to the model.
+    """
+    blocks = []
+    for rank, hit in enumerate(results, start=1):
+        date = hit.get("date")
+        url = hit.get("url", "")
+        source = f"{url} ({date})" if date else url
+        blocks.append(
+            f"{rank}. {hit.get('title', '')}\n{source}\n{hit.get('snippet', '')}"
+        )
+    return "\n\n".join(blocks)
+
+
 @dataclass
 class Node:
     id: str = field(default_factory=lambda: uuid4().hex)
@@ -56,18 +76,62 @@ class Node:
             conversation_id=conversation_id,
         )
 
+    @classmethod
+    def search(
+        cls,
+        query: str,
+        results: list[dict],
+        conversation_id: str,
+    ) -> Node:
+        """Build a ``search`` node: one web search the model ran, plus its hits.
+
+        A search is its own node kind rather than a context import, because a
+        query with a ranked hit list is a genuinely different shape from a file
+        snapshot and the high-ground view must tell them apart at a glance
+        (ADR-0018 §4). ``role`` and ``node_type`` are both ``"search"``.
+
+        ``results`` is the ranked hit list, best hit first, as plain JSON-able
+        dicts with the keys ``title``, ``url``, ``snippet`` and ``date`` (the
+        date is optional — backends differ on whether they report one).
+
+        ``content`` is the **rendered results block the model receives** — this
+        factory renders it, so no call site invents its own layout. Every hit
+        contributes its rank, title, url and snippet, in ranked order, with the
+        date shown when the hit has one; ``build_context`` later wraps the whole
+        block in ``<search_results query="…">``. An empty ``results`` list
+        renders to empty content, and an empty search node contributes nothing
+        to the model (the same rule as an empty context import).
+
+        ``meta`` keys (the canonical vocabulary):
+          - ``meta["query"]`` — the query string exactly as the model asked it
+            (names the ``<search_results query="…">`` wrapper and the
+            inspector's Prompt split);
+          - ``meta["hits"]`` — the structured hit list, so the rendered block
+            never has to be re-parsed to recover the individual results.
+        """
+        return cls(
+            role="search",
+            content=_render_search_results(results),
+            node_type="search",
+            conversation_id=conversation_id,
+            meta={"query": query, "hits": list(results)},
+        )
+
     def goes_to_model(self) -> bool:
         """Whether this node's content is sent to the LLM when building context.
 
         The single source of truth for "which nodes reach the model" —
         ``build_context`` routes its inclusion decision through this predicate
         rather than re-deriving role rules (ADR 0014 #1). User/assistant turns,
-        context imports, and compression nodes reach the model; a compression
-        node stands in for the folded originals it summarizes (ADR-0016 H6).
+        context imports, compression nodes and search nodes reach the model; a
+        compression node stands in for the folded originals it summarizes
+        (ADR-0016 H6), and a search node replays its results as text so it stays
+        as foldable as an import (ADR-0018 §3).
         """
         return self.role in {"user", "assistant"} or self.node_type in {
             "context",
             "compression",
+            "search",
         }
 
     @classmethod
@@ -139,6 +203,7 @@ class Node:
         conversation_id: str,
         prompt: str = "",
         source_content: str = "",
+        origin: str = "user",
     ) -> Node:
         """Build a context-import node holding its content **on the node**.
 
@@ -164,10 +229,17 @@ class Node:
             shim (see ``context._context_body``);
           - ``meta["source_content"]`` — the raw source for prompt-mode; omitted
             for verbatim (source == content).
+          - ``meta["origin"]`` — stamped **only** when ``origin="model"``, marking
+            a page the model fetched itself (a fetched page is an import whose
+            source is a URL, ADR-0018 §4). The default ``"user"`` origin — a
+            hand-driven ``/include`` or ``/import`` — stamps nothing, so the key's
+            mere presence answers "did the model pull this in?".
         """
         meta = {"source_path": source_path, "prompt": prompt}
         if source_content:
             meta["source_content"] = source_content
+        if origin == "model":
+            meta["origin"] = origin
         return cls(
             role="context",
             content=content,

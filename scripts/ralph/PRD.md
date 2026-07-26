@@ -52,28 +52,6 @@ search backend is swappable by editing one config line.
 
 ## Tasks
 
-- [ ] **3 — `Node.search` and its model-facing form** — In
-      `ctx/models/nodes.py` add a `Node.search(query, results, conversation_id)`
-      classmethod: `role` and `node_type` both `"search"`, `content` = the
-      rendered results block the model receives, `meta["query"]` = the query and
-      `meta["hits"]` = the structured hit list. Add `"search"` to
-      `goes_to_model()`. Also add an `origin: str = "user"` parameter to the
-      existing `Node.context` factory, stamping `meta["origin"]` only when it is
-      `"model"` — a page the model fetched is a context node, and task 10 needs to
-      tell it apart from a `/include`d file. In `ctx/core/context.py` add the
-      `search` branch to `model_facing_form` (a search node contributes its
-      content under the `user` role; empty content contributes nothing) and wrap
-      its body in `<search_results query="…">\n…\n</search_results>` in
-      `build_context`, alongside the existing `<context_import>` /
-      `<conversation_summary>` wrappers. Ref: ADR-0018 §4, plan §4.4.
-      _Acceptance:_ `check.sh` green. Contract tests show the factory's shape and
-      meta vocabulary; `goes_to_model()` true for a search node; the
-      `<search_results>` wrapper appears with the query in its attribute; a search
-      node adjacent to user content **merges into the same user message** so the
-      role-alternation invariant in `build_context` still holds; an empty search
-      node contributes nothing; and `Node.context(origin="model")` stamps
-      `meta["origin"]` while the default does not.
-
 - [ ] **4 — Provider seam grows function calling** — In `ctx/core/provider.py`
       add a frozen `ToolCall(id, name, arguments)` dataclass (`arguments` is the
       raw JSON string exactly as the model emitted it) and widen the seam to
@@ -269,6 +247,7 @@ Full bodies live in `scripts/ralph/PRD-done.md`; task numbers are preserved so
 
 - [x] 1 — Search backend seam + litellm `search` adapter
 - [x] 2 — `fetch(url)` on the search backend
+- [x] 3 — `Node.search` and its model-facing form
 
 <!-- As tasks complete, the loop PRUNES them (PROMPT.md step 8): the finished
 task's full body is cut from here and moved to `PRD-done.md`, leaving a one-line

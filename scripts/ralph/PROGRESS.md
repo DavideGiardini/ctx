@@ -108,3 +108,61 @@ wants a split budget (short connect, long read), C13 has to be restated first.
 **Verification.** `bash scripts/check.sh` green — 682 passed (679 → +3). No
 `qa-tester` and no rendering: pure core with no UI surface, per the PRD's note on
 tasks 1–7 and PROMPT.md step 7.
+
+## 2026-07-26 — task 3: `Node.search` and its model-facing form
+
+**What shipped.** The graph/prompt half of the search tool, ~45 lines across two
+existing modules — no new module, no new seam. In `ctx/models/nodes.py`:
+`Node.search(query, results, conversation_id)` (role/node_type both `"search"`,
+`meta["query"]` + `meta["hits"]`), `"search"` added to `goes_to_model()`, and an
+`origin: str = "user"` parameter on `Node.context` that stamps `meta["origin"]`
+only in the `"model"` case. In `ctx/core/context.py`: `model_facing_form` folds
+`search` into the existing compression branch (both contribute `content` under the
+`user` role, empty → `None`), and `build_context` wraps the body in
+`<search_results query="…">` next to the other two wrappers. Role-alternation
+merging came for free — the body is user-role, so the existing merge path handles
+it with no new code.
+
+**Two decisions worth not re-deriving.**
+
+1. **The factory renders the results block; `results` is a list of plain dicts,
+   not `SearchHit`.** The PRD names the parameter `results` while requiring
+   `meta["hits"]` to hold "the structured hit list", so the structured form is the
+   input and the rendered `content` is derived — which keeps the rendering in one
+   place (ADR-0014: the factory is the single source of truth for the kind's
+   shape) instead of letting each call site invent a layout. Dicts rather than
+   `SearchHit` for two reasons: `meta` is `json.dumps`'d by storage, so hits must
+   be JSON-able to survive a round-trip, and `ctx/models/` is the bottom layer —
+   importing `SearchHit` from `ctx/core/search.py` would invert the layering.
+   Task 5's dispatch is what converts `SearchHit` → dict.
+2. **The rendered layout is `"{rank}. {title}\n{url} ({date})\n{snippet}"`, blocks
+   separated by a blank line, and the date is omitted entirely when the backend
+   reported none** (they differ on whether they do) so no `None` placeholder ever
+   reaches the model. Deliberately *not* pinned byte-exactly by the tests — the
+   contract asserts what the block must carry (rank order, title, url, snippet,
+   date-when-present), so the template stays free to change.
+
+**Tests.** Code-blind `test-spec-author`, given only the new signatures +
+docstrings and a prose intent statement, with an explicit budget of "5–7 tests,
+~40 lines of product code". It returned `tests/specs/search-node.md` (S1–S7) and
+`tests/test_search_node.py`; all 7 kept — each pins a distinct clause of the
+acceptance floor, so the deletion test pruned nothing. Red was clean: 7 failed
+(`NotImplementedError` / `KeyError: 'origin'`), zero collection errors. One
+authored line was fixed as test infra, not contract: `zip(roles, roles[1:])`
+tripped ruff's B905, so it gained `strict=False` (the lengths are intentionally
+unequal).
+
+**Gotcha for a future iteration.** The spec author flagged, and I left open, that
+nothing decides how a query containing `"` or `&` is escaped inside the
+`<search_results query="…">` attribute — the wrapper interpolates it raw, exactly
+as `<context_import source="…">` already does with paths. If a real model turns
+out to emit such queries, that needs its own decision plus a new contract item;
+don't "fix" it silently, since the same question applies to the existing import
+wrapper.
+
+**Verification.** `bash scripts/check.sh` green — 689 passed (682 → +7). No
+`qa-tester` and no rendering: pure core with no UI surface this iteration, per the
+PRD's note on tasks 1–7 and PROMPT.md step 7. Note that adding `"search"` to
+`goes_to_model()` also puts search nodes into `build_compression_transcript`
+(labeled `User:`), which is the intended ADR-0018 §3 foldability, not a side
+effect to undo.
