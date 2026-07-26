@@ -10,11 +10,18 @@ import json
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
 import pytest
 
 import ctx.core.config
 import ctx.core.search
-from ctx.core.search import LiteLLMSearch, SearchError, SearchHit, search_available
+from ctx.core.search import (
+    FETCH_TIMEOUT_SECONDS,
+    LiteLLMSearch,
+    SearchError,
+    SearchHit,
+    search_available,
+)
 
 # Aliased on import: pytest tries to collect any module-level ``Test*`` class in a
 # test module, and warns because the double takes constructor arguments.
@@ -188,3 +195,139 @@ def test_search_config_defaults_and_partial_override(
         "max_results": 5,
         "max_tool_calls": 12,
     }
+
+
+# A plausible blog post: chrome and promo links outside the article, five real
+# paragraphs inside it. Trafilatura needs genuine prose to call a block the main body.
+ARTICLE_PAGE = """<!DOCTYPE html>
+<html lang="en">
+<head><title>Why we store conversations as an append-only graph</title></head>
+<body>
+<header><a href="/">The Terminal Notebook</a> <a href="/archive">Archive</a></header>
+<nav><ul>
+<li><a href="#main">Skip to main content</a></li>
+<li><a href="/tags/python">Python</a></li>
+<li><a href="/tags/llm">Language models</a></li>
+</ul></nav>
+<aside class="sidebar"><h3>Elsewhere</h3><ul>
+<li><a href="/p/terminal-tricks">Ten terminal tricks</a></li>
+<li><a href="/p/rust-for-pythonistas">Rust for Pythonistas</a></li>
+<li><a href="/newsletter">Subscribe to the newsletter</a></li>
+</ul></aside>
+<article id="main">
+<h1>Why we store conversations as an append-only graph</h1>
+<p>Most chat tools keep the transcript as a mutable list of messages, and that one
+decision quietly costs them everything interesting. When you edit a turn, the version
+the model actually answered is overwritten, so afterwards nobody can explain why the
+assistant said what it said. The transcript stops being evidence and becomes a draft.</p>
+<p>An append-only graph makes a different promise: nothing already written is ever
+changed or removed. A rewind is a new branch, never a deletion, and the turns you walked
+away from stay on disk as a sibling path you can return to. Two answers to the same
+question can sit side by side instead of one silently replacing the other.</p>
+<p>Summarization works the same way. Compressing a range of turns appends a compression
+node that stands in front of the originals rather than replacing them, so the long
+version is still there when the summary turns out to have thrown away the one detail
+that mattered. Expanding it again is another append, not an undo.</p>
+<p>The honest cost is that storage only ever grows. A conversation you prune repeatedly
+never actually gets smaller on disk, and the reader has to know which nodes reach the
+model and which are historical sediment. We pay that because a conversation you cannot
+audit is a conversation you cannot trust.</p>
+<p>None of this hides the price of a long conversation from you. The token gauge stays
+the only honest signal of how much context you are carrying, and manual compaction
+stays the only lever that shrinks it. We would rather show you the number than quietly
+drop the middle of your work.</p>
+</article>
+<footer><p>Copyright 2026 The Terminal Notebook. All rights reserved.</p></footer>
+</body>
+</html>
+"""
+
+# A client-rendered app shell: chrome and empty containers, no prose to extract.
+EMPTY_PAGE = """<!DOCTYPE html>
+<html lang="en">
+<head><title>Dashboard</title></head>
+<body>
+<nav><a href="/">Home</a> <a href="/login">Log in</a></nav>
+<div id="app"></div>
+<div class="loading-spinner"></div>
+<footer><a href="/terms">Terms</a> <a href="/privacy">Privacy</a></footer>
+</body>
+</html>
+"""
+
+
+@pytest.mark.asyncio
+async def test_fetch_returns_the_whole_body_stripped_of_boilerplate() -> None:
+    """C9 + C10 + C13: full uncapped article body, redirect followed, timeout bounded."""
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path == "/r/graph":
+            return httpx.Response(
+                301,
+                headers={"Location": "https://blog.example.org/2026/append-only-graph"},
+            )
+        return httpx.Response(200, html=ARTICLE_PAGE)
+
+    backend = LiteLLMSearch(transport=httpx.MockTransport(handler))
+
+    body = await backend.fetch("http://blog.example.org/r/graph")
+
+    # C9: the article's own prose survives, from the first paragraph to the last.
+    assert "the transcript as a mutable list of messages" in body
+    assert "rewind is a new branch, never a deletion" in body
+    assert "token gauge stays" in body
+    assert "the only lever that shrinks it" in body
+
+    # C9: navigation and sidebar promo are not part of the readable body.
+    assert "Skip to main content" not in body
+    assert "Subscribe to the newsletter" not in body
+
+    # C10: the short link's redirect was followed to the canonical https URL.
+    assert [str(request.url) for request in seen] == [
+        "http://blog.example.org/r/graph",
+        "https://blog.example.org/2026/append-only-graph",
+    ]
+
+    # C13: a hung host cannot hold the turn open — the request carries the bound.
+    assert seen[0].extensions.get("timeout", {}).get("read") == FETCH_TIMEOUT_SECONDS
+
+
+@pytest.mark.asyncio
+async def test_fetch_wraps_transport_and_http_failures_in_search_error() -> None:
+    """C11: a dead host and a 404 both become SearchError; no httpx type escapes."""
+    refused = httpx.ConnectError("[Errno 111] Connection refused")
+
+    def refusing(request: httpx.Request) -> httpx.Response:
+        raise refused
+
+    with pytest.raises(SearchError) as excinfo:
+        await LiteLLMSearch(transport=httpx.MockTransport(refusing)).fetch(
+            "https://blog.example.org/2026/append-only-graph"
+        )
+    assert excinfo.value.__cause__ is refused
+
+    def not_found(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, html="<html><body><h1>404 Not Found</h1></body></html>")
+
+    with pytest.raises(SearchError):
+        await LiteLLMSearch(transport=httpx.MockTransport(not_found)).fetch(
+            "https://blog.example.org/2026/deleted-post"
+        )
+
+
+@pytest.mark.asyncio
+async def test_fetch_treats_an_empty_extraction_as_a_failure() -> None:
+    """C12: a page with no readable content raises rather than returning ""."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, html=EMPTY_PAGE)
+
+    with pytest.raises(SearchError) as excinfo:
+        await LiteLLMSearch(transport=httpx.MockTransport(handler)).fetch(
+            "https://app.example.com/dashboard"
+        )
+
+    # No library exception underlies this one — it is the module's own judgement.
+    assert excinfo.value.__cause__ is None

@@ -7,6 +7,10 @@ check, (d) a no-network test double, (e) one new config section. The items below
 ones a realistic regression to *this* code could break. I did **not** enumerate dataclass
 field storage, `Protocol` conformance, or type-level guarantees mypy already enforces.
 
+C9–C13 were added when `fetch(url)` joined the seam (PRD task 2, plan D10/D13): the
+page-extraction half is ours rather than litellm's, so its failure translation and its
+no-truncation promise are the parts a regression could break.
+
 ---
 
 C1. Any backend failure surfaces as `SearchError` with the original chained
@@ -93,6 +97,73 @@ C8. The `search` config section defaults, and partial overrides merge
             wanted to change backend, breaking search for the users most likely to
             touch the setting.
 
+C9. `fetch()` returns the whole readable body, boilerplate stripped, never truncated
+  Given:    `LiteLLMSearch(transport=...).fetch(url)` where the stub transport serves a
+            realistic article page: a `<header>`/`<nav>`, an `<aside>` of unrelated
+            promo links (including a "Subscribe to the newsletter" item), a `<footer>`,
+            and an `<article>` of five paragraph-length prose paragraphs.
+  Expect:   a non-empty `str` containing distinctive sentences from the article body —
+            from the **first** paragraph, from a middle paragraph, and from the **last**
+            paragraph — while the navigation and sidebar strings ("Skip to main
+            content", "Subscribe to the newsletter") are absent.
+  Rationale: The method's product promise is "the page body a reader would care about,
+            uncapped". The last-paragraph assertion is the truncation guard: a hidden
+            length cap is a settled non-goal, because the user's levers for an oversized
+            page are the token gauge and manual compaction, so silently dropping the
+            tail would remove exactly the content the model was asked to read. The
+            boilerplate assertions are what distinguishes extraction from a raw GET.
+  Note:     nothing is asserted about markdown syntax or whitespace — that is
+            Trafilatura's business, not this module's contract.
+
+C10. The GET follows redirects
+  Given:    the fetched URL is an `http://` short link whose first response is a `301`
+            pointing at the `https://` canonical article URL, which the stub transport
+            then serves as the article page of C9.
+  Expect:   `fetch()` returns the extracted article body (not an error and not the
+            redirect's empty body), and the transport sees a second request for the
+            canonical URL.
+  Rationale: Short links and `http`→`https` upgrades are the normal shape of a URL a
+            model lifts out of a search result; without redirect following every one of
+            them would come back as a non-2xx `SearchError` and web search would look
+            broken for the majority of real links.
+  Status:   no separate test — folded into C9's test, since the observable outcome is
+            the same returned body and splitting it would duplicate the whole page
+            fixture for one extra assertion.
+
+C11. Every fetch failure raises `SearchError`, with the library exception chained
+  Given:    (a) a transport that raises `httpx.ConnectError` (connection refused / DNS
+            failure / timeout all arrive here), and (b) a transport that answers `404`.
+  Expect:   both raise `SearchError` and nothing else — no `httpx` type escapes; in case
+            (a) `exc.__cause__` is the exact `httpx` exception instance raised.
+  Rationale: Same seam invariant as C1: the tool loop and the UI must be able to report
+            "that page could not be read" without importing `httpx`. A dead host and a
+            deleted page are both ordinary, expected outcomes of following a link the
+            model found, so neither may crash the turn with a library traceback; the
+            chain is what keeps the real cause in `~/.local/state/ctx/ctx.log`.
+
+C12. An empty extraction is a failure, not a successful fetch of nothing
+  Given:    a page with no extractable prose at all — nav, a couple of empty `<div>`s
+            and a footer of links (a client-rendered app shell, in practice).
+  Expect:   `SearchError` is raised rather than `""` returned, and `exc.__cause__` is
+            `None` (there is no library exception to chain in this branch).
+  Rationale: Returning an empty string would tell the model the fetch succeeded while
+            handing it nothing, and the model would then answer *about* a page it never
+            read. Failing loudly lets the loop try another result instead. The absent
+            `__cause__` pins that this is the module's own judgement call, not a
+            swallowed library error.
+
+C13. Each fetch carries the explicit `FETCH_TIMEOUT_SECONDS` bound
+  Given:    the successful fetch of C9, inspecting the request the stub transport
+            received.
+  Expect:   the request's effective read timeout equals the module constant
+            `FETCH_TIMEOUT_SECONDS`.
+  Rationale: "an explicit timeout so a hung host cannot hold a conversation turn open
+            forever" — an unbounded (or library-default) fetch means one slow host can
+            freeze the conversation with no way out, which is the worst failure mode of
+            a tool call the user did not explicitly request.
+  Status:   asserted inside C9's test rather than as its own test; it needs a successful
+            request and nothing more.
+
 ---
 
 ## Intent ambiguities I had to assume past (flag for a human)
@@ -109,3 +180,18 @@ C8. The `search` config section defaults, and partial overrides merge
   untested here.
 - **Does `search()` itself pre-check the key?** Unspecified. C1–C4 keep a dummy key in
   the environment so the tests exercise the mapping/wrapping path either way.
+- **How the timeout is expressed (C13).** The interface gives a single
+  `FETCH_TIMEOUT_SECONDS` float, so I assume it becomes the request's read timeout
+  (whether set on the client or per call — both land in `request.extensions["timeout"]`).
+  If the intent is a split budget — say a short connect timeout and a longer read one —
+  C13 needs restating in those terms.
+  Resolved: the implementation passes the one float as the client's whole timeout, so
+  every component (connect/read/write/pool) equals it; the read component is asserted.
+- **Whether a non-2xx chains a cause (C11).** Raising via `response.raise_for_status()`
+  chains an `httpx.HTTPStatusError`; checking the status code by hand chains nothing.
+  Both satisfy the stated intent, so C11 asserts the chained cause only for the
+  transport-error case and just the `SearchError` type for `404`.
+- **What "a page Trafilatura cannot parse" looks like.** I could not construct HTML that
+  reliably makes the extractor *raise* rather than return nothing, so that branch is
+  covered only through C12's empty-extraction outcome; if Trafilatura can genuinely
+  raise on malformed input, that path is untested.

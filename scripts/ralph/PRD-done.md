@@ -27,3 +27,20 @@ stays here for anyone auditing what a commit was supposed to do.
       env var for the configured provider; that `TestSearch` returns its canned
       hits; and that `get_config()["search"]` merges a partial user override
       without losing the other keys.
+
+- [x] **2 — `fetch(url)` on the search backend** — `uv add trafilatura httpx`
+      (never hand-edit `uv.lock`). Add `async fetch(url: str) -> str` to the
+      `SearchBackend` Protocol, to `LiteLLMSearch` (httpx GET with a timeout, then
+      Trafilatura extraction to markdown, main content only — nav/ads/sidebars
+      stripped), and to `TestSearch` (canned page text). litellm has **no**
+      page-extraction API, which is why this is ours; do not reach for a
+      backend-specific extract endpoint, because fetch must keep working whichever
+      search backend is configured (D13). No length cap — the whole extracted page
+      is returned (D10); the overflow guard is task 7's job, not this one's. Every
+      failure (HTTP error, timeout, unparseable page, empty extraction) raises
+      `SearchError`. Ref: plan §4.3, D10, D13. Depends on task 1.
+      _Acceptance:_ `check.sh` green. Unit tests show that a fetch whose HTTP layer
+      raises surfaces `SearchError` (no `httpx` type escapes), that a page yielding
+      no extractable content raises `SearchError` rather than returning `""`, and
+      that a successful fetch returns the extracted body. Use a stubbed HTTP
+      transport — no test may touch the network.

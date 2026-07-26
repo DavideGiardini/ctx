@@ -6,6 +6,8 @@ requires-python = ">=3.11"
 dependencies = [
     "textual",
     "litellm",
+    "trafilatura>=2.1.0",
+    "httpx>=0.28.1",
 ]
 
 [project.scripts]
