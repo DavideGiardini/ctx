@@ -178,3 +178,28 @@ stays here for anyone auditing what a commit was supposed to do.
       _Acceptance:_ `check.sh` green. A Pilot test drives `SEARCH …` through the
       app factory and asserts the resulting node sequence is user → assistant →
       search → assistant. No test and no harness run touches the network.
+
+- [x] **9 — Mount tool nodes mid-turn in the UI** — In `ctx/ui/app.py` pass an
+      `on_node` callback from `_stream_response` into `core.stream()` that mounts
+      each appended node with `_mount_node`, refreshes the token UI, and — when the
+      new node is an assistant node — retargets the live-stream pointers
+      (`_streaming_node`, `_stream_to_inspector`) at it, so text from rounds 2+
+      streams into the right row and, in Insert mode, into the locked inspector.
+      Then fix the invalidated one-node-per-turn assumptions: route
+      `_refresh_token_ui`'s node iteration through `_visible_nodes()` (today it
+      reads `self.core.nodes` directly, and `zip(..., strict=True)` will blow up
+      the moment the two disagree), and make `_visible_nodes()` drop **zero-content
+      assistant nodes that are not the live streaming target** — a turn opening
+      with a silent tool call leaves the `submit()`-created assistant node empty,
+      and the append-only graph cannot remove a node from the middle of the line
+      (ADR-0018 Consequences). This generalizes the phantom-row rule task 48
+      established for zero-token cancels; it is a **view** rule, so no graph
+      mutation. `describe_state` reads `_visible_nodes()` already, so its indices
+      and the weights stay in agreement. Ref: plan §4.5. Depends on tasks 6 and 8.
+      _Acceptance:_ qa-tester (verify-feature) on `tools.agent.harness:HarnessApp`:
+      submitting `SEARCH what is ctx0` shows the search node in the snapshot's
+      `nodes` **while `streaming=yes`**, not only after the turn settles; the
+      settled snapshot shows user → assistant → `node_type="search"` → assistant in
+      that order; every node carries a non-null `weight_pct` and the search node's
+      is non-zero; no empty assistant node appears; `textual_check_errors` reports
+      no crashes or worker errors. `check.sh` green.

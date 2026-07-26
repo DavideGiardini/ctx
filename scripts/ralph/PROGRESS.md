@@ -545,3 +545,88 @@ returns `True` afterwards. That is the path tasks 9–11 launch.
   `test_conversation_window_wall.py`). The new conftest `search_enabled` does the
   same job under a different name; I left them alone rather than churn ~10 test
   signatures. New tests should use `search_enabled`.
+
+## 2026-07-26 — task 9: mount tool nodes mid-turn in the UI
+
+Wired the core's `on_node` callback (task 6) into the app so a research turn
+builds up in front of the user, and fixed the two one-node-per-turn assumptions
+it invalidated. All in `ctx/ui/app.py`.
+
+**What changed.** `_stream_response` now builds an `on_node` closure and hands it
+to `core.stream()`. It mounts each appended node, and when the node is an
+*assistant* node (a lazily-created round-2+ one) it becomes the new live target:
+the `async for` body's `update_content`/`_stream_to_inspector` follow a `nonlocal
+target`, `self._streaming_node` retargets so `end_turn` stamps the node the turn
+actually finished on, and in Insert mode `_lock_inspector_to_last()` re-locks the
+inspector. `_visible_nodes()` drops empty assistant nodes; `_node_weights()` and
+`_refresh_token_ui()` both read `_visible_nodes()` instead of `core.nodes`.
+
+**Three decisions worth not re-deriving.**
+
+1. **Retarget *before* refreshing, and set `_streaming_node` before the first
+   `_refresh_token_ui()` in `_handle_submit`.** An assistant node is empty until
+   its first token, so under the new filter it is only visible *because* it is the
+   live target. Refresh first and the brand-new row is skipped by the weight loop
+   (and missing from `describe_state`) for one tick. Ordering is load-bearing in
+   both places; the two AIDEV-free inline comments say so.
+
+2. **`_visible_nodes()` keeps an empty assistant node carrying
+   `meta["error"]`.** The plan's rule is "drop zero-content assistant nodes that
+   are not the live streaming target", but an errored turn can end with zero
+   content (`ErroringProvider` raises before any token) and its "Error: …" row is
+   the *only* trace the user gets. Without the carve-out the next
+   `_rebuild_message_list()` would silently delete it. The `interrupted` case needs
+   no carve-out: `_drop_interrupted_node` already rewinds it out of `core.nodes`,
+   so both rules agree.
+
+3. **The filter tests `node_type != "message" or role != "assistant"`, not just
+   the role.** A `system` breadcrumb and an `expand` node are legitimately empty
+   or content-free and must stay.
+
+**Tests.** Code-blind `test-spec-author`, budget "2–3 tests, ~35 lines of product
+code". It returned `tests/specs/app-mid-turn-nodes.md` (C1–C5) and
+`tests/test_app_mid_turn_nodes.py` with 3 tests — all kept. I pruned one weak
+assertion (`weight_pct is None or 0 <= weight_pct <= 100`, which no plausible
+mutation survives). It deliberately left C5 (the two empty nodes that must *stay*)
+untested and flagged why; I agree for the streaming one, and the error one is
+already covered by `test_app_turn_lifecycle.py`'s durable-error test.
+
+**One deliberate change to the authored test, and it is scaffolding not
+assertions.** C1 (search row mounted *while* `streaming`) could not pass as
+written: `HarnessProvider` never awaits, so a whole multi-round scripted turn runs
+inside a single event-loop step and `pilot.pause()` only ever sees the settled
+result. I added a `GatedHarnessProvider` subclass in the test file that blocks on
+an `asyncio.Event` at the top of any round following a tool call — holding the
+turn open at exactly the moment the search node has landed. The assertions are
+untouched; the gate is released in a `finally` (a suspended turn at teardown hangs
+the suite — see `BlockingProvider`'s warning in `conftest.py`).
+
+**Verification.** `bash scripts/check.sh` green — 720 passed (717 → +3).
+`qa-tester` verify-feature on `tools.agent.harness:HarnessApp`: **PASS**. Settled
+`SEARCH` turn shows user → assistant("Let me look that up.") → `search` →
+assistant, every node non-null `weight_pct` and the search node at 72%; the
+`FETCH` turn shows no empty assistant node, contiguous indices, and its `context`
+page node before the answer; an untriggered turn is still two nodes;
+`textual_check_errors` clean. Step "snapshot mid-stream" came back **INCONCLUSIVE
+— too fast to observe**, exactly the non-yielding-double problem above; the gated
+Pilot test is the deterministic coverage for that clause. No visual check: task 9
+changes no rendering, only what is mounted and when (task 10 owns the search
+node's look).
+
+**Gotchas for tasks 10–11.**
+
+- **`_node_weights()` is now parallel to the *view*, not the graph.** Any new
+  caller must zip it against `_visible_nodes()`. `_node_signature()` and
+  `_gauge_state()` still read `core.nodes` on purpose — the gauge measures what is
+  actually sent to the model, which includes nothing the view drops (an empty node
+  contributes no tokens anyway).
+- **qa-tester cannot observe any mid-turn state through the harness**, on any
+  task. The doubles have no suspension point, so every turn settles between two
+  MCP calls. Anything mid-flight needs a Pilot test with a gated provider —
+  `GatedHarnessProvider` in `tests/test_app_mid_turn_nodes.py` is the reusable
+  shape (subclass the harness double, `await gate.wait()` where you want the
+  window, release in a `finally`).
+- **A search row currently mounts with generic styling and opens a spurious pass
+  separator** (`_SIDE` has no `"search"` entry, so it inherits the previous side —
+  and a fetched `context` node takes the *human* side mid-turn). That is task 10's
+  job, not a regression.

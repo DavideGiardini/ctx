@@ -472,8 +472,30 @@ class ChatApp(App):
     def _visible_nodes(self) -> list[Node]:
         """The node list currently rendered in the message pane (the live
         conversation). Kept as the single seam every view-facing method
-        (rendering, cursor navigation, snapshot) reads."""
-        return self.core.nodes
+        (rendering, cursor navigation, snapshot, weights) reads.
+
+        Empty assistant nodes are dropped. A turn is now several nodes
+        (ADR-0018), and one that opens on a silent tool call leaves the
+        ``submit()``-created round-1 node with no text — a phantom ``▌`` row the
+        append-only graph cannot remove from the middle of the line, so the view
+        drops it instead. This generalizes the phantom-row rule task 48
+        established for zero-token cancels; it is a **view** rule, so the graph
+        is untouched.
+
+        Two empty assistant nodes stay: the one the turn is streaming into right
+        now (it is about to have text, and its row is where the text goes), and
+        one carrying a durable ``meta["error"]`` (the "Error: …" row is the only
+        signal a failed turn leaves)."""
+        live_id = self._streaming_node.id if self._streaming_node else None
+        return [
+            node
+            for node in self.core.nodes
+            if node.content
+            or node.node_type != "message"
+            or node.role != "assistant"
+            or node.id == live_id
+            or node.meta.get("error")
+        ]
 
     # --- compression draft editor ---------------------------------------
 
@@ -922,15 +944,19 @@ class ChatApp(App):
     # --- token weights --------------------------------------------------
 
     def _node_weights(self) -> list[int | None]:
-        """Per-node weight percentages parallel to ``self.core.nodes``.
+        """Per-node weight percentages parallel to ``_visible_nodes()``.
 
         The single computation both ``describe_state`` and ``_refresh_token_ui``
         read, so the snapshot and the rendered ``--%`` slots cannot drift. Basis
         comes from config; the window denominator (only used by ``"window"``
         basis) from the active model, ``None`` when unknown.
+
+        Parallel to the *view*, not to the graph: a turn appends several nodes
+        now (ADR-0018) and the view drops the empty ones, so weighting the raw
+        list would pair every snapshot entry past the gap with the wrong node.
         """
         return tokens.weight_pct(
-            self.core.nodes,
+            self._visible_nodes(),
             self.core.model,
             self.core.read_file,
             get_config()["ui"]["weight_basis"],
@@ -974,7 +1000,7 @@ class ChatApp(App):
         node's per-node weight ``--%`` onto its message widget and the
         used-÷-window gauge (with its ``~`` marker) onto the header."""
         message_list = self.query_one(MessageList)
-        for node, pct in zip(self.core.nodes, self._node_weights(), strict=True):
+        for node, pct in zip(self._visible_nodes(), self._node_weights(), strict=True):
             try:
                 widget = message_list.query_one(f"#msg-{node.id}", MessageWidget)
             except Exception:
@@ -1173,10 +1199,12 @@ class ChatApp(App):
         user_node, assistant_node = self.core.submit(text)
         await self._mount_node(user_node)
         await self._mount_node(assistant_node)
+        # Before the refresh: the node is empty until its first token, so
+        # _visible_nodes() only keeps it once it is the live stream target.
+        self._streaming_node = assistant_node
         self._refresh_token_ui()
         if self.mode == "insert":
             self._lock_inspector_to_last()
-        self._streaming_node = assistant_node
         self._stream_worker = self._stream_response(assistant_node)
 
     def _accept_input(self) -> None:
@@ -1301,13 +1329,40 @@ class ChatApp(App):
     # point), not crash the app. The worker body handles no endings itself.
     @work(name="stream_response", exit_on_error=False)
     async def _stream_response(self, assistant_node: Node) -> None:
+        """Drive one turn: stream its text into the view and mount what it appends.
+
+        A turn is one or more rounds (ADR-0018 §2), so it can append nodes as it
+        runs — a search node, a fetched page, and the assistant node of every
+        round after the first. Each one is handed back through ``core.stream``'s
+        ``on_node`` callback and mounted *while the turn is still live*, so the
+        user watches the research happen rather than seeing it appear at the end.
+
+        An appended **assistant** node also retargets the live stream: subsequent
+        tokens render into its row, and in Insert mode the locked inspector
+        follows it, so a round-2 answer never streams into round 1's row.
+        """
         message_list = self.query_one(MessageList)
         inspector = self.query_one(DetailInspector)
         usage_gen_before = self.core.usage_generation
-        async for _token in self.core.stream(assistant_node):
-            message_list.update_content(assistant_node.id, assistant_node.content)
-            self._stream_to_inspector(inspector, assistant_node)
-        logger.info("response finalized | length=%d", len(assistant_node.content))
+        target = assistant_node
+
+        async def on_node(node: Node) -> None:
+            nonlocal target
+            await self._mount_node(node)
+            if node.role == "assistant":
+                # Retarget before refreshing: an assistant node is empty until
+                # its first token, so it is only in _visible_nodes() once it is
+                # the live target — refreshing first would skip its new row.
+                target = node
+                self._streaming_node = node
+                if self.mode == "insert":
+                    self._lock_inspector_to_last()
+            self._refresh_token_ui()
+
+        async for _token in self.core.stream(assistant_node, on_node):
+            message_list.update_content(target.id, target.content)
+            self._stream_to_inspector(inspector, target)
+        logger.info("response finalized | length=%d", len(target.content))
         if self.core.usage_generation != usage_gen_before:
             # This turn produced a fresh provider anchor: the gauge is now
             # exact for the current node set. Remember it so a later change
