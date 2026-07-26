@@ -87,3 +87,25 @@ stays here for anyone auditing what a commit was supposed to do.
       a test over a stubbed chunk sequence shows argument fragments split across
       chunks are reassembled into one `ToolCall` per index, and that the
       empty-`choices` usage chunk still doesn't crash the loop.
+
+- [x] **5 — Tool dispatch: a `ToolCall` becomes a node** — In
+      `ctx/core/search.py` add the tool-protocol surface: `TOOL_SCHEMAS`, the
+      OpenAI-format definitions for `search(query)` and `fetch(url)` with
+      **neutral** descriptions (plain capability statements — no "you should
+      search when…" guidance; D6, and the exact wording is in plan §D6's preview),
+      and a dispatch function taking a `ToolCall`, a `SearchBackend` and a
+      conversation id, returning `(node, result_text)` where `result_text` is what
+      goes back to the model in the `role="tool"` message. A `search` call builds
+      a `Node.search`; a `fetch` call builds `Node.context(page, source_path=url,
+      origin="model")` — a fetched page is an import whose source is a URL, not a
+      new node kind (ADR-0018 §4). **Every failure path returns an error string to
+      the model rather than raising** (D8): unknown tool name, malformed or
+      missing JSON arguments, and any `SearchError`. No retries. The failed call
+      still produces a node so nothing is hidden from the user. Ref: ADR-0018 §4,
+      plan D8. Depends on tasks 1–3.
+      _Acceptance:_ `check.sh` green. Tests show a `search` call produces a
+      `node_type="search"` node plus result text; a `fetch` call produces a
+      `node_type="context"` node whose `source_path` is the URL and whose
+      `meta["origin"]` is `"model"`; a backend raising `SearchError` yields an
+      error string and a node, never an exception; malformed JSON arguments and an
+      unknown tool name each yield an error string, never an exception.

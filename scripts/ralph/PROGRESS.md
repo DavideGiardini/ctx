@@ -225,3 +225,67 @@ fragment reassembly is not tested against *out-of-order* index arrival (index 1
 opening before index 0) because no real backend emits that; the implementation
 sorts by index anyway, so a future contract item can tighten it for free if it
 ever matters.
+
+## 2026-07-26 — task 5: tool dispatch, a `ToolCall` becomes a node
+
+**What shipped.** `ctx/core/search.py` only, plus its contract/tests. A new
+"tool protocol surface" section at the bottom of the module:
+
+- `TOOL_SCHEMAS` — the two OpenAI-format function definitions. Descriptions are
+  neutral capability statements (D6): *what* each tool does, nothing about *when*
+  to reach for it. `_TOOL_NAMES` is derived from the schemas so the roster the
+  model is offered and the roster dispatch accepts cannot drift apart.
+- `async dispatch_tool_call(call, backend, conversation_id) -> (node, result_text)`.
+  A `search` call → `Node.search(query, [asdict(hit) …], conversation_id)`, and
+  `result_text` is the node's own rendered content, so the model and the user see
+  the same block. A `fetch` call → `Node.context(page, source_path=url,
+  origin="model")`, and `result_text` is the bare page, uncapped (D10).
+
+**The decision worth not re-deriving: what node a *failed* tool call produces.**
+The task said "the failed call still produces a node" without saying which kind.
+Every failure path (unknown tool name, arguments that aren't a JSON object,
+missing/non-string/empty required argument, `SearchError` from either method) goes
+through one `_tool_failure()` helper that returns a **durable
+`Node.system(message, conversation_id=…)`** and hands the model the *same* string.
+An empty `Node.search`/`Node.context` was the alternative and is worse: a system
+node is the only one of the three where `goes_to_model()` is `False`, so the error
+the model already saw once as a tool result does not linger in the context of
+every later turn — while still being visible in the right pane and surviving a
+resume. Ordering inside dispatch is name-check → JSON parse → argument extract, so
+an invented tool name is reported as such even when its arguments are also broken.
+
+Two smaller calls: `_string_argument()` treats missing / non-string / blank as the
+same failure (nothing to search for), which is what keeps `{"query": 42}` from
+reaching the backend; and an *empty* hit list (a legitimate successful search)
+returns `No results for "…"` as the tool text rather than the node's empty
+content, because a blank `role="tool"` message tells the model nothing. Only
+`SearchError` is caught — the seam already promises every backend failure arrives
+as that type, and swallowing bare `Exception` here would hide real bugs from task
+6's `end_turn(error=…)` path.
+
+**Tests.** Code-blind `test-spec-author`, budget "4–6 tests, ~70 lines of product
+code". It returned `tests/specs/search-dispatch.md` (C1–C5) and
+`tests/test_search_dispatch.py` — 5 test functions / 9 cases, all kept: C1–C4 are
+the four clauses of the acceptance floor (C3 parametrized over all four malformed
+shapes, C4 over both backend methods) and C5 pins the wire contract plus D6
+neutrality via a guidance-phrase blocklist. Red was clean: 9 failed on
+`NotImplementedError`/empty `TOOL_SCHEMAS`, zero collection errors. Only edits to
+the authored file were lint (two over-long snippet strings, ruff import sort and
+format) — no assertion touched. `tests/specs/search.md` got a cross-reference to
+the new contract.
+
+Note the blind author's ambiguity #1: C2 asserts the page is *contained in*
+`result_text`, not equal to it, because "the page goes back whole" left room for a
+wrapper. The implementation returns the bare page; if task 6 or 7 ever wants a
+`Fetched <url>` header the test still passes, which is deliberate slack.
+
+**Verification.** `bash scripts/check.sh` green — 704 passed (695 → +9). No
+`qa-tester` and no rendering: pure core with no UI surface this iteration, per the
+PRD's note on tasks 1–7 and PROMPT.md step 7.
+
+**Gotcha for task 6.** `dispatch_tool_call` never persists and never touches the
+`streaming` flag — it only *builds* the node. The loop owns appending it to the
+line, `await on_node(node)`, and persistence. Also: a failure node is a `system`
+node, so the loop must not assume every node dispatch hands back is model-facing
+(e.g. don't add its content to the turn-local message list — the `result_text`
+return value is the only thing that goes to the model).

@@ -7,6 +7,10 @@ check, (d) a no-network test double, (e) one new config section. The items below
 ones a realistic regression to *this* code could break. I did **not** enumerate dataclass
 field storage, `Protocol` conformance, or type-level guarantees mypy already enforces.
 
+The module's *tool-protocol* surface — `TOOL_SCHEMAS` and `dispatch_tool_call()` — has
+its own contract in `tests/specs/search-dispatch.md` (PRD task 5); nothing about it is
+restated here.
+
 C9–C13 were added when `fetch(url)` joined the seam (PRD task 2, plan D10/D13): the
 page-extraction half is ours rather than litellm's, so its failure translation and its
 no-truncation promise are the parts a regression could break.

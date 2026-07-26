@@ -5,8 +5,9 @@ module adds no per-backend layer of its own (ADR-0018 §5) — only the domain
 types, the seam, and the wrapping that keeps litellm out of the rest of ctx.
 """
 
+import json
 import os
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Protocol
 
 import httpx
@@ -15,6 +16,8 @@ from litellm import asearch
 
 from ctx.core.config import get_config
 from ctx.core.log import logger
+from ctx.core.provider import ToolCall
+from ctx.models.nodes import Node
 
 # How long a single page fetch may take before it becomes a SearchError. Long
 # enough for a slow news site, short enough that a hung host does not hold the
@@ -220,6 +223,149 @@ class TestSearch:
         if self._error is not None:
             raise self._error
         return self._page
+
+
+# The two tools offered to the model, in OpenAI function-calling format. The
+# descriptions are deliberately neutral capability statements: they say what each
+# tool does and nothing about when to reach for it, so the model's own judgment
+# about whether a question needs the web stays unbiased (D6).
+TOOL_SCHEMAS: list[dict] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "search",
+            "description": (
+                "Search the web. Returns ranked results, each with a title, a URL, a "
+                "short extract, and a publication date where the source reports one."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search query.",
+                    },
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "fetch",
+            "description": (
+                "Retrieve one web page and return its readable text in full, with "
+                "navigation, adverts and sidebars stripped out."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "The address of the page to retrieve.",
+                    },
+                },
+                "required": ["url"],
+            },
+        },
+    },
+]
+
+# The tool roster, single-sourced from the schemas the model was actually offered.
+_TOOL_NAMES = frozenset(schema["function"]["name"] for schema in TOOL_SCHEMAS)
+
+
+async def dispatch_tool_call(
+    call: ToolCall, backend: SearchBackend, conversation_id: str
+) -> tuple[Node, str]:
+    """Run one tool call the model asked for, as a node plus its reply text.
+
+    Returns ``(node, result_text)``: the node to append to the conversation
+    graph, and the text that goes back to the model in the ``role="tool"``
+    message answering ``call.id``.
+
+    A ``search`` call becomes a ``Node.search`` carrying the query and its
+    ranked hits. A ``fetch`` call becomes ``Node.context(page,
+    source_path=url, origin="model")`` — a fetched page is an import whose
+    source happens to be a URL, not a node kind of its own (ADR-0018 §4).
+
+    **Never raises.** Every failure — an unknown tool name, arguments that are
+    not valid JSON, a missing or non-string argument, and any ``SearchError``
+    from the backend — comes back as an explanatory ``result_text`` for the
+    model, which is free to try something else; the turn continues and nothing
+    is retried (D8). A failed call still produces a node, so the attempt stays
+    visible to the user rather than vanishing.
+    """
+    if call.name not in _TOOL_NAMES:
+        offered = ", ".join(sorted(_TOOL_NAMES))
+        return _tool_failure(
+            f'"{call.name}" is not an available tool. The tools are: {offered}.',
+            conversation_id,
+        )
+
+    try:
+        arguments = json.loads(call.arguments)
+    except ValueError:
+        arguments = None
+    if not isinstance(arguments, dict):
+        return _tool_failure(
+            f'The arguments for "{call.name}" were not a valid JSON object.',
+            conversation_id,
+        )
+
+    if call.name == "search":
+        query = _string_argument(arguments, "query")
+        if query is None:
+            return _tool_failure(_missing_argument(call.name, "query"), conversation_id)
+        try:
+            hits = await backend.search(query)
+        except SearchError as exc:
+            return _tool_failure(f'The search for "{query}" failed: {exc}', conversation_id)
+        node = Node.search(query, [asdict(hit) for hit in hits], conversation_id)
+        # An empty hit list renders to empty content; the model still needs to be
+        # told *something* happened, or the tool message would arrive blank.
+        return node, node.content or f'No results for "{query}".'
+
+    url = _string_argument(arguments, "url")
+    if url is None:
+        return _tool_failure(_missing_argument(call.name, "url"), conversation_id)
+    try:
+        page = await backend.fetch(url)
+    except SearchError as exc:
+        return _tool_failure(f"Fetching {url} failed: {exc}", conversation_id)
+    # A fetched page is an import whose source is a URL (ADR-0018 §4), stamped
+    # origin="model" so the view can tell it from a hand-driven /include.
+    node = Node.context(page, source_path=url, conversation_id=conversation_id, origin="model")
+    return node, page
+
+
+def _string_argument(arguments: dict, name: str) -> str | None:
+    """The named argument when the model supplied a usable string, else ``None``.
+
+    A missing key and a key holding a number (or an empty string) are the same
+    problem from here: there is nothing to search for or fetch.
+    """
+    value = arguments.get(name)
+    if isinstance(value, str) and value.strip():
+        return value
+    return None
+
+
+def _missing_argument(tool: str, name: str) -> str:
+    return f'The "{tool}" tool needs a non-empty "{name}" string argument.'
+
+
+def _tool_failure(message: str, conversation_id: str) -> tuple[Node, str]:
+    """A failed tool call: one explanation, told to the model and to the user.
+
+    The user-facing half is a durable system breadcrumb rather than an empty
+    search/context node, and that choice is load-bearing: a system node never
+    reaches the model, so the failure the model already saw once as a tool result
+    does not linger in the context of every later turn.
+    """
+    logger.warning("tool call failed | %s", message)
+    return Node.system(message, conversation_id=conversation_id), message
 
 
 def search_available() -> bool:
