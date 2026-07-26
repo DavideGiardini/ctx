@@ -116,6 +116,28 @@ async def _apply_post_variant(app, pilot, variant: str | None) -> None:
                 sep.set_bridged(False)
         await pilot.pause()
 
+    if variant in ("search-generic", "search-styled"):
+        # task-10: a search row must read as part of the assistant's pass and be
+        # tellable from an import at a glance. `search-generic` reproduces the
+        # pre-task-10 look exactly as it shipped in task 9 — no entry in _SIDE, so
+        # the row inherited the previous side and opened a spurious separator; no
+        # entry in the palette or _KIND_GLYPH, so it wore the system grey and no
+        # glyph. `search-styled` leaves the real (fixed) rendering untouched.
+        if variant == "search-generic":
+            from textual.color import Color
+
+            from ctx.ui.widgets.message_list import MessageList, MessageWidget, Separator
+
+            message_list = app.query_one(MessageList)
+            for widget in app.query(MessageWidget):
+                if widget._role != "search":
+                    continue
+                widget._row_body().styles.border_left = ("solid", Color.parse("#737373"))
+                for glyph in widget.query(".kind"):
+                    glyph.display = False
+                await message_list.mount(Separator(), before=widget)
+        await pilot.pause()
+
     if variant in ("bar-outer", "bar-inner"):
         # task-49: the grey gap bridging two selected rows must show NO colored
         # left bar. `bar-outer` reproduces the pre-fix bleed by drawing a colored
@@ -197,6 +219,17 @@ async def _state_k_inspector(pilot) -> None:
         await pilot.pause()
 
 
+async def _state_search_turn(pilot) -> None:
+    """A settled research turn: the ``SEARCH`` trigger drives the harness through
+    user -> assistant lead-in -> search -> assistant answer, so the new search row
+    sits mid-turn between two assistant bubbles (task 10). Parked in Edit mode
+    with nothing selected, so no selection highlight competes with the row's own
+    bar for the eye."""
+    await _submit_turn(pilot, "SEARCH what is ctx0")
+    await pilot.press("escape")  # -> Edit mode
+    await pilot.pause()
+
+
 async def _state_range_selection(pilot) -> None:
     """A multi-node vim-style range selection (``v`` + ``down``) — the task-41
     case: the selected run (and the gaps between rows) should read as one
@@ -220,6 +253,7 @@ STATES: dict[str, Callable[[object], Awaitable[None]]] = {
     "k-after-assistant": _state_k_after_assistant,
     "k-inspector": _state_k_inspector,
     "range-selection": _state_range_selection,
+    "search-turn": _state_search_turn,
 }
 
 
@@ -265,6 +299,23 @@ FIXTURE: list[dict] = [
         ),
         "bad": "bar-outer",
         "good": "bar-inner",
+    },
+    {
+        # Not a bug the loop shipped but the task-10 acceptance itself, kept here
+        # so the pair cannot rot: the flushness half is the same pixel-level class
+        # as task-40, and the glyph half is unreadable through cairosvg's fallback
+        # font (a deterministic assertion in test_message_row.py pins the ⌕).
+        "bug": "task-10-search-row-inside-the-assistant-turn",
+        "state": "search-turn",
+        "intent": (
+            "The search row must sit flush inside the assistant's turn with no "
+            "blank line splitting it off from the reply above it, and must carry "
+            "its own distinctly-colored left bar (violet — not the assistant's "
+            "orange, the user's blue or an import's green) plus a glyph in the "
+            "right-docked meta slot beside its weight %."
+        ),
+        "bad": "search-generic",
+        "good": "search-styled",
     },
     # task-39 (K bar colour) is intentionally NOT the primary fixture bug — it is a
     # one-line palette assertion (ctx_snapshot colors:) that needs no vision. It is

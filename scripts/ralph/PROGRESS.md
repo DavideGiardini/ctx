@@ -630,3 +630,95 @@ node's look).
   separator** (`_SIDE` has no `"search"` entry, so it inherits the previous side —
   and a fetched `context` node takes the *human* side mid-turn). That is task 10's
   job, not a regression.
+
+## 2026-07-26 — task 10: render the search node in the high-ground view
+
+Gave the `search` node kind its place in the right pane and the Detail Inspector,
+and stopped either web-tool node from splitting one research turn into three fake
+ones. Almost all of it is new entries in the existing role→config tables — the one
+real shape change is `_pass_starts`.
+
+**What changed.** `ctx/core/config.py`: `colors.search = "#a855f7"` and
+`ui.truncation_lines.search = 2`. `message_row.py`: `search` in `_TRUNCATION_KEY`
+(its own key, not the 1-line `system` catch-all), in `_TALL_ROLES`, and `⌕` in
+`_KIND_GLYPH`; the `("system", "context")` plain-text branch became a named
+`_PLAIN_TEXT_ROLES` that includes `search`. `detail_inspector.py`: `search` in
+`_SPLIT_VIEW_TYPES`. `app.py`: a `search` branch in `_node_view` (query → Prompt,
+rendered hits → Source, Output empty so it hides). `tools/agent/visual.py`: a
+`search-turn` state and a `search-generic`/`search-styled` variant pair.
+
+**Three decisions worth not re-deriving.**
+
+1. **`_pass_starts` now takes `list[Node]`, not `list[str]` roles**, with a new
+   module-level `_side(node, prev_side)` owning side membership. A `context`
+   node's side is no longer decided by its role alone: a `/include` is a human
+   action (human side) but a page the model fetched (`meta["origin"] == "model"`)
+   belongs to the assistant's pass. There is no way to express that from a role
+   string. Two existing test files were adapted mechanically to the new signature
+   (`test_message_list_passes.py` gained a `nodes(*roles)` helper;
+   `test_message_list_separators.py` reuses its own `_FACTORY`) — a deliberate
+   interface change, not tests bent to pass.
+
+2. **Violet (`#a855f7`) for the search bar, not the context green.** ADR-0018 §4's
+   asymmetry made concrete: a fetched page *is* an import and keeps the green, but
+   a ranked hit list is a different shape and must be tellable from one at a
+   glance. Violet is the furthest hue from the four already in use. Note this is
+   the same hex the `k-violet` fixture variant uses as the *wrong* K colour — the
+   two never co-occur (that variant renders `committed-K`, which has no search
+   node), but don't "fix" one thinking it's the other.
+
+3. **A search's row content renders as plain `Static`, not `Markdown`.** Its
+   content is the rendered hit list, and a Markdown pass would renumber the
+   `1. title` lines into its own ordered list.
+
+`_SPLIT_LABELS` needed no `search` entry: the lookup falls back to the context
+labels, and Prompt / Source / Output reads correctly for query / hits / nothing.
+
+**Tests.** Code-blind `test-spec-author`, budget "3 tests, 4 max, ~45 lines of
+product code". It returned `tests/specs/search-rendering.md` (C1–C4) and
+`tests/test_search_rendering.py` with 3 tests; all four of its flagged ambiguities
+were guessed right (consecutive assistant nodes group into one pass; a user
+`context` + `user` query group in either order). I pruned two redundant
+assertions from C1 (`truncation_key("system") == "system"` and the `!=`
+restatement — both implied by `== "search"`) and **added** the one thing
+`splits_visible` cannot catch: that the query lands in Prompt and the hits in
+Source rather than in each other's split. Separately I added two assertions to
+`test_message_row.py` — `search` joins its `_ROLES` parametrization (bar colour +
+plain-text content) and a new test pinning the glyph *character*, because the
+visual gate provably cannot read it (below). +7 tests overall, 720 → 727.
+
+**Visual verification (step 7 — this was a rendering task, so I looked).**
+Rendered state `search-turn` at 120x30 in both directions:
+`--variant search-generic` (forced defect: reproduces the task-9 look — spurious
+`Separator` before the search row, system-grey `solid` bar, `.kind` hidden) and
+`--variant search-styled` (the real render). Intent judged: *"the search row sits
+flush inside the assistant's turn with no blank line splitting it off, carries its
+own distinctly-colored left bar and a ⌕ glyph in the meta slot, and is clamped to
+two lines with its weight % on the right edge."*
+
+- `search-generic` → **FAIL** (correctly): blank line above the search row, no
+  coloured bar, no glyph beside the 72%.
+- `search-styled` → **PASS**: the row sits flush under "Let me look that up." with
+  no gap, wears a clearly violet bar against the orange assistant bars above and
+  below it and the blue user bar, is clamped to two lines (title + URL; the
+  snippet and second hit are cut), and shows `72%` at the right edge with the
+  glyph slot occupied just left of it.
+
+The pair discriminates, so the verdict is trustworthy. Added it to `FIXTURE` (and
+the `VISUAL-FIXTURE.md` table) so the variants cannot rot.
+
+No `qa-tester`: task 10 changes only how an already-working turn *renders*, and
+`tools/agent/visual.py` sees current on-disk code by construction while the
+in-process MCP server does not. Task 11 owns the end-to-end app drive.
+
+**Gotchas for task 11.**
+
+- **The `⌕` glyph is invisible to the visual gate.** cairosvg's fallback font has
+  no U+2315, so every PNG shows tofu there — `test_message_row.py::
+  test_search_row_carries_the_lookup_glyph` is the only check on which character
+  it is. Don't "fix" a tofu you see in a render.
+- **`search-turn` parks in Edit mode, which re-selects the tip**, so the final
+  assistant row carries the grey selection background in that render. That is the
+  state script, not a styling bug.
+- **`_pass_starts` takes nodes now.** Any new caller must pass `Node`s;
+  `MessageList._apply_separators` does (`[w.node for w in widgets]`).

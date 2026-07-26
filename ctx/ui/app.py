@@ -316,6 +316,18 @@ class ChatApp(App):
                 prompt=node.meta.get("prompt", ""),
                 output=node.content,
             )
+        if node.node_type == "search":
+            # Search 3-split (ADR-0018 §4): Prompt = the query the model asked,
+            # Source = the rendered hit list it got back. Output stays empty and
+            # hides, so the pane collapses to two splits exactly as a verbatim
+            # /include does — a search has no separate edited extract.
+            return NodeView(
+                node_id=node.id,
+                role=node.role,
+                node_type=node.node_type,
+                content=node.content,
+                prompt=node.meta.get("query", ""),
+            )
         if node.node_type == "context":
             # Import 3-split (ctx0 §5): Prompt = the instruction (hidden when
             # empty — a verbatim include), Source = the raw file, Output = the

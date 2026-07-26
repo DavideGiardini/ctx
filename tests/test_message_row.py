@@ -19,7 +19,12 @@ from ctx.models.nodes import Node
 from ctx.ui.widgets.message_row import MessageRow, truncation_key
 from tools.agent.snapshot import render
 
-_ROLES = ["user", "assistant", "context", "system", "compression"]
+_ROLES = ["user", "assistant", "context", "system", "compression", "search"]
+
+# Roles whose compact row renders as plain text rather than Markdown: their
+# content is data (a file snapshot, a ranked hit list, a breadcrumb), and a
+# Markdown pass would reflow it.
+_PLAIN_TEXT = ("system", "context", "search")
 
 
 def _make_node(role: str) -> Node:
@@ -29,6 +34,11 @@ def _make_node(role: str) -> Node:
         "context": lambda: Node.context("file body", "file.txt", "c1"),
         "system": lambda: Node.system("a notice", "c1"),
         "compression": lambda: Node.compression("a summary", "c1", ["x"]),
+        "search": lambda: Node.search(
+            "what is ctx0",
+            [{"title": "ctx0", "url": "https://e.invalid", "snippet": "a hit"}],
+            "c1",
+        ),
     }[role]
     return factory()
 
@@ -77,9 +87,9 @@ async def test_two_line_layout(role):
         row = app.query_one(MessageRow)
         # Meta slot: a weight cell.
         assert row.query_one(".weight", Static) is not None
-        # Content: plain Static for system/context, Markdown for turn roles.
+        # Content: plain Static for the data roles, Markdown for turn roles.
         content = row.query_one(".content")
-        if role in ("system", "context"):
+        if role in _PLAIN_TEXT:
             assert isinstance(content, Static) and not isinstance(content, Markdown)
         else:
             assert isinstance(content, Markdown)
@@ -110,6 +120,16 @@ async def test_compression_row_carries_a_kind_glyph():
         row = app.query_one(MessageRow)
         glyph = row.query_one(".kind", Static)
         assert str(glyph.render()).strip() != ""
+
+
+async def test_search_row_carries_the_lookup_glyph():
+    # The one part of task 10's visual acceptance the agent's eye cannot check:
+    # cairosvg's fallback font has no ⌕, so the rendered PNG shows tofu and only
+    # this assertion pins which character the meta slot actually carries.
+    app = _Host(_make_node("search"))
+    async with app.run_test(size=(80, 24)):
+        glyph = app.query_one(MessageRow).query_one(".kind", Static)
+        assert str(glyph.render()).strip() == "⌕"
 
 
 async def test_context_row_has_no_kind_glyph():

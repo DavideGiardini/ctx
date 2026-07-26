@@ -29,6 +29,7 @@ _TRUNCATION_KEY = {
     "user": "human",
     "assistant": "assistant",
     "context": "context",
+    "search": "search",
     "system": "system",
     # A compression summary stands in for a run of turns; truncate it like an
     # assistant reply (there is no separate "compression" truncation config).
@@ -47,13 +48,18 @@ def truncation_key(role: str) -> str:
 
 # Roles rendered as first-class turns: a "tall" left border (thick when the
 # cursor selects them). Others (system) get a plain "solid" border.
-_TALL_ROLES = ("user", "assistant", "context", "compression")
+_TALL_ROLES = ("user", "assistant", "context", "compression", "search")
 
 # A per-role kind glyph shown in the meta slot. A compression summary shares the
 # context-import green bar (task 39), so it carries a distinct glyph (Σ = the
 # "sum"/summary of a folded run) to stay visually distinguishable from an
-# imported file.
-_KIND_GLYPH = {"compression": "Σ"}
+# imported file. A search carries ⌕ so a web lookup reads as one at a glance.
+_KIND_GLYPH = {"compression": "Σ", "search": "⌕"}
+
+# Roles whose content is data, not prose: rendered as plain text so a Markdown
+# pass cannot reflow it. A search's ranked hit list would otherwise turn its
+# "1. title" lines into a renumbered ordered list.
+_PLAIN_TEXT_ROLES = ("system", "context", "search")
 
 
 def display_content(node: Node) -> str:
@@ -145,7 +151,7 @@ class MessageRow(Vertical):
                 if glyph:
                     yield Static(glyph, classes="kind")
                 yield Static("--%" if self._shows_weight() else "", classes="weight")
-            if self._role in ("system", "context"):
+            if self._role in _PLAIN_TEXT_ROLES:
                 yield Static(self._content or "", classes="content")
             else:
                 yield Markdown(self._content or "▌", classes="content")

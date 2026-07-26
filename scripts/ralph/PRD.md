@@ -52,39 +52,6 @@ search backend is swappable by editing one config line.
 
 ## Tasks
 
-- [ ] **10 — Render the search node in the high-ground view** — Give the new node
-      kind its place in the right pane and the inspector. In `ctx/core/config.py`
-      add a `colors.search` entry and a `ui.truncation_lines.search` entry (2
-      lines, matching the other first-class turns). In
-      `ctx/ui/widgets/message_row.py` add `"search"` to `_TRUNCATION_KEY` and
-      `_TALL_ROLES` and give it a kind glyph in `_KIND_GLYPH` (`⌕`), the way
-      `compression` carries `Σ`. In `ctx/ui/widgets/message_list.py` map
-      `_SIDE["search"] = "assistant"` — a search is model-invoked, so it belongs to
-      the assistant's pass, unlike a `/include`d context node — and make the side
-      lookup treat a `context` node with `meta["origin"] == "model"` (a fetched
-      page, task 3) as assistant-side too, so neither opens a spurious new pass
-      mid-turn. Add `"search"` to `_SPLIT_VIEW_TYPES` in
-      `ctx/ui/widgets/detail_inspector.py` and a `search` branch to `_node_view` in
-      `ctx/ui/app.py` putting the query in the Prompt split and the rendered
-      results in the Source split (Output stays empty and hides, exactly as a
-      verbatim `/include` collapses). Add a `search-turn` state to
-      `tools/agent/visual.py`'s `STATES` covering a settled `SEARCH` turn. Ref:
-      plan §4.4, ADR-0018 §4. Depends on task 9.
-      _Acceptance (visual — you must look, per PROMPT.md step 7):_ render
-      `search-turn` with `tools/agent/visual.py` and judge against this sentence —
-      *"the search row sits flush inside the assistant's turn with no blank line
-      splitting it off, carries its own distinctly-colored left bar and a ⌕ glyph
-      in the meta slot, and is clamped to two lines with its weight % on the right
-      edge."* Verify your eye in both directions on a forced-defect variant before
-      trusting a PASS, and record the state, the intent and the verdict in
-      `PROGRESS.md`. _Deterministic floor:_ `check.sh` green plus unit tests that
-      `truncation_key("search") == "search"`, that `_pass_starts` puts **no**
-      separator before a search node following an assistant node nor before a
-      `context` node with `meta["origin"] == "model"` (and still puts one before a
-      `/include`d context node), and a snapshot assertion that a selected search
-      node reports `detail.view == "context"` with the prompt and content splits
-      visible.
-
 - [ ] **11 — End-to-end verification of the phase** — Run the full ten-step
       qa-tester brief in `docs/ctx0 Phase 4 Plan — Web search.md` §5.2 verbatim
       (verify-feature mode on `tools.agent.harness:HarnessApp`), including both
@@ -117,6 +84,7 @@ Full bodies live in `scripts/ralph/PRD-done.md`; task numbers are preserved so
 - [x] 7 — The window-wall guard and its breadcrumb
 - [x] 8 — Harness and test doubles for a driveable tool turn
 - [x] 9 — Mount tool nodes mid-turn in the UI
+- [x] 10 — Render the search node in the high-ground view
 
 <!-- As tasks complete, the loop PRUNES them (PROMPT.md step 8): the finished
 task's full body is cut from here and moved to `PRD-done.md`, leaving a one-line

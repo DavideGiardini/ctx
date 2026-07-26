@@ -115,6 +115,7 @@ def test_c3_baseline_shape(config_file):
         "system",
         "context",
         "compression",
+        "search",
         # UI chrome colors, surfaced to the CSS as $ctx-* variables.
         "selection",
         "seam",
@@ -124,7 +125,13 @@ def test_c3_baseline_shape(config_file):
         assert isinstance(value, str)
 
     truncation = defaults["ui"]["truncation_lines"]
-    assert set(truncation.keys()) == {"human", "assistant", "context", "system"}
+    assert set(truncation.keys()) == {
+        "human",
+        "assistant",
+        "context",
+        "search",
+        "system",
+    }
     for value in truncation.values():
         assert isinstance(value, int)
 

@@ -6,9 +6,9 @@ from textual.widgets import Static
 from ctx.models.nodes import Node
 from ctx.ui.widgets.message_row import _TALL_ROLES, MessageRow
 
-# Which "conversation pass" a role belongs to. context imports are always
-# human-invoked (/include), so they take the human side; only system nodes
-# inherit the previous node's side, resolved positionally (see _pass_starts).
+# Which "conversation pass" a role belongs to. A hand-driven context import
+# (/include) takes the human side; only system nodes inherit the previous node's
+# side, resolved positionally (see _pass_starts and _side).
 _SIDE = {
     "user": "human",
     "assistant": "assistant",
@@ -16,15 +16,33 @@ _SIDE = {
     # A K node folds a range that stood in the assistant's context; treat it as
     # the assistant side for conversation-pass margins.
     "compression": "assistant",
+    # A search is model-invoked (there is no /search command), so it belongs to
+    # the assistant's pass — unlike a /include'd context node.
+    "search": "assistant",
 }
 
 
-def _pass_starts(roles: list[str]) -> list[bool]:
-    """For an ordered list of node roles, return whether each node begins a new
+def _side(node: Node, prev_side: str | None) -> str | None:
+    """Which conversation pass side *node* belongs to, or ``prev_side`` when it
+    inherits positionally (a system breadcrumb).
+
+    The single source of truth for side membership, and the reason
+    :func:`_pass_starts` reads nodes rather than bare roles: a ``context`` node's
+    side is not decided by its role alone. A hand-driven ``/include`` is a human
+    action and takes the human side, but a page the *model* fetched mid-turn
+    (``meta["origin"] == "model"``, ADR-0018 §4) is part of the assistant's pass —
+    so it must not open a new one in the middle of a research turn.
+    """
+    if node.node_type == "context" and node.meta.get("origin") == "model":
+        return "assistant"
+    return _SIDE.get(node.role, prev_side)
+
+
+def _pass_starts(nodes: list[Node]) -> list[bool]:
+    """For an ordered list of nodes, return whether each node begins a new
     conversation pass. A pass is a human turn (query + its context imports) or an
-    assistant turn (response + its imports); context nodes take the human side
-    (they come from /include) and system nodes inherit the side of the preceding
-    node. The first node is never a pass start.
+    assistant turn (response, its searches and the pages it fetched); side
+    membership is :func:`_side`'s call. The first node is never a pass start.
 
     This is the single source of truth for turn boundaries: :class:`MessageList`
     puts exactly one :class:`Separator` (a blank line) before each row that starts
@@ -39,9 +57,9 @@ def _pass_starts(roles: list[str]) -> list[bool]:
     """
     starts: list[bool] = []
     prev_side: str | None = None
-    for role in roles:
-        side = _SIDE.get(role, prev_side)
-        if role == "compression":
+    for node in nodes:
+        side = _side(node, prev_side)
+        if node.role == "compression":
             starts.append(prev_side is not None)
         else:
             starts.append(prev_side is not None and side != prev_side)
@@ -191,7 +209,7 @@ class MessageList(VerticalScroll):
         for sep in list(self.query(Separator)):
             await sep.remove()
         widgets = list(self.query(MessageWidget))
-        starts = _pass_starts([w._role for w in widgets])
+        starts = _pass_starts([w.node for w in widgets])
         for widget, is_start in zip(widgets, starts, strict=True):
             if is_start:
                 await self.mount(Separator(), before=widget)

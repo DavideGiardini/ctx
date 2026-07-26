@@ -83,6 +83,11 @@ _DEFAULTS: dict = {
         # human-side, model-facing injections); the row's kind glyph (≡) is what
         # keeps a summary distinguishable from an imported file (task 39).
         "compression": "#22c55e",
+        # A search the model ran gets its own hue rather than sharing the context
+        # green: a fetched page *is* an import (same green), but a ranked hit list
+        # is a different shape and must be tellable from one at a glance
+        # (ADR-0018 §4). Violet is the furthest hue from the four already in use.
+        "search": "#a855f7",
         "selection": "#3a3a3a",
         # Fixed white rather than an ANSI name: "ansi_white" is a light grey in
         # most palettes and "ansi_bright_white" varies by theme. The rules are
@@ -99,6 +104,7 @@ _DEFAULTS: dict = {
             "human": 2,
             "assistant": 2,
             "context": 2,
+            "search": 2,
             "system": 1,
         },
         # Basis for the per-node weight % shown in the UI. "context" expresses

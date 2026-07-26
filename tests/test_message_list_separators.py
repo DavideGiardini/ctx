@@ -98,7 +98,7 @@ async def test_each_turn_boundary_gets_exactly_one_blank():
 async def test_separator_sits_before_exactly_each_pass_start(roles):
     # The single invariant: a Separator precedes a row iff _pass_starts says that
     # row begins a new pass. Never a leading blank (the first row is never a start).
-    starts = _pass_starts(roles)
+    starts = _pass_starts([_FACTORY[r]() for r in roles])
     expected: list[str] = []
     for role, is_start in zip(roles, starts, strict=True):
         if is_start:

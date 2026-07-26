@@ -60,8 +60,10 @@ _SPLITS = {
 
 # Node types rendered as the 3-split view (vs. the standard Markdown view). A
 # compression K reuses the context view's split machinery (browse/maximize/1-2-3)
-# with per-type labels (ADR-0016, task 10): Prompt / Originals / Summary.
-_SPLIT_VIEW_TYPES = ("context", "compression")
+# with per-type labels (ADR-0016, task 10): Prompt / Originals / Summary. A search
+# reuses the *context* labels verbatim — its query is the Prompt and its ranked
+# hits the Source, so no third label set is needed (ADR-0018 §4).
+_SPLIT_VIEW_TYPES = ("context", "compression", "search")
 
 # Split captions per node type. A compression K carries none: its three splits
 # read for themselves (the drafting instruction, the folded rows, the summary),

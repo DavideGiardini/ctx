@@ -54,6 +54,14 @@ async def test_k_inspector_selects_the_k():
     assert selected["node_type"] == "compression"
 
 
+async def test_search_turn_puts_a_search_node_between_two_assistant_nodes():
+    # The task-10 adjacency: a search row mid-turn, between the lead-in and the
+    # answer — the state whose flushness and bar colour the agent's eye judges.
+    _svg, state = await capture("search-turn")
+    roles = [n["role"] for n in state["nodes"]]
+    assert roles == ["user", "assistant", "search", "assistant"]
+
+
 async def test_range_selection_spans_multiple_nodes():
     # The task-41 case: a contiguous multi-node vim-style range.
     _svg, state = await capture("range-selection")
@@ -80,6 +88,8 @@ def test_fixture_entries_are_well_formed():
         "range-grey",
         "bar-outer",
         "bar-inner",
+        "search-generic",
+        "search-styled",
     }
     for entry in FIXTURE:
         assert entry["state"] in STATES
