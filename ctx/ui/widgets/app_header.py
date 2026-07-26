@@ -23,12 +23,12 @@ class AppHeader(Container):
         height: 1;
         layers: logo labels;
     }
-    /* CTX spans the full header width and centers, so its middle glyph lands on
-       the body's horizontal center — the same column as the pane divider. It
-       lives on its own layer so the model/gauge box widths can never shift it
-       (the earlier flex layout only aligned by rounding luck). Model/gauge text
-       use the config muted color ($ctx-muted): $text-muted (ansi_default 50%)
-       renders full-strength because the dim attribute only kicks in below 50%. */
+    /* CTX spans the full header width and centers, then ``align_logo`` nudges it
+       onto the seam column. It lives on its own layer so the model/gauge box
+       widths can never shift it (the earlier flex layout only aligned by rounding
+       luck). Model/gauge text use the config muted color ($ctx-muted):
+       $text-muted (ansi_default 50%) renders full-strength because the dim
+       attribute only kicks in below 50%. */
     AppHeader #hdr-logo {
         layer: logo;
         width: 100%;
@@ -53,31 +53,33 @@ class AppHeader(Container):
     }
     """
 
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._logo_offset: int | None = None
+
     def compose(self) -> ComposeResult:
         yield Static("CTX", id="hdr-logo")
         yield Static("", id="hdr-model")
         yield Static(self._gauge(None), id="hdr-context")
 
-    def on_resize(self) -> None:
-        self._align_logo()
+    def align_logo(self, column: int) -> None:
+        """Sit the logo's middle glyph on ``column`` — the pane seam.
 
-    def _align_logo(self) -> None:
-        """Sit the CTX logo's middle glyph exactly on the pane divider.
+        The caller passes the seam's real column rather than the header working
+        it out: the header has no business knowing how the body splits, and every
+        version of that guess has eventually gone stale (it used to assume two
+        1fr panes divided by a border, which rounding alone broke on odd widths).
 
-        The body is two 1fr panes with a 1-cell ``border-right`` on the left one
-        (app.css), so the divider column is always ``width // 2 - 1``. A plain
-        ``content-align: center`` puts the 3-char logo's middle glyph at
-        ``(width - 3) // 2 + 1`` — which matches the divider on even widths but
-        lands one cell right of it on odd widths. Nudge the logo by that exact
-        delta (0 or -1) so it aligns at every terminal width, not just even ones.
+        ``content-align: center`` puts the 3-glyph logo's middle at
+        ``(width - 3) // 2 + 1``; the offset is whatever closes the gap from there.
         """
-        w = self.size.width
-        if w <= 0:
+        if column < 0 or self.size.width <= 0:
             return
-        divider = w // 2 - 1
-        centered_glyph = (w - 3) // 2 + 1
-        logo = self.query_one("#hdr-logo", Static)
-        logo.styles.offset = (divider - centered_glyph, 0)
+        offset = column - ((self.size.width - 3) // 2 + 1)
+        if offset == self._logo_offset:
+            return
+        self._logo_offset = offset
+        self.query_one("#hdr-logo", Static).styles.offset = (offset, 0)
 
     def set_model(self, model: str) -> None:
         self.query_one("#hdr-model", Static).update(model or "")

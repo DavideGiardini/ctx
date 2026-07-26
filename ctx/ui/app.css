@@ -6,13 +6,16 @@ Screen {
 #body {
     height: 1fr;
 }
-/* Pane seams use the config seam color ($ctx-seam; see config.py + ChatApp.
-   get_css_variables): under the ansi-dark theme $surface resolves to
+/* The seam owns its column (PaneSeam, not a pane's border-right) so the
+   horizontal rules can join it. Config seam color ($ctx-seam; see config.py +
+   ChatApp.get_css_variables): under the ansi-dark theme $surface resolves to
    transparent, which would erase the divider. */
+#pane-seam {
+    color: $ctx-seam;
+}
 #detail {
     width: 1fr;
     height: 1fr;
-    border-right: solid $ctx-seam;
 }
 #conversation {
     width: 1fr;
@@ -25,34 +28,49 @@ Screen {
 /* The input area docks to the bottom of the right pane (not the Screen),
    keeping the input inside the conversation pane. Suggestions + input sit in
    normal flow inside it (compose order places the suggestions above the
-   input) — docking each one directly would overlap them. */
+   input) — docking each one directly would overlap them. The top border is the
+   seam between the conversation and everything the user is composing, so it
+   rides above the suggestions popup too when that opens. */
 #input-area {
     dock: bottom;
     height: auto;
+    border-top: solid $ctx-seam;
 }
 #command-suggestions {
     color: $text-muted;
     padding: 0 1;
-    border-top: solid $primary;
     height: auto;
     display: none;
 }
-/* Terminal-native prompt line: no border, no reserved box — one row with a
-   "> " marker, transparent against the terminal background. */
+/* Terminal-native prompt line: no border, no reserved box — a "> " marker
+   beside the text, transparent against the terminal background. Height is auto
+   so the row grows with the wrapped input. */
 #input-line {
-    height: 1;
+    height: auto;
 }
+/* Pinned to one row so the marker stays on the first line of a grown input,
+   shell-prompt style, instead of stretching down beside it. */
 #prompt-marker {
     width: 2;
+    height: 1;
     color: $text-muted;
 }
+/* Grows line by line with the wrapped text, then scrolls internally rather than
+   eating the conversation above it. */
 InputBar {
-    height: 1;
+    height: auto;
+    max-height: 10;
     border: none;
     padding: 0;
     background: transparent;
+    scrollbar-size-vertical: 1;
 }
 InputBar:focus {
     border: none;
+    background: transparent;
+}
+/* TextArea highlights the line under the cursor; across a bare prompt line that
+   reads as a stray bar, so flatten it. */
+InputBar .text-area--cursor-line {
     background: transparent;
 }

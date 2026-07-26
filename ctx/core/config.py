@@ -75,7 +75,10 @@ _DEFAULTS: dict = {
         # keeps a summary distinguishable from an imported file (task 39).
         "compression": "#22c55e",
         "selection": "#3a3a3a",
-        "seam": "ansi_bright_black",
+        # Fixed white rather than an ANSI name: "ansi_white" is a light grey in
+        # most palettes and "ansi_bright_white" varies by theme. The rules are
+        # foreground glyphs, so a fixed color costs no terminal transparency.
+        "seam": "#ffffff",
         "muted": "ansi_bright_black",
     },
     "ui": {

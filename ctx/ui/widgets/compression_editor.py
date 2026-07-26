@@ -27,8 +27,6 @@ class CompressionEditor(Container):
         display: none;
         width: 1fr;
         height: 1fr;
-        /* Config seam color ($ctx-seam) — $surface is transparent under the ansi theme. */
-        border-right: solid $ctx-seam;
     }
     CompressionEditor #compress-prompt { height: 1fr; }
     CompressionEditor #compress-output { height: 2fr; }

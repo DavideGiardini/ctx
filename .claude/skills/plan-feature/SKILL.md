@@ -26,7 +26,7 @@ and `/ralph-tasks` (to decompose the agreed plan for the autonomous loop).
   decision. Check the actual current date; don't assume your memory is current.
   Say what you searched and what you found that changed (or confirmed) the design.
 - **One decision at a time, no premature convergence.** Keep going back and forth
-  with the user until every open branch is resolved. Recommend, don't just
+  with the user until every functional open branch is resolved. Recommend, don't just
   enumerate — but the user decides.
 
 ## Process
@@ -73,11 +73,14 @@ divergence, propose the specific edit, and let the user decide.
 ### 4. Grill until every decision is made
 Run the interview loop (lean on `/grilling`). Drive the conversation back and
 forth, using `AskUserQuestion` for concrete forks, until none of these are open:
-scope and out-of-scope, UX / interaction (keys, commands, modes), data/state
-changes, module placement and interface shape, error and edge-case behavior,
-migration/back-compat, and any external dependency choices (informed by step 2).
-Present trade-offs with a recommendation each time. Do not move on while a
-load-bearing question is unanswered — if the user is unsure, help them decide.
+scope and out-of-scope, UX / interaction (keys, commands, modes), error and
+edge-case behavior, migration/back-compat. Present trade-offs with a recommendation
+each time. Do not move on while a load-bearing question is unanswered, if the user
+is unsure, help them decide.
+Follow you CLAUDE.md instructions to understand what to ask the user and what to
+decide yourself: the user owns the functional layer, you own the technical layer.
+The only exception is NLP (anything touching LLM-core). When a technical decision
+has functional consequences, bring it to the user.
 
 ### 5. Define the test plan (mandatory)
 A feature is not planned until you've said exactly how it will be verified. Write

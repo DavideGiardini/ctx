@@ -14,7 +14,7 @@ _EDIT_HEAD = "↑↓ Nav  v Select  c Compress"
 _EDIT_TAIL = "i/Esc Insert  Tab Pane  1/2/3 Splits  ^C Cancel"
 
 _HINTS = {
-    "insert": "Esc Edit  / Commands  ^C Cancel",
+    "insert": "Esc Edit  / Commands  ⇧↵/⌥↵ Newline  ^C Cancel",
     "edit": f"{_EDIT_HEAD}  {_EDIT_TAIL}",
     "browse": "↑↓ Move  Enter Select  1/2/3 Open  Esc Back  Tab Conversation",
     "maximized": "↑↓/PgUp/PgDn Scroll  1/2/3 Switch  Esc Back  Tab Conversation",

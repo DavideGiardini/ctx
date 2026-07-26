@@ -16,14 +16,15 @@ A stranger installs ctx0 and, on day one, prefers it to a web chat app:
 - [x] **chats** — streaming turns that cannot be broken by a second submit,
       a cancel, a provider error, or `/new`/`/resume` mid-stream *(Phase 1 —
       done 2026-07-21, `end_turn` single-owner lifecycle)*
-- [ ] **sees the whole conversation** — the dual-pane high-ground view renders
-      predictably, with one owner for geometry *(Phase 2)*
-- [ ] **compacts** — condense any span of turns into an editable node that is
+- [x] **sees the whole conversation** — the dual-pane high-ground view renders
+      predictably, with one owner for geometry *(Phase 2 — done 2026-07-26,
+      subtraction pass + separator-owned turn spacing)*
+- [x] **compacts** — condense any span of turns into an editable node that is
       all the model sees, reversibly *(shipped; surface finalized in Phase 2)*
-- [ ] **imports** — point at a file with an instruction; only the editable
-      extract enters the context *(Phase 3)*
-- [ ] **searches the web** — the model calls built-in search; results are
-      nodes in the same view *(Phase 4)*
+- [x] **imports** — point at a file with an instruction; only the editable
+      extract enters the context *(Phase 3 — done 2026-07-26)*
+- [ ] **searches the web** — the model calls built-in search and fetch; results
+      are nodes in the same view *(Phase 4)*
 - [ ] **is a product** — system prompt, install story, README, config
       *(Phase 5)*
 
@@ -104,31 +105,38 @@ applied to the code.
   qa-tester verify-feature + `check.sh` green.
 
 ### Phase 4 — Built-in web search
-- **Goal:** the model can call `search(query)`; results come back as nodes in
-  the high-ground view (spec §4.4, §7).
-- **Approach:** provider seam grows function calling (first shape change since
-  ADR-0015 — design carefully); one internal search abstraction with 2–3
-  swappable backends behind a config line + API key; a provider interface,
-  not a plugin system.
+- **Goal:** the model can call `search(query)` and `fetch(url)`; results come
+  back as nodes in the high-ground view (spec §4.4, §7).
+- **Approach:** provider seam grows function calling via an `on_tool_calls`
+  callback (ADR-0018); litellm's own `asearch` supplies the swappable-backend
+  abstraction, so it is adopted rather than built; `fetch` is ours
+  (httpx + Trafilatura). Tool history replays as text, not natively, so tool
+  nodes stay compactable (ADR-0018).
 - **Depends on:** Phase 1 (turn lifecycle must absorb tool-call round-trips);
-  independent of Phase 3. **Size:** L.
-- **Design status:** **needs a `plan-feature` session** (open: tool-call
-  rendering as nodes, retry policy, search-result weight in token accounting).
-- **Execution mode:** to decide after the design session.
-- **Done:** a question that needs the web gets a searched, cited answer;
-  results visible as nodes with weights; backend swappable by config;
-  qa-tester verify-feature + `check.sh` green.
+  independent of Phase 3. **Size:** M–L (down from L — the backend abstraction
+  came for free).
+- **Design status:** settled — `docs/ctx0 Phase 4 Plan — Web search.md`
+  (planning session 2026-07-26) + ADR-0018.
+- **Execution mode:** Ralph loop; PRD via `/ralph-tasks` from the plan doc.
+- **Done:** a question that needs the web gets a researched answer; searches
+  and fetched pages visible as nodes with weights, compactable like any other
+  node; backend swappable by config; qa-tester verify-feature + `check.sh`
+  green.
 
 ### Phase 5 — System prompt + shipping polish
 - **Goal:** ctx0 is a product someone installs on day one.
 - **Approach:** one system prompt actually reaching the LLM (today none does),
   from config; install story + README for a stranger; API key via env var or
-  flat config (spec §8 — no wizard).
+  flat config (spec §8 — no wizard). Inherits from Phase 4: the system prompt
+  is where citation of web sources is instructed, and the README is where the
+  search-backend key is documented (Phase 4 ships search silently absent
+  without one).
 - **Depends on:** Phases 1–4. **Size:** M.
 - **Design status:** settled enough; confirm details at phase start.
 - **Execution mode:** to decide at phase start.
 - **Done:** clean-machine install → configured key → first useful conversation
-  exercising all four verbs, following only the README.
+  exercising all four verbs, following only the README; a web-backed answer
+  cites its sources.
 
 ## 6. Out of scope
 

@@ -69,10 +69,10 @@ async def test_second_submit_mid_stream_refused_and_typed_text_kept(app_factory)
 
         # The user types ahead and hits Enter mid-stream.
         bar = app.query_one(InputBar)
-        bar.value = "typed-ahead follow-up"
+        bar.text = "typed-ahead follow-up"
         await app.on_input_bar_submitted(InputBar.Submitted("typed-ahead follow-up"))
 
-        assert bar.value == "typed-ahead follow-up"  # refusal never clears
+        assert bar.text == "typed-ahead follow-up"  # refusal never clears
         assert app.core.streaming  # live turn undamaged
         assert [n.id for n in app.core.nodes] == nodes_before  # nothing appended
 
@@ -81,7 +81,7 @@ async def test_second_submit_mid_stream_refused_and_typed_text_kept(app_factory)
         await app.workers.wait_for_complete()
         assert not app.core.streaming
         app.core._provider = scripted
-        await app.on_input_bar_submitted(InputBar.Submitted(bar.value))
+        await app.on_input_bar_submitted(InputBar.Submitted(bar.text))
         await app.workers.wait_for_complete()
         user_texts = [n.content for n in app.core.nodes if n.role == "user"]
         assert user_texts == ["long question", "typed-ahead follow-up"]

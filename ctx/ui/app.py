@@ -8,7 +8,7 @@ from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
 from textual.css.query import NoMatches
 from textual.timer import Timer
-from textual.widgets import Input, Static, TextArea
+from textual.widgets import Static, TextArea
 from textual.worker import Worker, WorkerState
 
 from ctx.core import tokens
@@ -33,6 +33,7 @@ from ctx.ui.widgets.include_screen import ImportScreen, IncludeScreen
 from ctx.ui.widgets.input_bar import InputBar
 from ctx.ui.widgets.message_list import MessageList, MessageWidget
 from ctx.ui.widgets.message_row import truncation_key
+from ctx.ui.widgets.pane_seam import RULE_CLASS, PaneSeam
 
 # How long the Detail Inspector render waits after the last cursor move before
 # it re-parses the selected node's Markdown. Every move just restarts this
@@ -123,6 +124,10 @@ class ChatApp(App):
         # it; unlike a durable breadcrumb it is NOT a graph node. ``None`` = none
         # shown yet; reset on a conversation switch.
         self._last_hint: str | None = None
+        # Seam and header, held from on_mount so the idle tick that keeps the
+        # chrome tracking the layout costs nothing (see ``on_idle``).
+        self._seam: PaneSeam | None = None
+        self._header: AppHeader | None = None
         logger.info("app initialized | default_model=%s", self.core.model)
 
     def get_css_variables(self) -> dict[str, str]:
@@ -147,11 +152,12 @@ class ChatApp(App):
         with Horizontal(id="body"):
             yield DetailInspector(id="detail")
             yield CompressionEditor(id="compression-editor")
+            yield PaneSeam(id="pane-seam")
             with Vertical(id="conversation"):
                 yield MessageList(id="messages")
                 # Suggestions + input share one docked container so they stack
                 # in normal flow (docking both directly would overlap them).
-                with Container(id="input-area"):
+                with Container(id="input-area", classes=RULE_CLASS):
                     yield Static("", id="command-suggestions")
                     # Terminal-native prompt line: a "> " marker beside a
                     # borderless input, not a bordered GUI text box.
@@ -167,33 +173,41 @@ class ChatApp(App):
         # under this theme $surface/$panel/$boost resolve to *transparent* —
         # seams and highlights need explicit ansi_* colors.
         self.theme = "ansi-dark"
+        self._seam = self.query_one(PaneSeam)
+        self._header = self.query_one(AppHeader)
         self.core.setup()
         self.query_one(InputBar).focus()
         self.query_one(AppHeader).set_model(self.core.model)
         self.query_one(AppFooter).set_mode("insert")
         self._lock_inspector_to_last()
 
+    def on_idle(self) -> None:
+        # The chrome that has to track the layout re-checks here, because nothing
+        # notifies it: a grown input or a hidden split changes no geometry of the
+        # seam's own, and the header cannot see where the body ended up splitting.
+        # Both calls are no-ops unless something actually moved. Idle fires hard
+        # during a stream, hence the held references rather than queries.
+        if self._seam is None or self._header is None:
+            return
+        self._seam.sync()
+        self._header.align_logo(self._seam.region.x)
+
     # --- command suggestions overlay ------------------------------------
 
-    def on_input_changed(self, event: Input.Changed) -> None:
-        if event.input is not self.query_one(InputBar):
+    def on_text_area_changed(self, event: TextArea.Changed) -> None:
+        # The draft editor's two splits are TextAreas as well and their changes
+        # bubble through here; only the prompt line drives the command menu.
+        input_bar = self.query_one(InputBar)
+        if event.text_area is not input_bar:
             return
         suggestions = self.query_one("#command-suggestions", Static)
-        if not event.value.startswith("/"):
-            suggestions.display = False
+        suggestions.display = input_bar.menu_active
+        if not input_bar.menu_active:
             return
-        if " " in event.value:
-            suggestions.display = False
-            return
-        suggestions.display = True
-        input_bar = self.query_one(InputBar)
         for i, cmd in enumerate(InputBar.COMMANDS):
-            if cmd.startswith(event.value):
+            if cmd.startswith(input_bar.text):
                 input_bar._selected_command = i
                 break
-        else:
-            if event.value == "/":
-                input_bar._selected_command = 0
         self._update_suggestions()
 
     def _update_suggestions(self) -> None:
@@ -1056,7 +1070,7 @@ class ChatApp(App):
             },
             "context_gauge": {"pct": gauge_pct, "approximate": gauge_approximate},
             "truncation": truncation,
-            "input": input_bar.value,
+            "input": input_bar.text,
             "command_menu": command_menu,
             "colors": get_config()["colors"],
             "nodes": node_states,
@@ -1161,7 +1175,7 @@ class ChatApp(App):
         """Clear the input bar — the acceptance side of submit (the bar itself
         never clears; a refused submit keeps the typed text)."""
         with contextlib.suppress(Exception):
-            self.query_one(InputBar).value = ""
+            self.query_one(InputBar).text = ""
 
     def _update_model_label(self) -> None:
         with contextlib.suppress(Exception):

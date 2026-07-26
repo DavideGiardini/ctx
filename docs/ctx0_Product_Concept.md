@@ -57,8 +57,8 @@ Point at a file, give an instruction (e.g., "pull out just the API signatures").
 ### 4.3 compact(range, prompt)
 Select a span of turns, give an instruction (or use a default). The AI drafts a condensed node; you edit it; on commit it replaces those turns in what the model sees. The context percentage drops accordingly. **Reversible** via `:expand` (see §4.5).
 
-### 4.4 search(query)
-A **built-in** web search. The model can call it; results come back into the conversation as nodes, rendered in the same high-ground view as everything else. Search is hardwired, not a plugin — but the backend is swappable (see §7).
+### 4.4 search(query) / fetch(url)
+**Built-in** access to the web, as one verb in two steps. The model can call `search(query)` to get back ranked extracts, and `fetch(url)` to read one of those pages in full when an extract is not enough. Both come back into the conversation as nodes, rendered in the same high-ground view as everything else — a search result set is its own node kind; a fetched page is simply an import whose source is a URL rather than a file (§4.2). Web access is hardwired, not a plugin — but the backend is swappable (see §7).
 
 ### 4.5 :expand (reversibility)
 Any compaction can be reversed. `:expand` on a compacted node restores the original turns and removes the condensed node from the context. Reversibility is what makes users brave enough to compact aggressively — without it, the one distinctive action is a one-way door and people hesitate to use it.
@@ -102,7 +102,7 @@ Everything below is in the north-star ctx concept and is **intentionally absent*
 - **RAG pull, search-over-KB, and push imports.** ctx0's import is a direct, instructed file condense (§4.2). KB-wide retrieval is a separate product.
 - **Staleness indicators, snapshot-vs-live (`gD`), re-import.** Imports are static snapshots; that is enough at moment zero. (This apparatus depended on deep-dive, which is already cut.)
 - **Assistants** (project-level behavior presets). One system prompt.
-- **Tools / MCP subsystem** (global registry, project activation, assistant invocation, `/`-invocation). Replaced by one built-in, backend-swappable search (§7).
+- **Tools / MCP subsystem** (global registry, project activation, assistant invocation, `/`-invocation). Replaced by two built-in, backend-swappable web tools — search and fetch (§4.4, §7).
 - **Branching, sub-chats, indexing.** A single linear conversation.
 - ~~**The 3-split context inspector.**~~ **Kept — corrected 2026-07-11.** The original cut rationale ("no RAG prompt/output triads to display") was wrong: ctx0's own condensed nodes (import and compact output) carry exactly a prompt/source/output triad, and the 3-split is how the left pane "shows what was condensed" (§5) — it is the thing that makes cutting deep-dive safe. See ADR-0017.
 - **The context-transparency surface** (drift `Δ` marker, the full-screen diff view, per-turn context reconstruction). Built for full ctx in Sprint 3b; ctx0 deletes the reading surface but **keeps stamping the underlying data** (`created_seq`, `ctx_hash`) so the feature can return later without a migration seam and with honest history. Middle compaction stays available without it. See ADR-0017.

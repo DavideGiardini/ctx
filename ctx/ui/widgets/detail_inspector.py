@@ -21,6 +21,7 @@ from textual.widgets import Markdown, Static
 
 from ctx.models.nodes import Node
 from ctx.ui.widgets.message_row import MessageRow
+from ctx.ui.widgets.pane_seam import RULE_CLASS
 
 
 @dataclass(frozen=True)
@@ -126,10 +127,10 @@ class DetailInspector(Container):
             yield Markdown("", id="detail-standard-md")
             yield Static("", id="detail-standard-text")
         with Vertical(id="detail-context"):
-            with _Split(id="detail-prompt"):
+            with _Split(id="detail-prompt", classes=RULE_CLASS):
                 yield Static("Prompt", classes="split-label", id="detail-prompt-label")
                 yield Static("", id="detail-prompt-text")
-            with _Split(id="detail-content"):
+            with _Split(id="detail-content", classes=RULE_CLASS):
                 yield Static("Content", classes="split-label", id="detail-content-label")
                 yield Static("", id="detail-content-text")
                 yield Vertical(id="detail-content-rows")

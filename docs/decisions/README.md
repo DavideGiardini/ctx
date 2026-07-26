@@ -44,3 +44,4 @@ don't rewrite.
 | [0015](0015-usage-off-the-stream.md) | Report provider token usage via an `on_usage` callback | Accepted |
 | [0016](0016-append-only-conversation-graph.md) | Conversation state is an append-only node graph (no op log, no soft-delete) | Accepted |
 | [0017](0017-ctx0-rescope.md) | Re-scope to ctx0: ship a smaller, complete product | Accepted |
+| [0018](0018-tool-calling-on-the-provider-seam.md) | Tool calling on the provider seam, and tool history replayed as text | Accepted |
