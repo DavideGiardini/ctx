@@ -63,9 +63,12 @@ _SPLITS = {
 # with per-type labels (ADR-0016, task 10): Prompt / Originals / Summary.
 _SPLIT_VIEW_TYPES = ("context", "compression")
 
-_SPLIT_LABELS = {
+# Split captions per node type. A compression K carries none: its three splits
+# read for themselves (the drafting instruction, the folded rows, the summary),
+# and captions only cost lines in a narrow pane.
+_SPLIT_LABELS: dict[str, dict[str, str]] = {
     "context": {"prompt": "Prompt", "content": "Source", "output": "Output"},
-    "compression": {"prompt": "Prompt", "content": "Originals", "output": "Summary"},
+    "compression": {},
 }
 
 
@@ -88,12 +91,12 @@ class DetailInspector(Container):
     /* The inspector owns its own row spacing now that MessageRow carries none
        (ctx0 rendering redesign): one blank line between the folded originals. */
     DetailInspector #detail-content-rows MessageRow { margin-bottom: 1; }
-    /* Highlight/focus share the config selection color ($ctx-selection) with the
+    /* The highlight shares the config selection color ($ctx-selection) with the
        message list: alpha tints ($primary 20%) don't blend under the ansi theme,
-       and the ANSI grey read too light. */
-    DetailInspector _Split:focus {
-        background: $ctx-selection;
-    }
+       and the ANSI grey read too light. Only Browse paints it — a maximized split
+       owns the whole pane, so tinting it would read as "everything is selected".
+       Deliberately not keyed on :focus for that reason (the maximized split holds
+       focus to receive the scroll keys). */
     DetailInspector _Split.highlighted {
         background: $ctx-selection;
     }
@@ -241,27 +244,6 @@ class DetailInspector(Container):
         if self.pane_mode == "maximized" and self._max_box:
             self.query_one(self._max_box, _Split).scroll_relative(y=delta, animate=False)
 
-    def back(self) -> str:
-        """Esc: step back one level. Returns "browse" (un-maximized to Browse) or
-        "exit" (caller should refocus the conversation)."""
-        view = self.node_state
-        if (
-            self.pane_mode == "maximized"
-            and view is not None
-            and view.node_type in _SPLIT_VIEW_TYPES
-        ):
-            prev = self._maximized_name
-            self._render_context(view)  # restore all visible splits
-            visible = self.splits_visible()
-            if len(visible) >= 2:
-                self._enter_browse(visible)
-                if prev in visible:
-                    self._highlight = prev
-                    self._apply_highlight()
-                return "browse"
-        self.exit_pane()
-        return "exit"
-
     def exit_pane(self) -> None:
         self.pane_mode = "none"
         self._highlight = None
@@ -343,7 +325,9 @@ class DetailInspector(Container):
             value = values[name]
             box.display = bool(value)
             any_visible = any_visible or bool(value)
-            self.query_one(f"#detail-{name}-label", Static).update(labels[name])
+            label = self.query_one(f"#detail-{name}-label", Static)
+            label.display = name in labels
+            label.update(labels.get(name, ""))
             if name == "content":
                 self._render_content_split(view, value)
             else:
@@ -370,7 +354,9 @@ class DetailInspector(Container):
             if ids != self._rows_node_ids:
                 self._rows_node_ids = ids
                 rows.remove_children()
-                rows.mount_all([MessageRow(node) for node in view.content_nodes])
+                rows.mount_all(
+                    [MessageRow(node, show_weight=False) for node in view.content_nodes]
+                )
         else:
             rows.display = False
             text_widget.display = True

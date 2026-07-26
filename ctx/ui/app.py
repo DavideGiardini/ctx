@@ -247,13 +247,16 @@ class ChatApp(App):
                 return
             self._close_compression_editor()
             return
-        # Inside the detail pane, Esc backs out one level (Maximized→Browse→right pane)
-        # before it falls through to the Insert/Edit toggle.
+        # Inside the detail pane, Esc leaves the pane in one step — from Browse or
+        # from a maximized split alike — and lands back in Edit mode on the
+        # conversation, selection still on the node that was open. (No
+        # Maximized→Browse rung: stepping down into Browse left the split that had
+        # been maximized wearing focus, so the pane read as half-selected.)
         if self.mode == "edit" and self._focus_in_detail():
             inspector = self.query_one(DetailInspector)
             if inspector.pane_mode != "none":
-                if inspector.back() == "exit":
-                    self.query_one(MessageList).focus()
+                inspector.exit_pane()
+                self.query_one(MessageList).focus()
                 self._sync_footer()
                 return
         # An active range selection swallows the first Esc (clear the anchor but

@@ -34,12 +34,13 @@ def _make_node(role: str) -> Node:
 
 
 class _Host(App):
-    def __init__(self, node: Node) -> None:
+    def __init__(self, node: Node, *, show_weight: bool = True) -> None:
         super().__init__()
         self._node = node
+        self._show_weight = show_weight
 
     def compose(self) -> ComposeResult:
-        yield MessageRow(self._node)
+        yield MessageRow(self._node, show_weight=self._show_weight)
 
 
 @pytest.mark.parametrize(
@@ -141,6 +142,19 @@ async def test_model_node_keeps_its_weight_slot():
         row = app.query_one(MessageRow)
         row.set_weight_pct(12)
         assert str(row.query_one(".weight", Static).render()) == "12%"
+
+
+async def test_show_weight_false_blanks_the_slot_for_a_model_node():
+    # Rows shown outside the live conversation (a K's folded originals in the
+    # inspector) carry no context weight: the slot stays blank even for a turn
+    # role, and a pushed weight can't resurrect it.
+    app = _Host(_make_node("assistant"), show_weight=False)
+    async with app.run_test(size=(80, 24)):
+        row = app.query_one(MessageRow)
+        weight = row.query_one(".weight", Static)
+        assert str(weight.render()) == ""
+        row.set_weight_pct(12)
+        assert str(weight.render()) == ""
 
 
 def test_snapshot_colors_line_shows_compression_equals_context_green():

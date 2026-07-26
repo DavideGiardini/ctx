@@ -78,13 +78,24 @@ class MessageRow(Vertical):
 
     DEFAULT_CSS = ""
 
-    def __init__(self, node: Node, *, truncate: bool = True, **kwargs) -> None:
+    def __init__(
+        self,
+        node: Node,
+        *,
+        truncate: bool = True,
+        show_weight: bool = True,
+        **kwargs,
+    ) -> None:
         self.node = node
         self._role = node.role
         self._content = display_content(node)
         # Callers wanting full, untruncated content pass truncate=False; the
         # conversation list and inspector rows truncate per the role config.
         self._truncate = truncate
+        # Context weight is a property of the *live* conversation. Rows shown
+        # outside it — a K's folded originals in the inspector — carry no weight
+        # to report, so the slot stays empty rather than a meaningless "--%".
+        self._show_weight = show_weight
         extra = kwargs.pop("classes", "")
         super().__init__(classes=f"{node.role} {extra}".strip(), **kwargs)
 
@@ -119,10 +130,13 @@ class MessageRow(Vertical):
     def set_weight_pct(self, pct: int | None) -> None:
         # A node that never reaches the model (a system breadcrumb) has no weight
         # to show: leave the slot empty rather than a misleading "--%" (task 43a).
-        if not self.node.goes_to_model():
+        if not self._shows_weight():
             self.query_one(".weight", Static).update("")
             return
         self.query_one(".weight", Static).update("--%" if pct is None else f"{pct}%")
+
+    def _shows_weight(self) -> bool:
+        return self._show_weight and self.node.goes_to_model()
 
     def compose(self):
         with Vertical(classes="row-body"):
@@ -130,7 +144,7 @@ class MessageRow(Vertical):
                 glyph = _KIND_GLYPH.get(self._role)
                 if glyph:
                     yield Static(glyph, classes="kind")
-                yield Static("--%" if self.node.goes_to_model() else "", classes="weight")
+                yield Static("--%" if self._shows_weight() else "", classes="weight")
             if self._role in ("system", "context"):
                 yield Static(self._content or "", classes="content")
             else:

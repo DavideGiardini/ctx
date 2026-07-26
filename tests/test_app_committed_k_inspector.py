@@ -12,10 +12,10 @@ detail describe_state omits).
 """
 
 from pilot_helpers import inspector_settled, open_editor_on_range, two_turns
-from textual.widgets import TextArea
+from textual.widgets import Static, TextArea
 
 from ctx.core.conversation import DEFAULT_COMPRESSION_PROMPT
-from ctx.ui.widgets.detail_inspector import DetailInspector
+from ctx.ui.widgets.detail_inspector import DetailInspector, NodeView
 
 
 async def test_drafted_k_inspector_shows_prompt_originals_summary(app_factory):
@@ -92,6 +92,52 @@ async def test_k_inspector_originals_split_renders_compact_rows(app_factory):
         assert inspector.query_one("#detail-content-text").display is False
         # A visible divider (border) separates the splits.
         assert inspector.query_one("#detail-content").styles.border_bottom[0]
+
+
+async def test_k_splits_carry_no_captions_and_weightless_originals(app_factory):
+    """A K's splits are uncaptioned — no "Prompt"/"Originals"/"Summary" headers —
+    and its folded originals show no context weight: they sit outside the live
+    conversation, so a "--%" there would be meaningless."""
+    app = app_factory()
+    async with app.run_test() as pilot:
+        await two_turns(app)
+        await open_editor_on_range(pilot)
+
+        app.query_one("#compress-output", TextArea).text = "SUMMARY"
+        await pilot.press("ctrl+s")
+        await pilot.press("home")  # select the K
+        await inspector_settled(pilot)
+
+        inspector = app.query_one(DetailInspector)
+        for name in ("prompt", "content", "output"):
+            assert inspector.query_one(f"#detail-{name}-label").display is False
+        for row in inspector.query("#detail-content-rows MessageRow"):
+            assert str(row.query_one(".weight", Static).render()) == ""
+
+
+async def test_context_node_splits_keep_their_captions(app_factory):
+    """The caption suppression is scoped to compression nodes — an imported file
+    still labels its Prompt / Source / Output splits."""
+    app = app_factory()
+    async with app.run_test() as pilot:
+        inspector = app.query_one(DetailInspector)
+        inspector.show(
+            NodeView(
+                node_id="n1",
+                role="context",
+                node_type="context",
+                content="file body",
+                prompt="the instruction",
+                output="the output",
+            )
+        )
+        await pilot.pause()
+
+        labels = {
+            name: str(inspector.query_one(f"#detail-{name}-label", Static).render())
+            for name in ("prompt", "content", "output")
+        }
+        assert labels == {"prompt": "Prompt", "content": "Source", "output": "Output"}
 
 
 async def test_number_keys_maximize_k_splits(app_factory):
