@@ -454,3 +454,94 @@ tasks 1–7 and PROMPT.md step 7.
 - **A walled call still spends one unit of the D7 budget** (`calls_made += 1`),
   which is correct — a call was made — but means a model repeatedly fetching huge
   pages exhausts its budget on refusals.
+
+## 2026-07-26 — task 8: harness and test doubles for a driveable tool turn
+
+Built the scaffolding tasks 9–11 need to *drive* a tool-calling turn: a
+trigger-word-scripted provider double and a canned search backend in
+`tools/agent/harness.py`, plus the `search=` injection parameter on
+`ChatApp.__init__` (forwarded straight to `ConversationCore`, mirroring
+`provider=`/`workspace=`/`storage=`).
+
+**Three decisions worth not re-deriving.**
+
+1. **The trigger word rides in the search query.** `SEARCHFAIL` has to make the
+   *search tool* raise, not the provider, but the backend only ever sees a query
+   string. Instead of a trigger object both doubles mutate, `HarnessProvider`
+   issues the search with the user's message **verbatim** — trigger word included
+   — and `HarnessSearch.search` raises when it sees `SEARCHFAIL` in the query. Each
+   double stays a pure function of what it is handed; there is no shared state to
+   fall out of sync. Consequence for a future reader: a harness search node's
+   rendered query *contains* the trigger word. That is deliberate, not a leak.
+
+2. **The round index is derived, never counted.** Past turns replay as text rather
+   than as native tool messages (ADR-0018 §3), so the number of `role="tool"`
+   messages in a request **is** the number of calls this turn has already made.
+   `HarnessProvider` holds no per-turn state, so a script cannot desynchronize from
+   the core — which matters because the same provider instance serves every turn of
+   a long harness session.
+
+3. **`tools is None` is the answer signal.** The core withholds tools on the final
+   round once the D7 budget is spent. The double reads that as "your budget is
+   gone, answer from what you have" and streams the canned answer. Without it
+   `SEARCHLOOP` would end its 13th round with no text at all, leaving an empty
+   assistant node instead of a real answer.
+
+**The gate I had to work around.** `search_available()` (D4) offers the tools only
+when the configured backend's key is in the environment, so `HarnessApp` would
+have scripted tool calls the core never asked for and silently behaved
+pre-Phase-4. It now plants a placeholder `TAVILY_API_KEY` via
+`os.environ.setdefault` — safe because `HarnessSearch` is canned and never spends
+it. **This assumes the default `search.provider` ("tavily")**: a developer whose
+`~/.config/ctx/config.json` names another backend would need that backend's key
+planted instead. The same gate bites tests, which is why the new conftest
+`search_enabled` fixture *also* redirects `CONFIG_DIR`/`CONFIG_PATH` at an empty
+temp dir — otherwise the developer's own config decides which key is looked for.
+**Any later test that expects a tool call must request `search_enabled`, or it
+silently gets an ordinary chat turn and passes for the wrong reason.**
+
+`HARNESS_HITS` URLs are under the reserved `.invalid` TLD (RFC 2606), so a bug
+that let a real fetch through fails to resolve rather than quietly reaching a live
+site.
+
+**Tests.** Code-blind `test-spec-author`, budget "2 tests, 3 max, ~90 lines of
+scaffolding". It returned `tests/specs/app-search-turn.md` (C1–C2) and
+`tests/test_app_search_turn.py` — exactly 2 tests, both kept, neither pruned. Red
+was clean: both failed on the stubs' `NotImplementedError` with no collection
+errors. Beyond ruff-driven reflow (line length only, no assertion touched), one
+deliberate change: **I added `assert HARNESS_HITS[0].url in nodes[2].content`** to
+C1's test. The blind author flagged (its ambiguity 1) that with only `node_type`
+and position asserted, a correctly-positioned but *empty* search node would pass —
+and carrying the canned hits into the graph is the whole job of the two doubles.
+This strengthens the suite toward the acceptance floor; it is not a fix-to-pass.
+Its ambiguity 2 (is a tool turn's round-2 answer the same canned text as an
+ordinary turn?) guessed right: it is `CANNED_RESPONSE`.
+
+**Verification.** `bash scripts/check.sh` green — 717 passed (715 → +2). No
+`qa-tester` and no rendering, deliberately: task 8 changes no UI or rendering
+behavior, the PRD assigns app-driving to tasks 9–11, and the UI does not yet mount
+tool nodes mid-turn (that is task 9) — so a qa-tester run now would report an
+expected absence as a failure. Instead I smoke-tested the one path the Pilot test
+cannot reach, `HarnessApp`'s own constructor, out-of-process and network-free:
+`HarnessApp()` wires `HarnessSearch` + `HarnessProvider` and `search_available()`
+returns `True` afterwards. That is the path tasks 9–11 launch.
+
+**Gotchas for tasks 9–11.**
+
+- **A `SEARCH` turn works end-to-end in the graph today but not in the view.** The
+  search node lands in `core.nodes` mid-turn, yet no row is mounted for it until
+  something reconciles — `_stream_response` still passes no `on_node`. Nothing
+  crashes: `_refresh_token_ui`'s widget lookup swallows the miss (`except:
+  continue`) and `zip(..., strict=True)` is safe *only* because `_visible_nodes()`
+  still returns `self.core.nodes` verbatim. **Task 9 breaks that identity** — the
+  moment `_visible_nodes()` filters anything, that `zip` must already be reading
+  through it, or the turn dies on a `ValueError`.
+- **`FETCH` and `SEARCHLOOP` open with a silent round 1** (no text before the tool
+  call), which is exactly the zero-content-assistant-node case task 9 has to drop
+  from the view. `SEARCH` and `SEARCHFAIL` stream `LEAD_IN` first, so they do
+  *not* exercise it — use `FETCH` to see the phantom row.
+- **The two existing core test files still carry their own local
+  `config_dir`/`search_available` fixtures** (`test_conversation_tool_loop.py`,
+  `test_conversation_window_wall.py`). The new conftest `search_enabled` does the
+  same job under a different name; I left them alone rather than churn ~10 test
+  signatures. New tests should use `search_enabled`.

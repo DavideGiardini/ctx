@@ -13,7 +13,9 @@ from pathlib import Path
 
 import pytest
 
+from ctx.core import config as ctx_config
 from ctx.core.provider import Provider, TestProvider, Usage
+from ctx.core.search import SearchBackend
 from ctx.core.storage import ConversationRepository
 from ctx.core.workspace import Workspace
 from ctx.models.nodes import Node
@@ -238,6 +240,11 @@ def app_factory(
       gauge / weights / draft-compression variants).
 
     ``provider`` takes precedence over ``tokens``/``usage`` when both are given.
+    Pass ``search=`` to inject a canned search backend for a tool-calling turn
+    (pair it with the ``search_enabled`` fixture, or the core offers no tools);
+    omitted, the app has the real backend it would have in production, which no
+    turn reaches unless a backend key happens to be in the environment.
+
     Each call returns a fresh ChatApp over the *same* shared repo/workspace, so a
     single test can build two apps against one store (e.g. expand-survives-restart).
     """
@@ -247,12 +254,34 @@ def app_factory(
         *,
         tokens: list[str] | None = None,
         usage: Usage | None = None,
+        search: SearchBackend | None = None,
     ) -> ChatApp:
         if provider is None:
             provider = TestProvider(list(tokens) if tokens is not None else ["ok"], usage)
-        return ChatApp(provider=provider, workspace=workspace, storage=repo)
+        return ChatApp(
+            provider=provider, workspace=workspace, storage=repo, search=search
+        )
 
     return _build
+
+
+@pytest.fixture
+def search_enabled(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Make the model's web tools reachable: default config, backend key present.
+
+    ``search_available()`` (D4) offers the tools only when the configured
+    backend's API key is in the environment, so a turn that should make a tool
+    call makes none without this. Config is redirected at an empty temp dir so
+    the developer's own ``~/.config/ctx/config.json`` cannot change which
+    backend — and therefore which key — is looked for; the key itself is a
+    placeholder, since every test pairing with this fixture injects a canned
+    backend and reaches no network.
+    """
+    cfg_dir = tmp_path / "ctx-config"
+    cfg_dir.mkdir(exist_ok=True)
+    monkeypatch.setattr(ctx_config, "CONFIG_DIR", cfg_dir)
+    monkeypatch.setattr(ctx_config, "CONFIG_PATH", cfg_dir / "config.json")
+    monkeypatch.setenv("TAVILY_API_KEY", "tvly-test-key-not-real")
 
 
 class RecordingProvider:

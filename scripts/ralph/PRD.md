@@ -52,24 +52,6 @@ search backend is swappable by editing one config line.
 
 ## Tasks
 
-- [ ] **8 — Harness and test doubles for a driveable tool turn** — Extend
-      `tools/agent/harness.py` so `HarnessApp` wires a `TestSearch` alongside its
-      `TestProvider`, and give `ChatApp.__init__` a `search=` injection parameter
-      mirroring `provider=`/`workspace=`/`storage=`. Script the harness provider by
-      **trigger word in the submitted message**, so qa-tester steps are
-      deterministic: `SEARCH` → round 1 emits `"Let me look that up. "` plus a
-      `search` tool call, round 2 emits the canned answer; `FETCH` → round 1 a
-      `search` call, round 2 a `fetch` call on the first hit's URL, round 3 the
-      answer; `SEARCHFAIL` → the search tool raises `SearchError`; `SEARCHLOOP` →
-      the model requests a search every round, forever. A message with no trigger
-      word behaves exactly as today. Add the matching doubles/fixtures to
-      `tests/conftest.py` next to the existing `app_factory`, `test_provider` and
-      `BlockingProvider`. Nothing here ships: `tools/` stays outside the `ctx`
-      package (ADR-0012). Ref: plan §5.2. Depends on tasks 4 and 6.
-      _Acceptance:_ `check.sh` green. A Pilot test drives `SEARCH …` through the
-      app factory and asserts the resulting node sequence is user → assistant →
-      search → assistant. No test and no harness run touches the network.
-
 - [ ] **9 — Mount tool nodes mid-turn in the UI** — In `ctx/ui/app.py` pass an
       `on_node` callback from `_stream_response` into `core.stream()` that mounts
       each appended node with `_mount_node`, refreshes the token UI, and — when the
@@ -158,6 +140,7 @@ Full bodies live in `scripts/ralph/PRD-done.md`; task numbers are preserved so
 - [x] 5 — Tool dispatch: a `ToolCall` becomes a node
 - [x] 6 — The tool loop in `ConversationCore.stream()`
 - [x] 7 — The window-wall guard and its breadcrumb
+- [x] 8 — Harness and test doubles for a driveable tool turn
 
 <!-- As tasks complete, the loop PRUNES them (PROMPT.md step 8): the finished
 task's full body is cut from here and moved to `PRD-done.md`, leaving a one-line

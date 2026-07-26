@@ -17,6 +17,7 @@ from ctx.core.context import build_context
 from ctx.core.conversation import ConversationCore
 from ctx.core.log import logger
 from ctx.core.provider import LiteLLMProvider, Provider
+from ctx.core.search import SearchBackend
 from ctx.core.storage import ConversationRepository, StoragePort
 from ctx.core.workspace import Workspace
 from ctx.models.nodes import Node
@@ -80,15 +81,19 @@ class ChatApp(App):
         provider: Provider | None = None,
         workspace: Workspace | None = None,
         storage: StoragePort | None = None,
+        search: SearchBackend | None = None,
     ) -> None:
         super().__init__()
         # Injectable seams: default to the real adapters so production
         # `ChatApp()` is unchanged, while tests/harness can pass a
-        # TestProvider and a temp-dir Workspace.
+        # TestProvider, a canned search backend and a temp-dir Workspace.
         self._workspace = workspace or Workspace(Path.cwd())
         self._repo = storage or ConversationRepository(str(self._workspace.db_path))
         self.core = ConversationCore(
-            self._repo, provider or LiteLLMProvider(), workspace=self._workspace
+            self._repo,
+            provider or LiteLLMProvider(),
+            workspace=self._workspace,
+            search=search,
         )
         self._stream_worker: Worker | None = None
         # The assistant node the live turn-stream writes into, tracked so a
