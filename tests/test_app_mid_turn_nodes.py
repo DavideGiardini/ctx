@@ -5,6 +5,7 @@ Contract: tests/specs/app-mid-turn-nodes.md (C1-C4; C5 untested, see the spec).
 
 import asyncio
 
+from conftest import GatedHarnessProvider
 from pilot_helpers import turn, wait_until
 
 from ctx.ui.widgets.input_bar import InputBar
@@ -16,27 +17,6 @@ from tools.agent.harness import (
     HarnessProvider,
     HarnessSearch,
 )
-
-
-class GatedHarnessProvider(HarnessProvider):
-    """A scripted harness turn that suspends before its answering round.
-
-    ``HarnessProvider`` never awaits, so a whole multi-round turn runs inside a
-    single event-loop step and ``pilot.pause()`` can only ever see the settled
-    result — there is no window in which to observe a mid-turn mount. Blocking
-    at the top of the round that *follows* a tool call holds the turn open at
-    exactly the moment the search node has landed. Release with ``gate.set()``;
-    see ``BlockingProvider``'s deadlock warning in ``conftest.py``.
-    """
-
-    def __init__(self, gate: asyncio.Event) -> None:
-        self._gate = gate
-
-    async def stream(self, messages, model, on_usage=None, tools=None, on_tool_calls=None):  # type: ignore[no-untyped-def]
-        if any(message.get("role") == "tool" for message in messages):
-            await self._gate.wait()
-        async for token in super().stream(messages, model, on_usage, tools, on_tool_calls):
-            yield token
 
 
 def _search_node(app):

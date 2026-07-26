@@ -236,3 +236,21 @@ stays here for anyone auditing what a commit was supposed to do.
       `/include`d context node), and a snapshot assertion that a selected search
       node reports `detail.view == "context"` with the prompt and content splits
       visible.
+
+- [x] **11 — End-to-end verification of the phase** — Run the full ten-step
+      qa-tester brief in `docs/ctx0 Phase 4 Plan — Web search.md` §5.2 verbatim
+      (verify-feature mode on `tools.agent.harness:HarnessApp`), including both
+      negative probes: a second submit during a research turn must be refused with
+      the typed text preserved and no new user node, and `/new` mid-research-turn
+      must clear the list with no stuck `streaming=yes`. Address any FAIL by fixing
+      it in this task. Then confirm the phase's own done-criteria: tool output is
+      compactable (step 4) and expandable (step 5) like any other node, and the
+      backend is swappable by editing `search.provider` in config with no code
+      change. Ref: plan §5.2, roadmap Phase 4 "Done". Depends on all above.
+      _Acceptance:_ all ten steps match their expected snapshots, both negative
+      probes behave, `textual_check_errors` clean throughout, and `check.sh` green.
+      Record the qa-tester verdict in `PROGRESS.md`. **Note for the human, not this
+      loop:** a manual live smoke against a real provider with a real
+      `TAVILY_API_KEY` (plan §5.3) is still owed before the phase is called done —
+      the harness proves the machinery but cannot prove a real model calls these
+      schemas.

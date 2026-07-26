@@ -52,23 +52,10 @@ search backend is swappable by editing one config line.
 
 ## Tasks
 
-- [ ] **11 — End-to-end verification of the phase** — Run the full ten-step
-      qa-tester brief in `docs/ctx0 Phase 4 Plan — Web search.md` §5.2 verbatim
-      (verify-feature mode on `tools.agent.harness:HarnessApp`), including both
-      negative probes: a second submit during a research turn must be refused with
-      the typed text preserved and no new user node, and `/new` mid-research-turn
-      must clear the list with no stuck `streaming=yes`. Address any FAIL by fixing
-      it in this task. Then confirm the phase's own done-criteria: tool output is
-      compactable (step 4) and expandable (step 5) like any other node, and the
-      backend is swappable by editing `search.provider` in config with no code
-      change. Ref: plan §5.2, roadmap Phase 4 "Done". Depends on all above.
-      _Acceptance:_ all ten steps match their expected snapshots, both negative
-      probes behave, `textual_check_errors` clean throughout, and `check.sh` green.
-      Record the qa-tester verdict in `PROGRESS.md`. **Note for the human, not this
-      loop:** a manual live smoke against a real provider with a real
-      `TAVILY_API_KEY` (plan §5.3) is still owed before the phase is called done —
-      the harness proves the machinery but cannot prove a real model calls these
-      schemas.
+*(none — every task in this PRD is complete. One item is owed by the **human**,
+not this loop: the manual live smoke of plan §5.3 against a real provider with a
+real `TAVILY_API_KEY`. The harness proves the machinery; it cannot prove a real
+model calls these schemas.)*
 
 ## Completed
 
@@ -85,6 +72,7 @@ Full bodies live in `scripts/ralph/PRD-done.md`; task numbers are preserved so
 - [x] 8 — Harness and test doubles for a driveable tool turn
 - [x] 9 — Mount tool nodes mid-turn in the UI
 - [x] 10 — Render the search node in the high-ground view
+- [x] 11 — End-to-end verification of the phase
 
 <!-- As tasks complete, the loop PRUNES them (PROMPT.md step 8): the finished
 task's full body is cut from here and moved to `PRD-done.md`, leaving a one-line

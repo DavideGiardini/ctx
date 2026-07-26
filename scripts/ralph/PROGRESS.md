@@ -722,3 +722,98 @@ in-process MCP server does not. Task 11 owns the end-to-end app drive.
   state script, not a styling bug.
 - **`_pass_starts` takes nodes now.** Any new caller must pass `Node`s;
   `MessageList._apply_separators` does (`[w.node for w in widgets]`).
+
+## 2026-07-26 — task 11: end-to-end verification of Phase 4
+
+Ran the §5.2 brief verbatim through `qa-tester` on `tools.agent.harness:HarnessApp`
+and closed the two clauses that harness provably cannot reach. **No product code
+changed** — the phase's machinery verified clean end to end.
+
+**qa-tester verdict: all ten steps PASS on every observable clause.** Order in
+step 1 was exactly `user → assistant("Let me look that up.") → search → assistant`;
+every node carried a non-null `weight_pct` with the search node at 72%; a selected
+search node reported `detail.node_role="search"` with the query and hits in
+separate splits (step 3); the search node compressed into a K and `x` restored it
+in place (steps 4–5, so **tool output is compactable and expandable like any other
+node** — a phase done-criterion); `FETCH` produced `search → context(source_path =
+https://ctx0.example.invalid/graph) → assistant` (step 6); `SEARCHFAIL` still
+answered, with the failure recorded as a `system` node and **no** error mark on the
+assistant node (step 7); `SEARCHLOOP` terminated itself at exactly 12 search nodes
+(step 8, the `max_tool_calls` budget); a trigger-free message was still a plain
+two-node turn (step 10); `/resume` brought search nodes back with their
+`node_type` and weights. `textual_check_errors` was clean after every action
+across all sessions.
+
+**Two reported problems, both triaged to not-a-bug — do not "fix" either.**
+
+1. **`context_gauge.pct` is always null in the harness.** Not a defect and not
+   harness wiring: the default model is `openrouter/google/gemma-4-26b-a4b-it`, and
+   `tokens.model_window()` returns `None` for it because litellm ships no window
+   metadata for that slug (verified directly). No window → no percentage, by
+   design. "Solving `model_window() is None` for metadata-less models" is
+   explicitly out of scope (plan §6, PRD "Out of scope"). So **step 2's
+   `context_gauge.pct is not null` clause is unsatisfiable in the harness as
+   written** — a defect in the brief, not the app. The clause that mattered (every
+   node weighted, the search node non-zero) passed.
+2. **"Ctrl+C freezes all input, even on a fresh app."** This is `action_cancel_stream`'s
+   documented escalation ladder working correctly: live stream → live draft → `self.exit()`.
+   With no worker to cancel, Ctrl+C *quits*, so an exited app reads through MCP exactly
+   like a frozen one (no error, workers settled, keys inert). qa-tester pressed Ctrl+C
+   after the turn had already settled — because it cannot catch a live turn (below) —
+   and hit the exit rung. `test_app_turn_lifecycle.py::test_ctrl_c_cancels_live_draft_not_the_app`
+   already pins the rung above it.
+
+**Four clauses came back INCONCLUSIVE — too fast to observe**, all the same known
+harness limit (see task 9's gotcha): the doubles never await, so a research turn
+settles between two MCP calls and there is no mid-flight window. Those were step 1's
+`streaming=yes`, step 9's Ctrl+C timing, the second-submit refusal, and `/new`
+mid-research-turn. Rather than leave the acceptance's "both negative probes behave"
+resting on an unobservable, I converted the two that had no UI-layer coverage into
+deterministic Pilot tests — the route task 9's gotcha already prescribes.
+
+**Tests added (+2, 727 → 729): `tests/test_app_research_turn_interrupts.py`.**
+`test_ctrl_c_mid_research_turn_keeps_the_search_node_and_the_app` (D12: cancel
+mid-loop drops only the in-flight round, the already-appended search node survives,
+and the app stays up) and
+`test_new_mid_research_turn_clears_the_list_with_no_stuck_streaming` (no stuck
+`streaming`, no row from the abandoned turn leaking into the fresh conversation).
+Both gate the turn open with the search node already in the graph. I skipped a
+research-turn copy of the *second-submit* refusal: it exercises the identical
+`core.streaming` guard as the existing ordinary-turn test and the tool loop never
+touches that flag — a pure duplicate, so it failed the deletion test.
+
+Written by hand rather than by `test-spec-author`: this task adds no product
+interface to be blind to, and the tests reuse in-repo scaffolding (`app_factory`,
+`search_enabled`, the gated double) that a no-file-reading agent cannot see. The
+code-blind flow protects against tests mirroring an implementation; here the
+contract came from the written brief.
+
+`GatedHarnessProvider` moved from `tests/test_app_mid_turn_nodes.py` into
+`tests/conftest.py` beside `BlockingProvider` — the documented home for provider
+doubles — now that two modules need it. `conftest.py` therefore imports
+`tools.agent.harness`; fine, since only `ctx` is barred from importing `tools/`.
+
+**Both new tests were verified in both directions by forced mutation**, because a
+green interrupt test that cannot fail is worthless: deleting the stream rung from
+`action_cancel_stream` fails test 1 (Ctrl+C falls through to `exit()`), and
+no-op'ing `_cancel_stream_worker` fails test 2. Both reverted.
+
+**Gotcha worth keeping.** On the second mutant, test 2 first failed by *hanging*:
+`/new` left the worker suspended on the gate and `await worker.wait()` never
+returned, so pytest hung instead of going red. `_settle_worker` now **asserts the
+worker is already cancelled/finished before awaiting it**, so that class of
+regression fails fast. Any future gated-interrupt test must keep that order —
+assert, then await — or a real bug will present as a hung suite and burn a whole
+loop iteration.
+
+No visual check: nothing rendered changed this task.
+
+**Two notes for the human, neither a loop task.**
+- **The live smoke of plan §5.3 is still owed** — one real run against OpenRouter
+  with a real `TAVILY_API_KEY`, asking something genuinely post-cutoff. The harness
+  cannot prove a real model accepts and calls these tool schemas.
+- qa-tester noticed that pressing `c` focuses the `compress-prompt` split, not the
+  summary field, so a `Ctrl+S` straight after typing hits "Write a summary before
+  committing" until you `Tab`. Pre-existing compression-editor behavior, unrelated
+  to Phase 4, and the step-4 criterion passed regardless — flagged only as a UX
+  observation.

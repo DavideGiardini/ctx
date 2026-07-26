@@ -20,6 +20,7 @@ from ctx.core.storage import ConversationRepository
 from ctx.core.workspace import Workspace
 from ctx.models.nodes import Node
 from ctx.ui.app import ChatApp
+from tools.agent.harness import HarnessProvider
 
 
 @pytest.fixture
@@ -220,6 +221,27 @@ class BlockingProvider:
 
     async def check_connectivity(self, model=None):  # type: ignore[no-untyped-def]
         return (True, "ok")
+
+
+class GatedHarnessProvider(HarnessProvider):
+    """A scripted harness turn that suspends before its answering round.
+
+    ``HarnessProvider`` never awaits, so a whole multi-round turn runs inside a
+    single event-loop step and ``pilot.pause()`` can only ever see the settled
+    result — there is no window in which to observe a mid-turn state. Blocking
+    at the top of the round that *follows* a tool call holds the turn open at
+    exactly the moment the search node has landed. Release with ``gate.set()``;
+    the same deadlock warning as ``BlockingProvider`` applies.
+    """
+
+    def __init__(self, gate: asyncio.Event) -> None:
+        self._gate = gate
+
+    async def stream(self, messages, model, on_usage=None, tools=None, on_tool_calls=None):  # type: ignore[no-untyped-def]
+        if any(message.get("role") == "tool" for message in messages):
+            await self._gate.wait()
+        async for token in super().stream(messages, model, on_usage, tools, on_tool_calls):
+            yield token
 
 
 @pytest.fixture
