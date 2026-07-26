@@ -140,7 +140,7 @@ class _VaryingProvider:
         self._turns = turns
         self._call = 0
 
-    async def stream(self, messages, model, on_usage=None):  # type: ignore[no-untyped-def]
+    async def stream(self, messages, model, on_usage=None, tools=None, on_tool_calls=None):  # type: ignore[no-untyped-def]
         tokens, usage = self._turns[self._call]
         self._call += 1
         for token in tokens:
@@ -210,7 +210,7 @@ class BlockingProvider:
         self._before = before
         self._gate = gate
 
-    async def stream(self, messages, model=None, on_usage=None):  # type: ignore[no-untyped-def]
+    async def stream(self, messages, model=None, on_usage=None, tools=None, on_tool_calls=None):  # type: ignore[no-untyped-def]
         for token in self._before:
             yield token
         await self._gate.wait()
@@ -270,7 +270,7 @@ class RecordingProvider:
         self.called = False
         self.captured: list[dict] | None = None
 
-    async def stream(self, messages, model=None, on_usage=None):  # type: ignore[no-untyped-def]
+    async def stream(self, messages, model=None, on_usage=None, tools=None, on_tool_calls=None):  # type: ignore[no-untyped-def]
         self.called = True
         self.captured = messages
         for token in self._tokens:
@@ -287,7 +287,7 @@ class ErroringProvider:
     generator; the ``RuntimeError`` surfaces on the first iteration.
     """
 
-    async def stream(self, messages, model=None, on_usage=None):  # type: ignore[no-untyped-def]
+    async def stream(self, messages, model=None, on_usage=None, tools=None, on_tool_calls=None):  # type: ignore[no-untyped-def]
         raise RuntimeError("boom")
         yield ""  # pragma: no cover — makes this an async generator
 

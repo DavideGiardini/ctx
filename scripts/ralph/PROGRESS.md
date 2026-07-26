@@ -289,3 +289,84 @@ line, `await on_node(node)`, and persistence. Also: a failure node is a `system`
 node, so the loop must not assume every node dispatch hands back is model-facing
 (e.g. don't add its content to the turn-local message list — the `result_text`
 return value is the only thing that goes to the model).
+
+## 2026-07-26 — task 6: the tool loop in `ConversationCore.stream()`
+
+**What shipped.** `ctx/core/conversation.py` only, plus its contract/tests.
+`__init__` gained a fourth injected seam — `search: SearchBackend | None = None`,
+defaulting to `LiteLLMSearch()` — and `stream()` gained `on_node` and became the
+round loop. Per round: offer `TOOL_SCHEMAS` while `search_available()` and the
+budget is unspent, stream the round's text into the current assistant node, and
+if it ended in tool calls dispatch each one (task 5), append its node, `await
+on_node(node)`, and go again.
+
+**Three decisions worth not re-deriving.**
+
+1. **The cap is expressed as "a round offered no tools is final by
+   construction"**, not as a separate round counter. `offered = TOOL_SCHEMAS if
+   tools_reachable and calls_made < budget else None`, and the loop returns when
+   `offered is None or not requested`. That single rule covers three cases at
+   once: the D7 budget, a `max_tool_calls: 0` config, and a provider that ignores
+   `tools=None` and asks for a search anyway (which would otherwise be an
+   infinite loop). The budget counts *executed calls*, not rounds, so a round
+   emitting two calls at once spends two.
+
+2. **`on_usage` is handed to the provider on the FIRST round only.** Calibration
+   is `provider_prompt_tokens / local_estimate`, and only round 1's prompt is the
+   context the gauge actually measured; rounds 2+ carry the turn-local
+   round-trip, so anchoring their usage against round 1's estimate would inflate
+   the ratio and skew the header gauge. `ctx_hash` is likewise stamped once, on
+   the first round's context. Not an acceptance clause — recording it here
+   because it is invisible from the tests and a future reader would otherwise
+   "fix" it by passing `on_usage` every round.
+
+3. **`stream()`'s return annotation widened from `AsyncIterator[str]` to
+   `AsyncGenerator[str, None]`.** mypy surfaced this from the blind author's C7
+   test, which calls `aclose()` to express "the consumer stopped mid-loop" —
+   `AsyncIterator` has no `aclose`. The object always *was* an async generator;
+   the annotation was hiding a capability a cancelling caller legitimately needs.
+   `draft_compression`/`draft_import` still say `AsyncIterator` — deliberately
+   left alone, no demonstrated need.
+
+**Test infra touched (not contract).** Nine provider doubles across
+`tests/conftest.py`, `tests/test_conversation.py` and
+`tests/test_provider_errors.py` had `stream(self, messages, model, on_usage=None)`
+signatures predating task 4's seam change. The core now always passes `tools=` and
+`on_tool_calls=`, so they were widened to accept both. **Task 8 note:** any new
+double must carry the full five-parameter signature or every turn through it
+raises `TypeError`.
+
+**Tests.** Code-blind `test-spec-author`, budget "7–9 tests, ~90 lines of product
+code". It returned `tests/specs/conversation-tool-loop.md` (C1–C8) and
+`tests/test_conversation_tool_loop.py` — 8 tests, all kept. C1–C7 are the seven
+clauses of the acceptance floor; C8 (a `SearchError` and a malformed-arguments
+call in the *same* round) earns its place because it is the only test covering
+two calls dispatched from one round and the only one proving nothing escapes
+`stream()` as an exception — `test_search_dispatch.py` covers the failure shapes
+but not the loop's handling of them. Red was clean: 8 failed on
+`NotImplementedError`, zero collection errors. No authored assertion was edited;
+the only change made for the suite was the product-side annotation widening
+above.
+
+**Verification.** `bash scripts/check.sh` green — 712 passed (704 → +8). No
+`qa-tester` and no rendering: pure core with no UI surface, per the PRD's note on
+tasks 1–7 and PROMPT.md step 7.
+
+**Gotchas for tasks 7–9.**
+
+- **Between task 6 and task 9 the UI does not mount tool nodes.** `ctx/ui/app.py`
+  still calls `core.stream(assistant_node)` with no `on_node`, so on a machine
+  with a real `TAVILY_API_KEY` exported a search turn now appends nodes the right
+  pane never renders until task 9 wires the callback. Expected intermediate
+  state, not a bug to chase.
+- **A turn abandoned mid-loop by `/new` is unguarded.** `_append_to_line` has no
+  equivalent of `end_turn`'s stale-turn identity check, so in principle a tool
+  node from an abandoned turn could land in the freshly-created conversation. The
+  window is narrow (the worker is cancelled and every round boundary is an await
+  point) and neither the PRD nor the plan asks for the guard, so it was left out
+  rather than added code-blind. If task 11's `/new`-mid-research-turn probe ever
+  shows a stray node, this is where it comes from and the fix is a two-line
+  identity guard mirroring `end_turn`'s.
+- **`dispatch_tool_call` can return a `system` node** (every failure path does),
+  so task 9's `on_node` handler must not assume every node it mounts is a search
+  or context node.

@@ -31,7 +31,7 @@ class CapturingProvider:
         self._tokens = tokens
         self.captured_messages = None
 
-    async def stream(self, messages, model, on_usage=None):
+    async def stream(self, messages, model, on_usage=None, tools=None, on_tool_calls=None):
         self.captured_messages = messages
         for t in self._tokens:
             yield t
@@ -44,7 +44,7 @@ class FailingProvider:
     def __init__(self, tokens):
         self._tokens = tokens
 
-    async def stream(self, messages, model, on_usage=None):
+    async def stream(self, messages, model, on_usage=None, tools=None, on_tool_calls=None):
         for t in self._tokens:
             yield t
         raise RuntimeError("boom")
@@ -58,7 +58,7 @@ class FailingConnectivityProvider:
         self._tokens = tokens
         self._error = error
 
-    async def stream(self, messages, model, on_usage=None):
+    async def stream(self, messages, model, on_usage=None, tools=None, on_tool_calls=None):
         for t in self._tokens:
             yield t
 
@@ -701,7 +701,7 @@ class ModelCapturingProvider:
         self.captured_messages = None
         self.captured_model = None
 
-    async def stream(self, messages, model, on_usage=None):
+    async def stream(self, messages, model, on_usage=None, tools=None, on_tool_calls=None):
         self.captured_messages = messages
         self.captured_model = model
         for t in self._tokens:

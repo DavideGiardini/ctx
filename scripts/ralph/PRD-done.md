@@ -109,3 +109,36 @@ stays here for anyone auditing what a commit was supposed to do.
       `meta["origin"]` is `"model"`; a backend raising `SearchError` yields an
       error string and a node, never an exception; malformed JSON arguments and an
       unknown tool name each yield an error string, never an exception.
+
+- [x] **6 — The tool loop in `ConversationCore.stream()`** — Inject a
+      `SearchBackend` into `ConversationCore.__init__` (defaulting to
+      `LiteLLMSearch()`, alongside the existing `provider`/`storage`/`workspace`
+      seams) and add an optional `on_node` async callback to `stream()` so a
+      caller learns about each node the turn appends. Turn `stream()` into the
+      round loop: offer `TOOL_SCHEMAS` only when `search_available()`; per round,
+      stream text into the current assistant node and, if the round ended in tool
+      calls, dispatch each one (task 5), append its node, `await on_node(node)`,
+      and go again — up to `search.max_tool_calls` (D7), after which one final
+      round runs with `tools=None`. **`stream()` keeps yielding plain `str`.**
+      Within the turn the round-trip uses the native protocol (an assistant
+      message carrying `tool_calls`, then `role="tool"` messages keyed by
+      `tool_call_id`); build the base context **once** from the nodes that existed
+      before the turn and append round-trip messages to a **turn-local list**, so
+      `build_context`'s role-alternation invariant is never violated by
+      re-deriving them from the graph. Historical tool nodes are replayed as text
+      by `model_facing_form`, never natively — ADR-0018 §3 records why, and it is
+      not optional. Rounds 2+ create their assistant node **lazily on first
+      token** (via `Node.assistant` + the existing line-append path) so a silent
+      round leaves no empty bubble; `on_node` fires for those too. `ctx_hash` is
+      still stamped once, on the first round's context. Ref: ADR-0018 §2–3, plan
+      §4.5, D7, D9, D12. Depends on tasks 1–5.
+      _Acceptance:_ `check.sh` green. Tests driven with a scripted `TestProvider` +
+      `TestSearch` show: a turn with no tool call behaves exactly as before (same
+      nodes, same yielded tokens); a scripted `search` call appends a search node
+      mid-turn, fires `on_node`, and runs a second round; text from rounds 1 and 2
+      lands in **two separate assistant nodes in chronological order** with the
+      search node between them; a round that produces no text creates no assistant
+      node; the cap stops the loop and the final round is sent with no tools; with
+      no search key available no tools are offered at all and the turn is an
+      ordinary chat turn; and cancelling mid-loop leaves the already-appended nodes
+      in the graph with `end_turn` still the only thing that marks the ending.

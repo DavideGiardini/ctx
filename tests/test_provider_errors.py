@@ -158,7 +158,7 @@ class _FailingProvider:
         self._tokens = tokens
         self._error = error
 
-    async def stream(self, messages, model, on_usage=None):
+    async def stream(self, messages, model, on_usage=None, tools=None, on_tool_calls=None):
         for tok in self._tokens:
             yield tok
         raise self._error

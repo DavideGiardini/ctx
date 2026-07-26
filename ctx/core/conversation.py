@@ -1,4 +1,4 @@
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from uuid import uuid4
 
 from ctx.core import tokens
@@ -11,7 +11,14 @@ from ctx.core.context import (
     hash_context,
 )
 from ctx.core.log import logger
-from ctx.core.provider import Provider, Usage
+from ctx.core.provider import Provider, ToolCall, Usage
+from ctx.core.search import (
+    TOOL_SCHEMAS,
+    LiteLLMSearch,
+    SearchBackend,
+    dispatch_tool_call,
+    search_available,
+)
 from ctx.core.storage import StoragePort
 from ctx.core.workspace import Workspace
 from ctx.models.nodes import Node
@@ -29,6 +36,30 @@ MAX_TITLE_LENGTH = 50
 # source of the ``compression.default_prompt`` default (task 18); re-exported here
 # so existing importers of ``ConversationCore``'s module keep working.
 __all__ = ["ConversationCore", "DEFAULT_COMPRESSION_PROMPT", "DEFAULT_IMPORT_PROMPT"]
+
+
+def _tool_call_message(text: str, calls: list[ToolCall]) -> dict:
+    """The assistant message that asked for ``calls``, in the native wire shape.
+
+    Only ever used *within* a live turn: strict providers require each tool call
+    to be answered by a matching ``role="tool"`` message, so the round-trip has to
+    be replayed natively while the turn runs. On later turns the same nodes are
+    replayed as ordinary text instead (ADR-0018 §3). A round that emitted no text
+    before its call sends ``content: None`` rather than an empty string, which is
+    what the OpenAI format expects and what litellm translates cleanly.
+    """
+    return {
+        "role": "assistant",
+        "content": text or None,
+        "tool_calls": [
+            {
+                "id": call.id,
+                "type": "function",
+                "function": {"name": call.name, "arguments": call.arguments},
+            }
+            for call in calls
+        ],
+    }
 
 
 def _derive_title(content: str) -> str:
@@ -59,10 +90,14 @@ class ConversationCore:
         storage: StoragePort,
         provider: Provider,
         workspace: Workspace,
+        search: SearchBackend | None = None,
     ) -> None:
         self._storage = storage
         self._provider = provider
         self._workspace = workspace
+        # The web-reaching seam the tool loop dispatches through (ADR-0018 §5),
+        # defaulting to the real litellm-backed adapter so production is unchanged.
+        self._search: SearchBackend = search or LiteLLMSearch()
         # Default model is read once from config at construction (no per-call
         # file I/O); used for the initial model and on /new reset (ADR 0006 #3).
         self._default_model: str = get_config()["model"]
@@ -794,15 +829,59 @@ class ConversationCore:
         self._calibration = ratio
         self._usage_generation += 1
 
-    async def stream(self, assistant_node: Node) -> AsyncIterator[str]:
-        """Yield tokens, updating assistant_node.content internally.
+    async def stream(
+        self,
+        assistant_node: Node,
+        on_node: Callable[[Node], Awaitable[None]] | None = None,
+    ) -> AsyncGenerator[str, None]:
+        """Yield the turn's tokens, running the model's tool calls as it goes.
 
-        Also anchors the header gauge: the local token estimate of the context
-        just built (``tokens.count_messages`` of the exact ``messages`` sent) is
-        measured, and an ``on_usage`` callback is handed to the provider. When the
-        provider reports a sane ``Usage`` (see ``_calibrate``) it updates
-        ``last_usage`` and ``calibration`` for this turn; otherwise both are left
-        unchanged. The yielded values stay plain ``str``.
+        A turn is one or more **rounds**. Each round is a single provider
+        request whose text streams into the turn's current assistant node and is
+        yielded to the caller as plain ``str``. If a round ends in tool calls
+        instead of settling, each call is executed, its result becomes a node
+        appended to the conversation line, and another round runs with those
+        results in hand — so one submit can append several nodes (ADR-0018 §2).
+
+        ``on_node`` is awaited once for every node this generator appends — each
+        tool node, and the assistant node of every round after the first — so the
+        caller can mount it as the turn progresses. It is **not** called for the
+        round-1 assistant node, which ``submit()`` already handed the caller. Like
+        ``on_usage`` it is out-of-band: the yielded values stay ``str``
+        (ADR-0018 §1).
+
+        **The tools on offer.** The two web tools are offered only while
+        ``search_available()`` — with no backend key configured, no tools are
+        offered at all and the turn is an ordinary chat turn (D4). A turn may make
+        at most ``search.max_tool_calls`` tool calls (D7); once that budget is
+        spent one final round runs with no tools, so the model must answer from
+        what it has and the loop always terminates.
+
+        **What the model sees.** The base context is built **once**, from the
+        nodes that existed before the turn, and the live round-trip is appended to
+        a turn-local message list in the native protocol (an assistant message
+        carrying ``tool_calls``, answered by ``role="tool"`` messages keyed by
+        ``tool_call_id``). The graph is never re-read mid-turn, so
+        ``build_context``'s role-alternation invariant cannot be violated by
+        half-finished rounds. On *later* turns those same nodes are replayed as
+        ordinary text by ``model_facing_form``, never natively — which is what
+        keeps a search as compactable as an import (ADR-0018 §3).
+
+        **Empty rounds leave no bubble.** ``submit()`` creates round 1's assistant
+        node up front, but rounds 2+ create theirs lazily on their first token, so
+        a round that is nothing but a tool call adds no node. (A turn that *opens*
+        with a silent tool call does leave round 1's node empty — the append-only
+        graph cannot remove it, so the view drops it instead.)
+
+        Also anchors the header gauge, on the first round only: the local token
+        estimate of the context just built (``tokens.count_messages`` of the exact
+        messages sent) is measured and an ``on_usage`` callback handed to the
+        provider. When the provider reports a sane ``Usage`` (see ``_calibrate``)
+        it updates ``last_usage`` and ``calibration``; otherwise both are left
+        unchanged. Later rounds report no usage: their prompts include the
+        turn-local round-trip, so calibrating against the first round's estimate
+        would skew the ratio. ``ctx_hash`` is likewise stamped once, on the first
+        round's context.
 
         This generator never touches the ``streaming`` flag and never persists:
         every ending — clean finish, cancel, error (including a pre-stream
@@ -810,19 +889,71 @@ class ConversationCore:
         recorded by the caller through ``end_turn``, the single owner of how a
         turn ends. A generator ``finally`` cannot own the flag: a worker
         cancelled before its first tick never runs it, which is exactly the
-        stuck-flag bug ``end_turn`` retires.
+        stuck-flag bug ``end_turn`` retires. Cancelling mid-loop therefore leaves
+        every node already appended in the graph and drops only the round in
+        flight (D12).
         """
         context_nodes = [n for n in self.nodes if n is not assistant_node]
-        messages = build_context(context_nodes, self._workspace.read_file)
+        base_messages = build_context(context_nodes, self._workspace.read_file)
         # AIDEV-NOTE: stamp the per-turn ctx_hash once, at the real generation
         # moment — immutable after (ADR-0016 A#3 §4 tripwire). Write-only under
         # ctx0 (ADR-0017): the reading surfaces that compared it were subtracted.
-        assistant_node.meta["ctx_hash"] = hash_context(messages)
-        local_sum = tokens.count_messages(messages, self.model)
+        assistant_node.meta["ctx_hash"] = hash_context(base_messages)
+        local_sum = tokens.count_messages(base_messages, self.model)
 
         def on_usage(usage: Usage) -> None:
             self._calibrate(local_sum, usage)
 
-        async for token in self._provider.stream(messages, self.model, on_usage):
-            assistant_node.content += token
-            yield token
+        # AIDEV-NOTE: the live round-trip lives HERE, never in the graph — the
+        # base context is built once above, so no half-finished round can break
+        # build_context's role-alternation invariant (ADR-0018 §3).
+        round_trip: list[dict] = []
+        tools_reachable = search_available()
+        budget = get_config()["search"]["max_tool_calls"]
+        calls_made = 0
+        # Round 1 streams into the node submit() already created; later rounds
+        # start with none and create theirs on their first token.
+        target: Node | None = assistant_node
+        first_round = True
+
+        while True:
+            offered = TOOL_SCHEMAS if tools_reachable and calls_made < budget else None
+            requested: list[ToolCall] = []
+            round_text = ""
+            async for token in self._provider.stream(
+                base_messages + round_trip,
+                self.model,
+                on_usage if first_round else None,
+                tools=offered,
+                on_tool_calls=requested.extend,
+            ):
+                if target is None:
+                    target = Node.assistant(self.conversation_id)
+                    self._append_to_line(target)
+                    if on_node is not None:
+                        await on_node(target)
+                target.content += token
+                round_text += token
+                yield token
+            first_round = False
+
+            # A round that was offered no tools is the last one by construction:
+            # that is what makes the budget terminate a model which would ask for
+            # a search every round (D7).
+            if offered is None or not requested:
+                return
+
+            round_trip.append(_tool_call_message(round_text, requested))
+            for call in requested:
+                node, result = await dispatch_tool_call(
+                    call, self._search, self.conversation_id
+                )
+                self._append_to_line(node)
+                if on_node is not None:
+                    await on_node(node)
+                round_trip.append(
+                    {"role": "tool", "tool_call_id": call.id, "content": result}
+                )
+                calls_made += 1
+            logger.info("tool round done | calls=%d | budget=%d", calls_made, budget)
+            target = None
