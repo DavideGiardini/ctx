@@ -16,7 +16,7 @@ from textual.widgets import Markdown, Static
 
 from ctx.core.config import get_config
 from ctx.models.nodes import Node
-from ctx.ui.widgets.message_row import MessageRow, truncation_key
+from ctx.ui.widgets.message_row import CARET, MessageRow, truncation_key
 from tools.agent.snapshot import render
 
 _ROLES = ["user", "assistant", "context", "system", "compression", "search"]
@@ -122,14 +122,14 @@ async def test_compression_row_carries_a_kind_glyph():
         assert str(glyph.render()).strip() != ""
 
 
-async def test_search_row_carries_the_lookup_glyph():
-    # The one part of task 10's visual acceptance the agent's eye cannot check:
-    # cairosvg's fallback font has no ⌕, so the rendered PNG shows tofu and only
-    # this assertion pins which character the meta slot actually carries.
+async def test_search_row_has_no_kind_glyph():
+    # A search reads as ordinary injected context (green bar, no marker) — the
+    # meta slot carries its weight % and nothing else.
     app = _Host(_make_node("search"))
     async with app.run_test(size=(80, 24)):
-        glyph = app.query_one(MessageRow).query_one(".kind", Static)
-        assert str(glyph.render()).strip() == "⌕"
+        row = app.query_one(MessageRow)
+        with pytest.raises(NoMatches):
+            row.query_one(".kind", Static)
 
 
 async def test_context_row_has_no_kind_glyph():
@@ -185,3 +185,23 @@ def test_snapshot_colors_line_shows_compression_equals_context_green():
     out = render({"mode": "edit", "model": "gpt-4o", "streaming": False, "colors": colors})
     line = next(ln for ln in out.splitlines() if ln.startswith("colors:"))
     assert "compression=#22c55e" in line and "context=#22c55e" in line
+
+
+async def test_empty_row_blinks_a_full_cell_caret_until_text_arrives():
+    # The caret stands in for text on its way: a full cell (not the half-block it
+    # used to be), blinking by hiding the cell rather than by rewriting it — so a
+    # blinking row cannot reflow the pane. Real text stops the blink for good.
+    app = _Host(Node.assistant("c1"))
+    async with app.run_test(size=(80, 24)):
+        row = app.query_one(MessageRow)
+        content = row.query_one(".content")
+        assert CARET == "█"
+        assert str(row.query_one(".content", Markdown)._markdown) == CARET
+        assert row._blink_timer is not None
+
+        row._toggle_caret()
+        assert content.has_class("caret-off")  # hidden half of the blink
+
+        row.update_content("the answer")
+        assert row._blink_timer is None
+        assert not content.has_class("caret-off")

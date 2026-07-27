@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from textual.color import Color
 from textual.containers import Horizontal, Vertical
+from textual.timer import Timer
 from textual.widgets import Markdown, Static
 
 from ctx.core.config import get_config
@@ -53,13 +54,18 @@ _TALL_ROLES = ("user", "assistant", "context", "compression", "search")
 # A per-role kind glyph shown in the meta slot. A compression summary shares the
 # context-import green bar (task 39), so it carries a distinct glyph (Σ = the
 # "sum"/summary of a folded run) to stay visually distinguishable from an
-# imported file. A search carries ⌕ so a web lookup reads as one at a glance.
-_KIND_GLYPH = {"compression": "Σ", "search": "⌕"}
+# imported file.
+_KIND_GLYPH = {"compression": "Σ"}
 
 # Roles whose content is data, not prose: rendered as plain text so a Markdown
 # pass cannot reflow it. A search's ranked hit list would otherwise turn its
 # "1. title" lines into a renumbered ordered list.
 _PLAIN_TEXT_ROLES = ("system", "context", "search")
+
+# The stand-in for text that has not arrived yet: a full cell, blinking on this
+# interval, so it reads as a terminal cursor rather than a half-drawn character.
+CARET = "█"
+_BLINK_INTERVAL = 0.5
 
 
 def display_content(node: Node) -> str:
@@ -102,6 +108,7 @@ class MessageRow(Vertical):
         # outside it — a K's folded originals in the inspector — carry no weight
         # to report, so the slot stays empty rather than a meaningless "--%".
         self._show_weight = show_weight
+        self._blink_timer: Timer | None = None
         extra = kwargs.pop("classes", "")
         super().__init__(classes=f"{node.role} {extra}".strip(), **kwargs)
 
@@ -115,6 +122,7 @@ class MessageRow(Vertical):
         # through it (task 49).
         self._row_body().styles.border_left = (style, self._border_color)  # type: ignore[assignment]
         self._apply_truncation()
+        self._sync_caret()
 
     def _row_body(self) -> Vertical:
         """The inner wrapper around the meta slot + content that carries the
@@ -154,12 +162,30 @@ class MessageRow(Vertical):
             if self._role in _PLAIN_TEXT_ROLES:
                 yield Static(self._content or "", classes="content")
             else:
-                yield Markdown(self._content or "▌", classes="content")
+                yield Markdown(self._content or CARET, classes="content")
 
     def update_content(self, content: str) -> None:
         self._content = content
-        placeholder = "" if self._role == "system" else "▌"
+        placeholder = "" if self._role == "system" else CARET
         self.query_one(".content").update(content or placeholder)  # type: ignore[attr-defined]
+        self._sync_caret()
+
+    def _sync_caret(self) -> None:
+        """Blink the caret while it stands in for text, and stop the moment real
+        text lands. Blinking is a timer toggling ``caret-off`` (whose CSS *hides*
+        the cell rather than emptying it): the terminal's own blink attribute is
+        widely ignored, and rewriting the content would reflow the row height on
+        every tick."""
+        showing = not self._content and self._role != "system"
+        if showing and self._blink_timer is None:
+            self._blink_timer = self.set_interval(_BLINK_INTERVAL, self._toggle_caret)
+        elif not showing and self._blink_timer is not None:
+            self._blink_timer.stop()
+            self._blink_timer = None
+            self.query_one(".content").remove_class("caret-off")
+
+    def _toggle_caret(self) -> None:
+        self.query_one(".content").toggle_class("caret-off")
 
     def refresh_ending(self) -> None:
         """Re-derive the row text from the node's durable state — called once

@@ -83,11 +83,11 @@ _DEFAULTS: dict = {
         # human-side, model-facing injections); the row's kind glyph (≡) is what
         # keeps a summary distinguishable from an imported file (task 39).
         "compression": "#22c55e",
-        # A search the model ran gets its own hue rather than sharing the context
-        # green: a fetched page *is* an import (same green), but a ranked hit list
-        # is a different shape and must be tellable from one at a glance
-        # (ADR-0018 §4). Violet is the furthest hue from the four already in use.
-        "search": "#a855f7",
+        # A search shares the context-import green: like an import (and like a
+        # compression summary) it is model-facing material injected into the
+        # conversation, and the palette says *what kind of thing* a node is, not
+        # who put it there.
+        "search": "#22c55e",
         "selection": "#3a3a3a",
         # Fixed white rather than an ANSI name: "ansi_white" is a light grey in
         # most palettes and "ansi_bright_white" varies by theme. The rules are

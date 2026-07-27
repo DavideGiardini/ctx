@@ -68,7 +68,12 @@ the core to create nodes, inverting the dependency for no gain.
 
 Newly appended nodes reach the UI through an `on_node` async callback supplied to
 `stream()` — the same out-of-band shape as `on_usage`, for the same reason: the
-token stream stays `str`.
+token stream stays `str`. A sibling `on_tool_round` fires once per round that
+settles on tool calls, *before* those calls run: a tool's node cannot announce the
+wait it is about to cause, because it does not exist until the search or fetch has
+returned. That is what lets the view retire a silent round's `▌` caret for the
+duration of the web work instead of leaving it standing in for an answer that is
+not coming.
 
 ### 3. Tool history is replayed as text, not natively
 
@@ -100,12 +105,14 @@ context the user controls, not an opaque protocol artifact.
 ### 4. Two web tools, two node representations
 
 `search` is a new node type (`Node.search`, added to `goes_to_model()`, its own
-color and truncation key): a query plus a ranked hit list is a new shape in the
-graph, and the high-ground view must distinguish it from a file import at a
-glance. `fetch` reuses the existing `context` node with `source_path` set to the
+truncation key): a query plus a ranked hit list is a new shape in the graph, so
+it needs its own model-facing form and its own inspector splits. It is *not* a
+new color — it renders in the context-import green, like every other block of
+material injected into the conversation for the model to read (a search is not
+"a different kind of thing" from an import; it is an import the model asked
+for). `fetch` reuses the existing `context` node with `source_path` set to the
 URL — a fetched page *is* an import whose source happens to be a URL, with the
-same content-on-node storage, wrapper, inspector and weight accounting. The
-asymmetry is deliberate.
+same content-on-node storage, wrapper, inspector and weight accounting.
 
 ### 5. No search-backend abstraction of our own
 

@@ -117,12 +117,12 @@ async def _apply_post_variant(app, pilot, variant: str | None) -> None:
         await pilot.pause()
 
     if variant in ("search-generic", "search-styled"):
-        # task-10: a search row must read as part of the assistant's pass and be
-        # tellable from an import at a glance. `search-generic` reproduces the
-        # pre-task-10 look exactly as it shipped in task 9 — no entry in _SIDE, so
-        # the row inherited the previous side and opened a spurious separator; no
-        # entry in the palette or _KIND_GLYPH, so it wore the system grey and no
-        # glyph. `search-styled` leaves the real (fixed) rendering untouched.
+        # task-10: a search row must read as part of the assistant's pass and as
+        # ordinary injected context. `search-generic` reproduces the pre-task-10
+        # look exactly as it shipped in task 9 — no entry in _SIDE, so the row
+        # inherited the previous side and opened a spurious separator; no entry in
+        # the palette, so it wore the system grey. `search-styled` leaves the real
+        # (fixed) rendering untouched.
         if variant == "search-generic":
             from textual.color import Color
 
@@ -133,8 +133,6 @@ async def _apply_post_variant(app, pilot, variant: str | None) -> None:
                 if widget._role != "search":
                     continue
                 widget._row_body().styles.border_left = ("solid", Color.parse("#737373"))
-                for glyph in widget.query(".kind"):
-                    glyph.display = False
                 await message_list.mount(Separator(), before=widget)
         await pilot.pause()
 
@@ -303,16 +301,14 @@ FIXTURE: list[dict] = [
     {
         # Not a bug the loop shipped but the task-10 acceptance itself, kept here
         # so the pair cannot rot: the flushness half is the same pixel-level class
-        # as task-40, and the glyph half is unreadable through cairosvg's fallback
-        # font (a deterministic assertion in test_message_row.py pins the ⌕).
+        # as task-40.
         "bug": "task-10-search-row-inside-the-assistant-turn",
         "state": "search-turn",
         "intent": (
             "The search row must sit flush inside the assistant's turn with no "
             "blank line splitting it off from the reply above it, and must carry "
-            "its own distinctly-colored left bar (violet — not the assistant's "
-            "orange, the user's blue or an import's green) plus a glyph in the "
-            "right-docked meta slot beside its weight %."
+            "the green left bar of injected context (not the system grey of an "
+            "unstyled row, the assistant's orange or the user's blue)."
         ),
         "bad": "search-generic",
         "good": "search-styled",

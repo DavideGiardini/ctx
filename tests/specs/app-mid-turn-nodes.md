@@ -83,16 +83,28 @@ C5. Two empty assistant nodes stay visible: the currently-streaming one, and one
             for the human: if a durable assistant error mark is reachable from the
             harness, C5(b) is worth one more test.
 
+C6. A silent round gives up its caret row before its tool runs
+  Given:    a fetch turn whose round 1 streams no text and asks for a search,
+            observed while the search backend is still blocked — so
+            `app.core.streaming` is `True` and the search has produced no node yet.
+  Expect:   the empty round-1 assistant node has **no** row in the message pane
+            (`#msg-<id>` matches nothing) and no entry in
+            `describe_state()["nodes"]`.
+  Rationale:The `▌` caret means "an answer is being typed". Retiring the row when the
+            *tool node lands* would be too late: that node does not exist until the
+            search has already returned, so the caret would stand in for a
+            never-coming answer for the whole wait. The observation window is
+            therefore mid-search, which is what makes this clause distinct from C3
+            (same node, asserted after the turn settles). Answers A1: the row is
+            unmounted, not merely un-rendered.
+
 ---
 
 ## Ambiguities (assumed past, please confirm)
 
-A1. **Does the row for a now-invisible node get unmounted?** C3 is asserted through
-    `describe_state()`, which the interface says is fed by `_visible_nodes()`. Whether
-    the already-mounted `MessageWidget` for the empty round-1 assistant node is removed
-    from the DOM, or merely stops being re-rendered, is not stated. I did not assert on
-    DOM row absence for that node, so the test passes either way. If unmounting is part
-    of the intent, that deserves its own assertion.
+A1. **Does the row for a now-invisible node get unmounted?** — **Answered: yes**, and
+    C6 now asserts it. The empty round-1 row is reconciled out of the DOM at
+    `on_tool_round`, before the tool runs.
 
 A2. **Exact count of empty assistant nodes in the fetch flow.** I assumed the middle
     (fetch) round produces no assistant node at all, since a round's node is created

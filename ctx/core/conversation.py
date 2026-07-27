@@ -874,6 +874,7 @@ class ConversationCore:
         self,
         assistant_node: Node,
         on_node: Callable[[Node], Awaitable[None]] | None = None,
+        on_tool_round: Callable[[], Awaitable[None]] | None = None,
     ) -> AsyncGenerator[str, None]:
         """Yield the turn's tokens, running the model's tool calls as it goes.
 
@@ -890,6 +891,11 @@ class ConversationCore:
         round-1 assistant node, which ``submit()`` already handed the caller. Like
         ``on_usage`` it is out-of-band: the yielded values stay ``str``
         (ADR-0018 §1).
+
+        ``on_tool_round`` is awaited once per round that settles on tool calls
+        instead of an answer, *before* those calls run — the only signal that
+        arrives before a tool starts working (a tool's own node does not exist
+        until its search or fetch has returned).
 
         **The tools on offer.** The two web tools are offered only while
         ``search_available()`` — with no backend key configured, no tools are
@@ -920,7 +926,8 @@ class ConversationCore:
         node up front, but rounds 2+ create theirs lazily on their first token, so
         a round that is nothing but a tool call adds no node. (A turn that *opens*
         with a silent tool call does leave round 1's node empty — the append-only
-        graph cannot remove it, so the view drops it instead.)
+        graph cannot remove it, so the view drops it instead, as of
+        ``on_tool_round``.)
 
         Also anchors the header gauge, on the first round only: the local token
         estimate of the context just built (``tokens.count_messages`` of the exact
@@ -993,6 +1000,9 @@ class ConversationCore:
             # a search every round (D7).
             if offered is None or not requested:
                 return
+
+            if on_tool_round is not None:
+                await on_tool_round()
 
             round_trip.append(_tool_call_message(round_text, requested))
             for call in requested:

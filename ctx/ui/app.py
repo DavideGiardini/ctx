@@ -99,6 +99,10 @@ class ChatApp(App):
         # The assistant node the live turn-stream writes into, tracked so a
         # zero-token cancel can drop the phantom empty node (task 48).
         self._streaming_node: Node | None = None
+        # AIDEV-NOTE: the node whose ▌ caret may show while still empty — text is
+        # expected in it. Deliberately shorter-lived than _streaming_node (which
+        # owns the turn's ending): a round that answers with a tool call gives it up.
+        self._live_row_id: str | None = None
         # The in-flight draft worker (``Ctrl+D``) and the prompt of the last
         # draft that actually ran. ``""`` means no draft ran → a manual commit
         # (Q4); ``Ctrl+S`` records this prompt on the committed K.
@@ -494,18 +498,17 @@ class ChatApp(App):
         established for zero-token cancels; it is a **view** rule, so the graph
         is untouched.
 
-        Two empty assistant nodes stay: the one the turn is streaming into right
-        now (it is about to have text, and its row is where the text goes), and
-        one carrying a durable ``meta["error"]`` (the "Error: …" row is the only
-        signal a failed turn leaves)."""
-        live_id = self._streaming_node.id if self._streaming_node else None
+        Two empty assistant nodes stay: ``_live_row_id`` (text is still expected in
+        it, and its ▌ caret is where that text lands) and one carrying a durable
+        ``meta["error"]`` (the "Error: …" row is the only signal a failed turn
+        leaves)."""
         return [
             node
             for node in self.core.nodes
             if node.content
             or node.node_type != "message"
             or node.role != "assistant"
-            or node.id == live_id
+            or node.id == self._live_row_id
             or node.meta.get("error")
         ]
 
@@ -1214,6 +1217,7 @@ class ChatApp(App):
         # Before the refresh: the node is empty until its first token, so
         # _visible_nodes() only keeps it once it is the live stream target.
         self._streaming_node = assistant_node
+        self._live_row_id = assistant_node.id
         self._refresh_token_ui()
         if self.mode == "insert":
             self._lock_inspector_to_last()
@@ -1352,6 +1356,10 @@ class ChatApp(App):
         An appended **assistant** node also retargets the live stream: subsequent
         tokens render into its row, and in Insert mode the locked inspector
         follows it, so a round-2 answer never streams into round 1's row.
+
+        A round that answers with a tool call gives up its ▌ caret at
+        ``on_tool_round`` — the caret means "typing an answer", so it lasts only
+        while the model is deciding, never across the search itself.
         """
         message_list = self.query_one(MessageList)
         inspector = self.query_one(DetailInspector)
@@ -1367,11 +1375,18 @@ class ChatApp(App):
                 # the live target — refreshing first would skip its new row.
                 target = node
                 self._streaming_node = node
+                self._live_row_id = node.id
                 if self.mode == "insert":
                     self._lock_inspector_to_last()
             self._refresh_token_ui()
 
-        async for _token in self.core.stream(assistant_node, on_node):
+        async def on_tool_round() -> None:
+            self._live_row_id = None
+            if not target.content:
+                # A silent round: reconcile its now-unkept caret row away.
+                await self._rebuild_message_list()
+
+        async for _token in self.core.stream(assistant_node, on_node, on_tool_round):
             message_list.update_content(target.id, target.content)
             self._stream_to_inspector(inspector, target)
         logger.info("response finalized | length=%d", len(target.content))
@@ -1423,6 +1438,7 @@ class ChatApp(App):
         self._stream_worker = None
         node = self._streaming_node
         self._streaming_node = None
+        self._live_row_id = None
         if node is None:
             return
         if event.state is WorkerState.CANCELLED:
@@ -1455,10 +1471,16 @@ class ChatApp(App):
         the phantom ``▌`` row disappears and the tip is back at the user turn."""
         if node.prev_id is None:
             return
-        if all(n.id != node.id for n in self.core.nodes):
+        line = self.core.nodes
+        if all(n.id != node.id for n in line):
             # Stale turn: /new or /resume already replaced the line this node
             # lived on — there is nothing on screen to retire, and rewinding
             # would target the wrong conversation.
+            return
+        if line[-1].id != node.id:
+            # AIDEV-NOTE: a research turn cancelled after a silent round — the
+            # search nodes sit after this node, and rewinding past it would take
+            # them off the view too (D12 keeps what a turn appended).
             return
         self.core.rewind(node.prev_id)
         await self._rebuild_message_list()

@@ -24,6 +24,12 @@ MessageRow.context {
 MessageRow .content {
     overflow: hidden hidden;
 }
+/* The dark half of the caret's blink (MessageRow._toggle_caret). `visibility`,
+   never `display`: the cell keeps its space, so a blinking row cannot make the
+   pane below it jump every half second. */
+MessageRow .content.caret-off {
+    visibility: hidden;
+}
 MessageRow Static {
     padding: 0;
 }
